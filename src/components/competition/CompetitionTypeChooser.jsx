@@ -1,0 +1,85 @@
+import { useTranslation } from 'react-i18next';
+import { Trophy, ListOrdered, Flag } from 'lucide-react';
+import { TournamentType } from '../../domain/value_objects/TournamentType';
+
+/**
+ * Qué tipo de competición se va a crear (FE #639).
+ *
+ * Ryder Cup, Stableford y Medal se pueden elegir (Stableford y Medal desde la
+ * FE #824). Los tipos que vengan (parejas, scramble…) se enseñan antes de
+ * existir, y a propósito: la decisión de BE #251 es que el tipo se
+ * pregunte primero, y quien abre esta pantalla tiene que ver hacia dónde va la
+ * aplicación. Cuando existan, esto es rellenar un hueco.
+ *
+ * Los que no están tienen que leerse como lo que son. Dos cuidados, los dos del
+ * móvil:
+ *
+ *   - El «próximamente» va SIEMPRE visible en la tarjeta, nunca en un tooltip:
+ *     en un teléfono no hay ratón que lo descubra.
+ *   - La tarjeta entera es el botón. Un botón pequeño dentro de una tarjeta a
+ *     ancho completo es el que falla el dedo.
+ */
+const TIPOS = [
+  { id: TournamentType.RYDER_CUP, icono: Trophy, disponible: true },
+  { id: TournamentType.STABLEFORD, icono: ListOrdered, disponible: true },
+  { id: TournamentType.MEDAL, icono: Flag, disponible: true },
+];
+
+const CompetitionTypeChooser = ({ onSelect, tipos = TIPOS }) => {
+  const { t } = useTranslation('competitions');
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h2 className="text-lg font-bold text-tinta">
+          {t('create.type.title')}
+        </h2>
+        <p className="text-sm text-tinta-suave">{t('create.type.subtitle')}</p>
+      </div>
+
+      {/* Apiladas en el móvil, en fila a partir de `sm`: en un teléfono la
+          tarjeta ocupa el ancho entero y se toca sin apuntar */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {tipos.map(({ id, icono: Icono, disponible }) => (
+          <button
+            key={id}
+            type="button"
+            data-testid={`tipo-${id}`}
+            onClick={disponible ? () => onSelect(id) : undefined}
+            aria-disabled={disponible ? undefined : 'true'}
+            tabIndex={disponible ? undefined : -1}
+            // Arriba en todas: un botón centra su contenido, y la tarjeta de
+            // «próximamente», más alta, desalineaba los iconos (#710)
+            className={`flex w-full flex-col items-start justify-start rounded-tarjeta border p-4 text-left transition-colors ${
+              disponible
+                ? 'border-linea bg-tarjeta hover:border-tinta'
+                : // Fondo apagado, NO `opacity` sobre la tarjeta: atenuar el
+                  // conjunto se lleva por delante el texto y la propia etiqueta,
+                  // y estos tienen que leerse —es lo que vienen a decir—
+                  'pointer-events-none cursor-default border-linea bg-fondo'
+            }`}
+          >
+            <Icono
+              className={`mb-2 h-6 w-6 ${disponible ? 'text-tinta' : 'text-tinta-suave'}`}
+            />
+            <span
+              className={`block font-semibold ${disponible ? 'text-tinta' : 'text-tinta-suave'}`}
+            >
+              {t(`create.type.${id}.title`)}
+            </span>
+            <span className="mt-1 block text-sm text-tinta-suave">
+              {t(`create.type.${id}.blurb`)}
+            </span>
+            {!disponible && (
+              <span className="mt-2 inline-block rounded-full border border-current px-2 py-0.5 text-xs font-medium text-tinta">
+                {t('create.type.comingSoon')}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+export default CompetitionTypeChooser;

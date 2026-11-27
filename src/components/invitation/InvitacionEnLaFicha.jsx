@@ -1,0 +1,133 @@
+import { AL_PASAR } from '../ui/clasesDeComportamiento';
+import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Mail } from 'lucide-react';
+import AceptarInvitacionModal from './AceptarInvitacionModal';
+import { useResponderInvitacion } from '../../hooks/useResponderInvitacion';
+import {
+  instanteEnTexto,
+  instanteSiEsValido,
+} from '../../utils/instanteDeLaApi';
+
+/**
+ * Si ya caducó, y al llegar la hora se vuelve a pintar: el cuadro se va solo,
+ * como la tarjeta de «Mis invitaciones» pasa a «Caducada» (decidido el 27 oct).
+ * Sin huso, la API da UTC (FE #710).
+ */
+const useCaducada = (expiresAt) => {
+  const momento = instanteSiEsValido(expiresAt)?.getTime() ?? null;
+  const [ahora, setAhora] = useState(() => Date.now());
+  useEffect(() => {
+    if (momento === null) return undefined;
+    // Ya pasada (otra invitación tras releer), al momento
+    const falta = Math.max(0, momento - Date.now());
+    // Más de ~24,8 días hace saltar el reloj al momento: solo repinta, y el
+    // cuadro se queda (aún no ha caducado)
+    const reloj = setTimeout(() => setAhora(Date.now()), falta);
+    return () => clearTimeout(reloj);
+  }, [momento]);
+  return momento !== null && momento <= ahora;
+};
+
+/**
+ * Mi invitación pendiente, en la ficha de su competición (release social 2):
+ * aceptar o rechazar sin pasar por «Mis invitaciones». Solo sale si el
+ * servidor la ofrece, es decir, si aceptarla puede salir bien.
+ *
+ * @param {{
+ *   invitacion: {id: string, expiresAt: string|null}|null,
+ *   alCambiar: () => unknown,
+ *   alAceptar?: (resultado: object) => unknown,
+ *   conEquipos?: boolean,
+ * }} props - la invitación, cómo releer la ficha tras responder y, si se
+ *   quiere, qué hacer al aceptar (la ficha pide la barra de los campos que
+ *   no tengan la general); sin él, releerla. `conEquipos`: una Ryder (por
+ *   defecto) o stroke play, para nombrar lo pendiente en un fallo de la barra
+ */
+const InvitacionEnLaFicha = ({
+  invitacion,
+  alCambiar,
+  alAceptar,
+  conEquipos = true,
+}) => {
+  const { t, i18n } = useTranslation('invitations');
+  const caducada = useCaducada(invitacion?.expiresAt);
+  const {
+    seEstaRespondiendo,
+    accionEnCurso,
+    aceptar,
+    rechazar,
+    preguntaDeLaBarra,
+  } = useResponderInvitacion({
+    alAceptar: alAceptar ?? alCambiar,
+    alCambiar,
+    textoYaNoPendiente: 'inDetail.notPendingAnymore',
+    conEquipos,
+  });
+
+  if (!invitacion || caducada) return null;
+  const procesando = seEstaRespondiendo(invitacion.id);
+  const caduca = instanteEnTexto(invitacion.expiresAt, i18n.language, {
+    day: 'numeric',
+    month: 'short',
+  });
+  // Qué se está respondiendo, para decirlo en su botón, como en la lista
+  const textoDe = (accion) =>
+    accionEnCurso(invitacion.id) === accion
+      ? t(`actions.${accion === 'ACCEPT' ? 'accepting' : 'declining'}`)
+      : null;
+
+  return (
+    <section
+      data-testid="invitacion-en-la-ficha"
+      aria-labelledby="invitacion-en-la-ficha-titulo"
+      className="mx-4 mb-6 rounded-tarjeta border border-contorno bg-realce p-4"
+    >
+      <div className="flex items-start gap-3">
+        <Mail
+          className="mt-0.5 h-5 w-5 shrink-0 text-tinta"
+          aria-hidden="true"
+        />
+        <div className="min-w-0 flex-1">
+          <h2
+            id="invitacion-en-la-ficha-titulo"
+            className="text-lg font-extrabold tracking-tight text-tinta"
+          >
+            {t('inDetail.title')}
+          </h2>
+          {caduca && (
+            <p
+              data-testid="invitacion-caduca"
+              className="mt-0.5 text-sm text-tinta-suave"
+            >
+              {t('inDetail.expiresOn', { date: caduca.replace('.', '') })}
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          data-testid="invitacion-aceptar"
+          onClick={() => aceptar(invitacion.id)}
+          disabled={procesando}
+          className="btn-primary min-h-11 flex-1 text-sm disabled:opacity-50"
+        >
+          {textoDe('ACCEPT') ?? t('actions.accept')}
+        </button>
+        <button
+          type="button"
+          data-testid="invitacion-rechazar"
+          onClick={() => rechazar(invitacion.id)}
+          disabled={procesando}
+          className={`min-h-11 flex-1 rounded-boton border-[1.5px] border-tinta bg-fondo px-4 text-sm font-bold text-tinta disabled:opacity-50 ${AL_PASAR}`}
+        >
+          {textoDe('DECLINE') ?? t('actions.decline')}
+        </button>
+      </div>
+      <AceptarInvitacionModal {...preguntaDeLaBarra} />
+    </section>
+  );
+};
+
+export default InvitacionEnLaFicha;

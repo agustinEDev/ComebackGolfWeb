@@ -1,0 +1,334 @@
+// src/domain/repositories/ICompetitionRepository.js
+/** @typedef {import('../entities/Competition').default} Competition */
+/** @typedef {import('../value_objects/CompetitionStatus').CompetitionStatus} CompetitionStatus */
+/**
+ * Lo que la ficha y los listados enseñan y la entidad no guarda (país con sus
+ * nombres, ficha del organizador, plazo, actualización de hándicaps…), en
+ * camelCase y tal cual llegó: lo que falta, undefined. Lo lee `CompetitionAssembler`.
+ * @typedef {Object<string, any>} CompetitionExtras
+ */
+/**
+ * Una competición tal como la devuelve una lectura del repositorio.
+ * @typedef {{ entity: Competition, extras: CompetitionExtras|null }} CompetitionWithExtras
+ */
+
+/**
+ * Interface for a competition repository.
+ * This class should be extended by concrete repository implementations.
+ *
+ * In JavaScript, interfaces are simulated by classes that throw errors
+ * for methods that must be implemented by subclasses.
+ */
+export class ICompetitionRepository {
+  /**
+   * Creates a competition.
+   * @param {Object} competition The data for the new competition (API DTO format).
+   * @returns {Promise<Competition>} The newly created competition entity.
+   * @throws {Error} If the method is not implemented.
+   */
+  async save(competition) {
+    throw new Error('ICompetitionRepository.save must be implemented');
+  }
+
+  /**
+   * Finds a competition by its unique ID.
+   * @param {string} competitionId The ID of the competition to find.
+   * @returns {Promise<CompetitionWithExtras>} The competition entity and its extras. It never resolves to null.
+   * @throws {Error} If the competition is not found (the API answers 404) or the request fails,
+   *   or if the method is not implemented.
+   */
+  async findById(competitionId) {
+    throw new Error('ICompetitionRepository.findById must be implemented');
+  }
+
+  /**
+   * El resumen público de una competición, sin sesión (release social 3): para
+   * que su clasificación sepa qué pintar.
+   * @param {string} competitionId The ID of the competition.
+   * @returns {Promise<Object>} id, name, hasTeams, tournamentType, status, visibility y fechas.
+   * @throws {Error} If the method is not implemented.
+   */
+  async findSummary(competitionId) {
+    throw new Error('ICompetitionRepository.findSummary must be implemented');
+  }
+
+  /**
+   * Finds all competitions.
+   * @returns {Promise<Competition[]>} A list of all competition entities.
+   * @throws {Error} If the method is not implemented.
+   */
+  async findAll() {
+    throw new Error('ICompetitionRepository.findAll must be implemented');
+  }
+
+  /**
+   * Deletes a competition by its unique ID.
+   * @param {string} competitionId The ID of the competition to delete.
+   * @returns {Promise<void>}
+   * @throws {Error} If the method is not implemented.
+   */
+  async delete(competitionId) {
+    throw new Error('ICompetitionRepository.delete must be implemented');
+  }
+
+  /**
+   * Finds competitions by their status.
+   * @param {CompetitionStatus} status The status to filter by.
+   * @returns {Promise<Competition[]>} A list of competitions with the given status.
+   * @throws {Error} If the method is not implemented.
+   */
+  async findByStatus(status) {
+    throw new Error('ICompetitionRepository.findByStatus must be implemented');
+  }
+
+  /**
+   * Finds all competitions for a specific user (creator).
+   * @param {string} userId The ID of the user/creator.
+   * @param {object} [filters] Optional filters (status, etc.)
+   * @returns {Promise<CompetitionWithExtras[]>} A list of competitions created by the user, each with its extras.
+   * @throws {Error} If the method is not implemented.
+   */
+  async findByCreator(userId, filters = {}) {
+    throw new Error('ICompetitionRepository.findByCreator must be implemented');
+  }
+
+  /**
+   * Finds public competitions with optional filters.
+   * This method is used to browse competitions that are publicly visible.
+   *
+   * @param {object} [filters] Optional filters for the search.
+   * @param {string|string[]} [filters.status] Competition status (e.g., 'ACTIVE', ['CLOSED', 'IN_PROGRESS'])
+   * @param {string} [filters.searchName] Search by competition name (partial match)
+   * @param {string} [filters.searchCreator] Search by creator name (partial match)
+   * @param {boolean} [filters.excludeMyCompetitions] If true, excludes competitions where user is creator or enrolled
+   * @param {number} [filters.limit] Maximum number of results
+   * @param {number} [filters.offset] Pagination offset
+   * @returns {Promise<CompetitionWithExtras[]>} A list of public competitions matching the filters, each with its extras.
+   * @throws {Error} If the method is not implemented.
+   */
+  async findPublic(filters = {}) {
+    throw new Error('ICompetitionRepository.findPublic must be implemented');
+  }
+
+  /**
+   * Adds a golf course to a competition.
+   * Only allowed when competition status is DRAFT.
+   *
+   * @param {string} competitionId The ID of the competition.
+   * @param {string} golfCourseId The ID of the golf course to add.
+   * @returns {Promise<object>} The association details (competition_id, golf_course_id, display_order, added_at).
+   * @throws {Error} If the method is not implemented.
+   */
+  async addGolfCourse(competitionId, golfCourseId) {
+    throw new Error('ICompetitionRepository.addGolfCourse must be implemented');
+  }
+
+  /**
+   * Removes a golf course from a competition.
+   * Only allowed when competition status is DRAFT.
+   *
+   * @param {string} competitionId The ID of the competition.
+   * @param {string} golfCourseId The ID of the golf course to remove.
+   * @returns {Promise<object>} The removal confirmation (competition_id, golf_course_id, removed_at).
+   * @throws {Error} If the method is not implemented.
+   */
+  async removeGolfCourse(competitionId, golfCourseId) {
+    throw new Error(
+      'ICompetitionRepository.removeGolfCourse must be implemented',
+    );
+  }
+
+  /**
+   * Reorders golf courses in a competition.
+   * Only allowed when competition status is DRAFT.
+   *
+   * @param {string} competitionId The ID of the competition.
+   * @param {string[]} golfCourseIds Array of golf course IDs in the new order.
+   * @returns {Promise<object>} The reordered golf courses with display_order.
+   * @throws {Error} If the method is not implemented.
+   */
+  async reorderGolfCourses(competitionId, golfCourseIds) {
+    throw new Error(
+      'ICompetitionRepository.reorderGolfCourses must be implemented',
+    );
+  }
+
+  /**
+   * Gets all golf courses associated with a competition.
+   *
+   * @param {string} competitionId The ID of the competition.
+   * @returns {Promise<object>} Object containing competition_id and golf_courses array.
+   * @throws {Error} If the method is not implemented.
+   */
+  async getCompetitionGolfCourses(competitionId) {
+    throw new Error(
+      'ICompetitionRepository.getCompetitionGolfCourses must be implemented',
+    );
+  }
+
+  /**
+   * Updates a competition.
+   * Only allowed when competition status is DRAFT and user is the creator.
+   *
+   * @param {string} competitionId The ID of the competition to update.
+   * @param {object} competitionData The updated competition data.
+   * @returns {Promise<Competition>} The updated competition entity.
+   * @throws {Error} If the method is not implemented.
+   */
+  async updateCompetition(competitionId, competitionData) {
+    throw new Error(
+      'ICompetitionRepository.updateCompetition must be implemented',
+    );
+  }
+
+  /**
+   * Lanza la actualización de hándicaps con la RFEG (FE #824).
+   * @returns {Promise<{status: string, resumed: boolean}>} `resumed` si retoma una a medias
+   */
+  async launchHandicapUpdate(competitionId) {
+    throw new Error(
+      'ICompetitionRepository.launchHandicapUpdate must be implemented',
+    );
+  }
+
+  /**
+   * Programa la actualización de hándicaps; `runAt` con su huso.
+   * @returns {Promise<{runAt: string}>} La hora que queda programada
+   */
+  async scheduleHandicapUpdate(competitionId, runAt) {
+    throw new Error(
+      'ICompetitionRepository.scheduleHandicapUpdate must be implemented',
+    );
+  }
+
+  /** Anula la actualización programada. */
+  async cancelScheduledHandicapUpdate(competitionId) {
+    throw new Error(
+      'ICompetitionRepository.cancelScheduledHandicapUpdate must be implemented',
+    );
+  }
+
+  /**
+   * Mis hándicaps sin actualizar con la RFEG (15 nov 2026).
+   * @returns {Promise<{asOrganizer: Array<{competitionId: string, competitionName: string, count: number}>, asPlayer: Array<{competitionId: string, competitionName: string}>}>}
+   */
+  async getMyHandicapsNotUpdated() {
+    throw new Error(
+      'ICompetitionRepository.getMyHandicapsNotUpdated must be implemented',
+    );
+  }
+
+  /**
+   * Cambia los ajustes de un Stableford o un Medal (FE #824). Solo lo que llega.
+   * @param {string} competitionId
+   * @param {{categoryLimits?: number[], categoryCount?: number, maxMatchdaysPerPlayer?: number, overallStanding?: string}} cambios
+   * @returns {Promise<import('../value_objects/StrokePlaySetup').StrokePlaySetup>} Los ajustes como quedan
+   */
+  async updateStrokePlay(competitionId, cambios) {
+    throw new Error(
+      'ICompetitionRepository.updateStrokePlay must be implemented',
+    );
+  }
+
+  /**
+   * Activates a competition (DRAFT → ACTIVE).
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async activate(competitionId) {
+    throw new Error('ICompetitionRepository.activate must be implemented');
+  }
+
+  /**
+   * Closes enrollments for a competition (ACTIVE → CLOSED).
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async closeEnrollments(competitionId) {
+    throw new Error(
+      'ICompetitionRepository.closeEnrollments must be implemented',
+    );
+  }
+
+  /**
+   * Nombra a los dos capitanes; con las inscripciones abiertas, las cierra (FE #692).
+   * @param {string} competitionId
+   * @param {{team_a_captain_id: string, team_b_captain_id: string}} capitanes
+   * @returns {Promise<Object>}
+   */
+  async nameCaptains(competitionId, capitanes) {
+    throw new Error('ICompetitionRepository.nameCaptains must be implemented');
+  }
+
+  /**
+   * Cubre el puesto de capitán de un equipo, vacío tras una baja (FE #692).
+   * @param {string} competitionId
+   * @param {'A'|'B'} team
+   * @param {{player_id: string}} jugador
+   * @returns {Promise<Object>}
+   */
+  async fillTeamCaptain(competitionId, team, jugador) {
+    throw new Error(
+      'ICompetitionRepository.fillTeamCaptain must be implemented',
+    );
+  }
+
+  /**
+   * Starts a competition (CLOSED → IN_PROGRESS).
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async start(competitionId) {
+    throw new Error('ICompetitionRepository.start must be implemented');
+  }
+
+  /**
+   * Completes a competition (IN_PROGRESS → COMPLETED).
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async complete(competitionId) {
+    throw new Error('ICompetitionRepository.complete must be implemented');
+  }
+
+  /**
+   * Cancels a competition (any state → CANCELLED).
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async cancel(competitionId) {
+    throw new Error('ICompetitionRepository.cancel must be implemented');
+  }
+
+  /**
+   * Reopens enrollments for a competition (CLOSED → ACTIVE).
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async reopenEnrollments(competitionId) {
+    throw new Error(
+      'ICompetitionRepository.reopenEnrollments must be implemented',
+    );
+  }
+
+  /**
+   * Reverts a competition status (IN_PROGRESS → CLOSED).
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async revertStatus(competitionId) {
+    throw new Error('ICompetitionRepository.revertStatus must be implemented');
+  }
+
+  /**
+   * Reverts a completed competition back to IN_PROGRESS (COMPLETED → IN_PROGRESS).
+   * Does not modify existing rounds/matches.
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async revertToInProgress(competitionId) {
+    throw new Error(
+      'ICompetitionRepository.revertToInProgress must be implemented',
+    );
+  }
+}

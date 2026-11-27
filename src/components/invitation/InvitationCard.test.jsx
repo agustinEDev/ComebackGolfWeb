@@ -1,0 +1,715 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  render as renderSinRouter,
+  screen,
+  fireEvent,
+  act,
+} from '@testing-library/react';
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router';
+import InvitationCard from './InvitationCard';
+
+// La tarjeta aceptada enlaza a su competición (FE #682): necesita un router
+const render = (ui) => renderSinRouter(ui, { wrapper: MemoryRouter });
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key) => key,
+    i18n: { language: 'en' },
+  }),
+}));
+
+const mockT = (key) => key;
+
+const pendingInvitation = {
+  id: 'inv-1',
+  competitionId: 'comp-1',
+  competitionName: 'Summer Cup',
+  inviterName: 'John Creator',
+  inviteeEmail: 'player@example.com',
+  inviteeName: 'Jane Player',
+  status: 'PENDING',
+  isPending: true,
+  isAccepted: false,
+  isDeclined: false,
+  isExpired: false,
+  personalMessage: 'Join our tournament!',
+  expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+  respondedAt: null,
+};
+
+const acceptedInvitation = {
+  ...pendingInvitation,
+  id: 'inv-2',
+  status: 'ACCEPTED',
+  isPending: false,
+  isAccepted: true,
+  respondedAt: '2026-02-19T10:00:00Z',
+};
+
+describe('InvitationCard', () => {
+  let onAccept;
+  let onDecline;
+
+  beforeEach(() => {
+    onAccept = vi.fn();
+    onDecline = vi.fn();
+  });
+
+  it('should render competition name and status badge', () => {
+    render(
+      <InvitationCard invitation={pendingInvitation} mode="player" t={mockT} />,
+    );
+    expect(screen.getByText('Summer Cup')).toBeInTheDocument();
+    expect(screen.getByTestId('invitation-badge')).toBeInTheDocument();
+  });
+
+  it('should show inviter name in player mode', () => {
+    render(
+      <InvitationCard invitation={pendingInvitation} mode="player" t={mockT} />,
+    );
+    expect(screen.getByText(/John Creator/)).toBeInTheDocument();
+  });
+
+  it('should show invitee email in creator mode', () => {
+    render(
+      <InvitationCard
+        invitation={pendingInvitation}
+        mode="creator"
+        t={mockT}
+      />,
+    );
+    expect(screen.getByText('Jane Player')).toBeInTheDocument();
+  });
+
+  it('should show personal message', () => {
+    render(
+      <InvitationCard invitation={pendingInvitation} mode="player" t={mockT} />,
+    );
+    expect(screen.getByText('Join our tournament!')).toBeInTheDocument();
+  });
+
+  it('should show accept/decline buttons in player mode for PENDING', () => {
+    render(
+      <InvitationCard
+        invitation={pendingInvitation}
+        mode="player"
+        onAccept={onAccept}
+        onDecline={onDecline}
+        isProcessing={false}
+        t={mockT}
+      />,
+    );
+    expect(screen.getByTestId('accept-button')).toBeInTheDocument();
+    expect(screen.getByTestId('decline-button')).toBeInTheDocument();
+  });
+
+  it('should NOT show buttons in creator mode', () => {
+    render(
+      <InvitationCard
+        invitation={pendingInvitation}
+        mode="creator"
+        t={mockT}
+      />,
+    );
+    expect(screen.queryByTestId('accept-button')).not.toBeInTheDocument();
+  });
+
+  it('should NOT show buttons for non-PENDING in player mode', () => {
+    render(
+      <InvitationCard
+        invitation={acceptedInvitation}
+        mode="player"
+        t={mockT}
+      />,
+    );
+    expect(screen.queryByTestId('accept-button')).not.toBeInTheDocument();
+  });
+
+  it('should call onAccept when accept button is clicked', () => {
+    render(
+      <InvitationCard
+        invitation={pendingInvitation}
+        mode="player"
+        onAccept={onAccept}
+        onDecline={onDecline}
+        isProcessing={false}
+        t={mockT}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('accept-button'));
+    expect(onAccept).toHaveBeenCalledWith('inv-1');
+  });
+
+  it('should call onDecline when decline button is clicked', () => {
+    render(
+      <InvitationCard
+        invitation={pendingInvitation}
+        mode="player"
+        onAccept={onAccept}
+        onDecline={onDecline}
+        isProcessing={false}
+        t={mockT}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('decline-button'));
+    expect(onDecline).toHaveBeenCalledWith('inv-1');
+  });
+
+  /**
+   * Una invitación aceptada lleva a su competición desde su propia tarjeta
+   * (FE #682). Antes el acceso estaba en una caja aparte, sin título, con los
+   * nombres de todas las aceptadas en fila.
+   */
+  describe('enlace a la competición (FE #682)', () => {
+    it('I1: aceptada, la tarjeta entera lleva a la competición', () => {
+      render(
+        <InvitationCard
+          invitation={acceptedInvitation}
+          mode="player"
+          t={mockT}
+        />,
+      );
+
+      const tarjeta = screen.getByTestId('invitation-card');
+      expect(tarjeta.tagName).toBe('A');
+      expect(tarjeta).toHaveAttribute('href', '/competitions/comp-1');
+    });
+
+    it('I4: y lleva una flecha que dice que se abre', () => {
+      // Sin ratón no hay subrayado al pasar por encima: en el móvil la flecha
+      // es lo único que dice que la tarjeta se puede pulsar
+      render(
+        <InvitationCard
+          invitation={acceptedInvitation}
+          mode="player"
+          t={mockT}
+        />,
+      );
+
+      expect(screen.getByTestId('invitation-card')).toContainElement(
+        screen.getByTestId('abre-competicion'),
+      );
+    });
+
+    // Release social 2: el invitado ya puede abrir la privada antes de contestar.
+    // La tarjeta entera no: lleva los botones de aceptar y rechazar dentro
+    it('I2: pendiente, un enlace «Ver la competición» y los botones siguen', () => {
+      render(
+        <InvitationCard
+          invitation={pendingInvitation}
+          mode="player"
+          onAccept={onAccept}
+          onDecline={onDecline}
+          t={mockT}
+        />,
+      );
+
+      const enlace = screen.getByRole('link', {
+        name: 'card.viewCompetition: Summer Cup',
+      });
+      expect(enlace).toHaveAttribute('href', '/competitions/comp-1');
+      expect(screen.getByTestId('invitation-card').tagName).not.toBe('A');
+      expect(screen.getByTestId('accept-button')).toBeInTheDocument();
+      expect(screen.getByTestId('decline-button')).toBeInTheDocument();
+    });
+
+    it('I2b: y vuelve a las invitaciones desde la ficha', () => {
+      const Origen = () => (
+        <div data-testid="origen">{useLocation().state?.from}</div>
+      );
+      renderSinRouter(
+        <MemoryRouter initialEntries={['/player/invitations']}>
+          <Routes>
+            <Route
+              path="/player/invitations"
+              element={
+                <InvitationCard
+                  invitation={pendingInvitation}
+                  mode="player"
+                  t={mockT}
+                />
+              }
+            />
+            <Route path="/competitions/:id" element={<Origen />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+
+      fireEvent.click(
+        screen.getByRole('link', { name: 'card.viewCompetition: Summer Cup' }),
+      );
+
+      expect(screen.getByTestId('origen')).toHaveTextContent('invitations');
+    });
+
+    it('I2c: rechazada o caducada, sin enlace', () => {
+      render(
+        <InvitationCard
+          invitation={{
+            ...pendingInvitation,
+            status: 'DECLINED',
+            isPending: false,
+            isDeclined: true,
+          }}
+          mode="player"
+          t={mockT}
+        />,
+      );
+
+      expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    });
+
+    it('I2e: pendiente pero ya caducada, sin enlace: ya no deja verla', () => {
+      render(
+        <InvitationCard
+          invitation={{
+            ...pendingInvitation,
+            expiresAt: new Date(Date.now() - 60_000).toISOString(),
+          }}
+          mode="player"
+          t={mockT}
+        />,
+      );
+
+      expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    });
+
+    describe('I2f: caduca con la página abierta (CodeRabbit)', () => {
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      });
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      const queCaducaEnUnMinuto = () => ({
+        ...pendingInvitation,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+
+      it('el enlace se va y dice «Caducada» en cuanto llega su hora', () => {
+        render(
+          <InvitationCard
+            invitation={queCaducaEnUnMinuto()}
+            mode="player"
+            t={mockT}
+          />,
+        );
+        expect(screen.getByRole('link')).toBeInTheDocument();
+
+        act(() => {
+          vi.advanceTimersByTime(60_000);
+        });
+
+        expect(screen.queryByRole('link')).not.toBeInTheDocument();
+        expect(screen.getByText('card.expired')).toBeInTheDocument();
+      });
+
+      it('antes de su hora sigue ahí', () => {
+        render(
+          <InvitationCard
+            invitation={queCaducaEnUnMinuto()}
+            mode="player"
+            t={mockT}
+          />,
+        );
+
+        act(() => {
+          vi.advanceTimersByTime(59_000);
+        });
+
+        expect(screen.getByRole('link')).toBeInTheDocument();
+      });
+
+      it('al desmontarse no deja el reloj puesto', () => {
+        const { unmount } = render(
+          <InvitationCard
+            invitation={queCaducaEnUnMinuto()}
+            mode="player"
+            t={mockT}
+          />,
+        );
+        expect(vi.getTimerCount()).toBe(1);
+
+        unmount();
+
+        expect(vi.getTimerCount()).toBe(0);
+      });
+
+      it('si cambia la fecha, cuenta con la nueva y suelta la vieja', () => {
+        const enUnaHora = {
+          ...pendingInvitation,
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        };
+        const { rerender } = render(
+          <InvitationCard invitation={enUnaHora} mode="player" t={mockT} />,
+        );
+        rerender(
+          <InvitationCard
+            invitation={queCaducaEnUnMinuto()}
+            mode="player"
+            t={mockT}
+          />,
+        );
+
+        expect(vi.getTimerCount()).toBe(1);
+        act(() => {
+          vi.advanceTimersByTime(60_000);
+        });
+        expect(screen.queryByRole('link')).not.toBeInTheDocument();
+      });
+
+      it('sin fecha, o ya caducada, no pone reloj', () => {
+        render(
+          <InvitationCard
+            invitation={{ ...pendingInvitation, expiresAt: null }}
+            mode="player"
+            t={mockT}
+          />,
+        );
+        render(
+          <InvitationCard
+            invitation={{ ...pendingInvitation, expiresAt: undefined }}
+            mode="player"
+            t={mockT}
+          />,
+        );
+        render(
+          <InvitationCard
+            invitation={{
+              ...pendingInvitation,
+              expiresAt: new Date(Date.now() - 1).toISOString(),
+            }}
+            mode="player"
+            t={mockT}
+          />,
+        );
+
+        expect(vi.getTimerCount()).toBe(0);
+      });
+
+      it('una fecha lejana no pone reloj: con más de 24,8 días, setTimeout saltaría enseguida', () => {
+        const lejana = {
+          ...pendingInvitation,
+          expiresAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+        };
+        render(<InvitationCard invitation={lejana} mode="player" t={mockT} />);
+
+        expect(vi.getTimerCount()).toBe(0);
+        expect(screen.getByRole('link')).toBeInTheDocument();
+      });
+    });
+
+    it('I2d: «Ver la competición», en los dos idiomas', async () => {
+      const es = (await import('../../i18n/locales/es/invitations.json'))
+        .default;
+      const en = (await import('../../i18n/locales/en/invitations.json'))
+        .default;
+
+      expect(es.card.viewCompetition).toBe('Ver la competición');
+      expect(en.card.viewCompetition).toBe('View the competition');
+    });
+
+    it('I3: el organizador no necesita el enlace: su lista ya está dentro de la competición', () => {
+      render(
+        <InvitationCard
+          invitation={acceptedInvitation}
+          mode="creator"
+          t={mockT}
+        />,
+      );
+
+      expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    });
+
+    it('C1: la ficha sabe que se llegó desde las invitaciones, para volver ahí', () => {
+      const Origen = () => (
+        <div data-testid="origen">{useLocation().state?.from}</div>
+      );
+      renderSinRouter(
+        <MemoryRouter initialEntries={['/player/invitations']}>
+          <Routes>
+            <Route
+              path="/player/invitations"
+              element={
+                <InvitationCard
+                  invitation={acceptedInvitation}
+                  mode="player"
+                  t={mockT}
+                />
+              }
+            />
+            <Route path="/competitions/:id" element={<Origen />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+
+      fireEvent.click(screen.getByTestId('invitation-card'));
+
+      expect(screen.getByTestId('origen')).toHaveTextContent('invitations');
+    });
+  });
+});
+
+// FE #724: quien invita puede retirar una pendiente
+describe('InvitationCard · retirar (FE #724)', () => {
+  it('al organizador, en una pendiente, le ofrece retirarla', () => {
+    const onWithdraw = vi.fn();
+    render(
+      <InvitationCard
+        invitation={pendingInvitation}
+        mode="creator"
+        onWithdraw={onWithdraw}
+        t={mockT}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'actions.withdraw' }));
+
+    expect(onWithdraw).toHaveBeenCalledWith(pendingInvitation);
+  });
+
+  it('en una ya respondida, no', () => {
+    render(
+      <InvitationCard
+        invitation={acceptedInvitation}
+        mode="creator"
+        onWithdraw={vi.fn()}
+        t={mockT}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'actions.withdraw' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('al jugador, no: él la rechaza', () => {
+    render(
+      <InvitationCard
+        invitation={pendingInvitation}
+        mode="player"
+        onWithdraw={vi.fn()}
+        t={mockT}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'actions.withdraw' }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+// Revisión de la FE #724: retirarla o quedarse sin plaza también apunta la
+// fecha en el servidor, y la tarjeta decía «Respondida» sin que nadie respondiera
+describe('InvitationCard · la fecha dice qué pasó (FE #724)', () => {
+  const conEstado = (status) => ({
+    ...pendingInvitation,
+    status,
+    isPending: false,
+    respondedAt: '2026-10-04T19:00:00Z',
+  });
+
+  it.each([
+    ['CANCELLED', 'card.withdrawnAt'],
+    ['NO_ROOM', 'card.noRoomSince'],
+    ['ACCEPTED', 'card.respondedAt'],
+    ['DECLINED', 'card.respondedAt'],
+  ])('%s → %s', (status, clave) => {
+    render(
+      <InvitationCard
+        invitation={conEstado(status)}
+        mode="creator"
+        t={mockT}
+      />,
+    );
+
+    expect(screen.getByTestId('fecha-de-la-invitacion')).toHaveTextContent(
+      clave,
+    );
+  });
+
+  it('FE #826: el correo del invitado se parte y el icono no se aplasta', () => {
+    const largo =
+      'un.correo.muy.largo.sin.espacios.para.partir@ejemplo-de-dominio.com';
+    render(
+      <InvitationCard
+        invitation={{
+          ...pendingInvitation,
+          inviteeName: null,
+          inviteeEmail: largo,
+        }}
+        mode="creator"
+        t={mockT}
+      />,
+    );
+
+    const correo = screen.getByText(largo);
+    expect(correo).toHaveClass('wrap-anywhere', 'min-w-0');
+    expect(correo.previousElementSibling).toHaveClass('flex-shrink-0');
+  });
+});
+
+describe('InvitationCard — volver a invitar (release social 2)', () => {
+  const rechazada = {
+    ...pendingInvitation,
+    status: 'DECLINED',
+    isPending: false,
+  };
+
+  it('con onReinvite, el organizador ve el botón y lo usa con esa invitación', () => {
+    const onReinvite = vi.fn();
+    render(
+      <InvitationCard
+        invitation={rechazada}
+        mode="creator"
+        onReinvite={onReinvite}
+        t={mockT}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('reinvite-button'));
+
+    expect(onReinvite).toHaveBeenCalledWith(rechazada);
+    expect(screen.getByTestId('reinvite-button')).toHaveTextContent(
+      'actions.reinvite',
+    );
+  });
+
+  it('sin onReinvite (la página no la ofrece), no sale', () => {
+    render(<InvitationCard invitation={rechazada} mode="creator" t={mockT} />);
+
+    expect(screen.queryByTestId('reinvite-button')).not.toBeInTheDocument();
+  });
+
+  it('el invitado nunca lo ve', () => {
+    render(
+      <InvitationCard
+        invitation={rechazada}
+        mode="player"
+        onReinvite={vi.fn()}
+        t={mockT}
+      />,
+    );
+
+    expect(screen.queryByTestId('reinvite-button')).not.toBeInTheDocument();
+  });
+
+  it('mide 44 px de alto, como pide el dedo (revisor)', () => {
+    render(
+      <InvitationCard
+        invitation={rechazada}
+        mode="creator"
+        onReinvite={vi.fn()}
+        t={mockT}
+      />,
+    );
+
+    expect(screen.getByTestId('reinvite-button').className).toMatch(
+      /\bmin-h-11\b/,
+    );
+  });
+
+  it('mientras se procesa, desactivado', () => {
+    render(
+      <InvitationCard
+        invitation={rechazada}
+        mode="creator"
+        onReinvite={vi.fn()}
+        isProcessing
+        t={mockT}
+      />,
+    );
+
+    expect(screen.getByTestId('reinvite-button')).toBeDisabled();
+  });
+});
+
+/**
+ * Invitaciones a cuentas sin verificar: el backend las manda sin invitee_name ni
+ * invitee_user_id, solo con el correo (fase 3, BE-3). El organizador ve el correo,
+ * sin huecos ni «undefined».
+ */
+describe('InvitationCard · invitado sin nombre (fase 3)', () => {
+  const sinNombre = {
+    ...pendingInvitation,
+    inviteeName: undefined,
+    inviteeUserId: null,
+  };
+
+  it('enseña el correo donde iría el nombre', () => {
+    render(
+      <InvitationCard
+        invitation={sinNombre}
+        mode="creator"
+        onWithdraw={vi.fn()}
+        onReinvite={vi.fn()}
+        t={mockT}
+      />,
+    );
+
+    expect(screen.getByText('player@example.com')).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/undefined|null/);
+  });
+
+  it('el botón de volver a invitar se nombra con el correo', () => {
+    const t = (key, params) => (params ? `${key}:${params.name}` : key);
+    render(
+      <InvitationCard
+        invitation={sinNombre}
+        mode="creator"
+        onReinvite={vi.fn()}
+        t={t}
+      />,
+    );
+
+    expect(screen.getByTestId('reinvite-button')).toHaveAttribute(
+      'aria-label',
+      'actions.reinviteAria:player@example.com',
+    );
+  });
+
+  describe('C9: lo que ve el organizador (B-01/B-03)', () => {
+    it('por id: el nombre, sin correo', () => {
+      render(
+        <InvitationCard
+          invitation={{ ...pendingInvitation, inviteeEmail: null }}
+          mode="creator"
+          t={mockT}
+        />,
+      );
+      expect(screen.getByText('Jane Player')).toBeInTheDocument();
+    });
+
+    it('por correo: el correo tecleado, sin nombre', () => {
+      render(
+        <InvitationCard
+          invitation={{ ...pendingInvitation, inviteeName: undefined }}
+          mode="creator"
+          t={mockT}
+        />,
+      );
+      expect(screen.getByText('player@example.com')).toBeInTheDocument();
+    });
+
+    it('sin nombre ni correo: un texto, nunca vacío', () => {
+      render(
+        <InvitationCard
+          invitation={{
+            ...pendingInvitation,
+            inviteeEmail: null,
+            inviteeName: undefined,
+          }}
+          mode="creator"
+          onReinvite={() => {}}
+          t={mockT}
+        />,
+      );
+      expect(screen.getByText('card.invitedPlayer')).toBeInTheDocument();
+      expect(screen.getByTestId('reinvite-button')).toHaveAttribute(
+        'aria-label',
+        'actions.reinviteAria',
+      );
+    });
+  });
+});

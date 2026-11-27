@@ -1,0 +1,82 @@
+import { useTranslation } from 'react-i18next';
+import RejillaDeHoyos from './RejillaDeHoyos';
+import { cuentaLaBola } from '../../domain/services/retiradaDelFourball';
+import { ValidationStatus } from '../../domain/value_objects/ValidationStatus';
+
+/**
+ * @param {number[]} [props.noGuardados] Hoyos que no se pudieron guardar
+ *   (FE #622): llevan un punto rojo para encontrarlos después de seguir
+ *   adelante. Punto y no fondo: el fondo rojo ya dice «desacuerdo». Dentro del
+ *   botón y no asomando: el último de cada fila llega al borde a 360 px, y en
+ *   el móvil no puede haber scroll lateral
+ * @param {string[]} [props.retirados] Fourball (BE #665): la bola del
+ *   retirado sin validar no cuenta, y el hoyo se cierra con las demás (F6)
+ */
+const HoleSelector = ({
+  currentHole,
+  onSelect,
+  scores = [],
+  totalHoles = 18,
+  noGuardados = [],
+  retirados = [],
+}) => {
+  const { t } = useTranslation('scoring');
+
+  const getHoleStatus = (holeNumber) => {
+    const holeScore = scores.find((s) => s.holeNumber === holeNumber);
+    if (!holeScore) return 'empty';
+    const hasPlayers =
+      Array.isArray(holeScore.playerScores) &&
+      holeScore.playerScores.length > 0;
+    if (!hasPlayers) return 'empty';
+    // Un desacuerdo, o una corrección que aún está en la cola, no es un hoyo
+    // cerrado aunque el servidor tenga su resultado (/code-review, 26 oct 2026)
+    const queCuentan = holeScore.playerScores.filter((ps) =>
+      cuentaLaBola(ps, retirados),
+    );
+    const hasMismatch = queCuentan.some(
+      (ps) => ps.validationStatus === ValidationStatus.MISMATCH,
+    );
+    if (hasMismatch) return 'mismatch';
+    if (holeScore.playerScores.some((ps) => ps.enCola)) return 'pending';
+    // Cerrado: con el resultado del servidor (también el que se cerró sin la
+    // bola de un retirado que luego volvió), o con todas las bolas que cuentan
+    // validadas
+    if (holeScore.holeResult) return 'validated';
+    const hasAllMatch =
+      queCuentan.length > 0 &&
+      queCuentan.every((ps) => ps.validationStatus === ValidationStatus.MATCH);
+    if (hasAllMatch) return 'validated';
+    // Sin nada anotado aún, vacío: la API trae fila de los 18 hoyos, también de
+    // los no jugados de un partido acabado (#847)
+    const algoAnotado = holeScore.playerScores.some(
+      (ps) => ps.ownSubmitted || ps.markerSubmitted,
+    );
+    return algoAnotado ? 'pending' : 'empty';
+  };
+
+  return (
+    <RejillaDeHoyos
+      currentHole={currentHole}
+      onSelect={onSelect}
+      totalHoles={totalHoles}
+      estadoDe={getHoleStatus}
+      testId="hole-selector"
+      testIdDelHoyo={(hoyo) => `hole-btn-${hoyo}`}
+      extraDelHoyo={(hoyo) =>
+        noGuardados.includes(hoyo) && (
+          <>
+            <span
+              data-testid={`no-guardado-${hoyo}`}
+              aria-hidden="true"
+              className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-error ring-1 ring-fondo"
+            />
+            <span className="sr-only">{`, ${t('holeSelector.noGuardado')}`}</span>
+          </>
+        )
+      }
+    />
+  );
+};
+
+export default HoleSelector;

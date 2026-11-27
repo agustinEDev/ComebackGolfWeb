@@ -1,0 +1,214 @@
+/** @typedef {import('../entities/GolfCourse').default} GolfCourse */
+
+/**
+ * Golf Course Repository Interface
+ * Defines the contract for golf course data operations
+ */
+class IGolfCourseRepository {
+  /**
+   * List all golf courses (with optional filtering)
+   * @param {Object} [filters] - Optional filters
+   * @param {string} [filters.approvalStatus] - Filter by approval status (APPROVED, PENDING_APPROVAL, REJECTED)
+   * @param {string} [filters.countryCode] - Filter by ISO country code
+   * @param {string} [filters.name] - Partial name search, filtered in the database
+   * @param {number} [filters.limit] - Page size. Without it every course comes back
+   * @param {number} [filters.offset] - Courses to skip
+   * @param {number} [filters.lat] - Latitude. With lon, sorts nearest first
+   * @param {number} [filters.lon] - Longitude. Required alongside lat
+   * @param {number} [filters.radiusKm] - Optional cap in km. Needs a position
+   * @returns {Promise<{courses: GolfCourse[], total: number}>} Page and how many match
+   */
+  async list(filters = {}) {
+    throw new Error('Method not implemented: list');
+  }
+
+  /**
+   * Get a golf course by ID
+   * @param {string} id - Golf course ID
+   * @returns {Promise<GolfCourse>} Golf course entity
+   */
+  async getById(id) {
+    throw new Error('Method not implemented: getById');
+  }
+
+  /**
+   * El mapa de hoyos aprobado del campo (BE #532)
+   * @param {string} id - Golf course ID
+   * @returns {Promise<Object|null>} El mapa, o null si no tiene
+   */
+  async getHoleMap(id) {
+    throw new Error('Method not implemented: getHoleMap');
+  }
+
+  /**
+   * El resumen de las muestras (anónimas) de cada hoyo (BE #532, marcado por par; una referencia por hoyo desde BE #575)
+   * @param {string} id - Golf course ID
+   * @returns {Promise<Object<number, {guardada: Object|null, primera: Object|null, green: Object|null, recoge: boolean}>>} por número de hoyo
+   */
+  async getHoleSamples(id) {
+    throw new Error('Method not implemented: getHoleSamples');
+  }
+
+  /**
+   * Envía una muestra de un hoyo (BE #532, marcado por par). Se resuelve si
+   * llegó, la guarde el servidor o no
+   * @param {string} id - Golf course ID
+   * @param {number} holeNumber - 1 a 18
+   * @param {Object} muestra - { id, barra: { color, gender }, tee, bends, greenCenter }
+   * @returns {Promise<void>}
+   */
+  async sendHoleSample(id, holeNumber, muestra) {
+    throw new Error('Method not implemented: sendHoleSample');
+  }
+
+  /**
+   * Reporta un hoyo con un motivo y la línea que propone el jugador (entrega
+   * 7): se resuelve si llegó, lo guarde el servidor o no
+   * @param {string} id - Golf course ID
+   * @param {number} holeNumber - 1 a 18
+   * @param {Object} reporte - { id, reason, tee, bends, greenCenter }
+   * @returns {Promise<void>}
+   */
+  async sendHoleReport(id, holeNumber, reporte) {
+    throw new Error('Method not implemented: sendHoleReport');
+  }
+
+  /**
+   * Los campos con hoyos pendientes de revisar (BE #575, admin)
+   * @returns {Promise<{golfCourseId: string, name: string, holes: {holeNumber: number, samples: number}[]}[]>}
+   */
+  async listHoleReviews() {
+    throw new Error('Method not implemented: listHoleReviews');
+  }
+
+  /**
+   * Los 18 hoyos de un campo para revisarlos: línea guardada, muestras y tarjeta de cada barra (BE #575, admin)
+   * @param {string} id - Golf course ID
+   * @returns {Promise<{golfCourseId: string, name: string, ubicacion: Object|null, holes: Array<Object>}>}
+   */
+  async getHoleReview(id) {
+    throw new Error('Method not implemented: getHoleReview');
+  }
+
+  /**
+   * Guarda la línea de referencia de un hoyo (BE #575, admin)
+   * @param {string} id - Golf course ID
+   * @param {number} holeNumber - 1 a 18
+   * @param {{tee: Object, bends: Object[], greenCenter: Object}} linea
+   */
+  async saveHoleLine(id, holeNumber, linea) {
+    throw new Error('Method not implemented: saveHoleLine');
+  }
+
+  /**
+   * Reabre un hoyo: quita su línea y vuelve a recoger muestras (BE #575, admin)
+   * @param {string} id - Golf course ID
+   * @param {number} holeNumber - 1 a 18
+   */
+  async reopenHole(id, holeNumber) {
+    throw new Error('Method not implemented: reopenHole');
+  }
+
+  /**
+   * Borra una muestra mala (BE #575, admin)
+   * @param {string} id - Golf course ID
+   * @param {string} sampleId
+   */
+  async deleteHoleSample(id, sampleId) {
+    throw new Error('Method not implemented: deleteHoleSample');
+  }
+
+  /**
+   * Descarta un reporte de un jugador (entrega 7, admin)
+   * @param {string} id - Golf course ID
+   * @param {string} reportId
+   */
+  async discardHoleReport(id, reportId) {
+    throw new Error('Method not implemented: discardHoleReport');
+  }
+
+  /**
+   * Create a new golf course request (any user)
+   * Creates a golf course in PENDING_APPROVAL status
+   * @param {Object} golfCourseData - Golf course data
+   * @returns {Promise<GolfCourse>} Created golf course
+   */
+  async create(golfCourseData) {
+    throw new Error('Method not implemented: create');
+  }
+
+  /**
+   * Create a golf course directly as APPROVED (admin only)
+   * @param {Object} golfCourseData - Golf course data
+   * @returns {Promise<GolfCourse>} Created golf course
+   */
+  async createAsAdmin(golfCourseData) {
+    throw new Error('Method not implemented: createAsAdmin');
+  }
+
+  /**
+   * Update a golf course
+   * Workflow:
+   * - Admin: updates in-place
+   * - Creator editing APPROVED: creates clone
+   * - Creator editing PENDING: updates in-place
+   * @param {string} id - Golf course ID
+   * @param {Object} golfCourseData - Updated golf course data
+   * @returns {Promise<{golfCourse: GolfCourse, pendingUpdate: GolfCourse|null}>}
+   */
+  async update(id, golfCourseData) {
+    throw new Error('Method not implemented: update');
+  }
+
+  /**
+   * Approve a golf course (admin only)
+   * Changes status from PENDING_APPROVAL to APPROVED
+   * @param {string} id - Golf course ID
+   * @returns {Promise<GolfCourse>} Approved golf course
+   */
+  async approve(id) {
+    throw new Error('Method not implemented: approve');
+  }
+
+  /**
+   * Reject a golf course (admin only)
+   * Changes status from PENDING_APPROVAL to REJECTED
+   * @param {string} id - Golf course ID
+   * @param {string} reason - Rejection reason (10-500 chars)
+   * @returns {Promise<GolfCourse>} Rejected golf course
+   */
+  async reject(id, reason) {
+    throw new Error('Method not implemented: reject');
+  }
+
+  /**
+   * Approve a golf course update (admin only)
+   * Applies clone changes to original and deletes clone
+   * @param {string} cloneId - Clone golf course ID
+   * @returns {Promise<GolfCourse>} Updated original golf course
+   */
+  async approveUpdate(cloneId) {
+    throw new Error('Method not implemented: approveUpdate');
+  }
+
+  /**
+   * Reject a golf course update (admin only)
+   * Deletes clone and leaves original unchanged
+   * @param {string} cloneId - Clone golf course ID
+   * @returns {Promise<GolfCourse>} Original golf course
+   */
+  async rejectUpdate(cloneId) {
+    throw new Error('Method not implemented: rejectUpdate');
+  }
+
+  /**
+   * List pending golf courses (admin only)
+   * Returns courses with PENDING_APPROVAL status
+   * @returns {Promise<GolfCourse[]>} Array of pending golf courses
+   */
+  async listPending() {
+    throw new Error('Method not implemented: listPending');
+  }
+}
+
+export default IGolfCourseRepository;

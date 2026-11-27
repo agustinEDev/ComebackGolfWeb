@@ -1,0 +1,499 @@
+/**
+ * Offline Queue for Scoring
+ *
+ * Stores pending hole scores in localStorage when the user is offline.
+ * Scores are queued and processed when connectivity is restored.
+ *
+ * Storage key: 'comebackgolf-scoring-queue'
+ * Each entry: { matchId, holeNumber, participantId, scoreData, timestamp }
+ *
+ * `participantId` distingue anotaciones del mismo hoyo en una partida rápida,
+ * donde cada participante se envía por separado. En competición no hay tal
+ * cosa —una anotación lleva dentro el golpe propio y el del jugador marcado—,
+ * así que allí va `null` y todo se comporta como antes (FE #515).
+ */
+
+import { marcadoDe } from './golpesDelHoyo';
+
+const STORAGE_KEY = 'comebackgolf-scoring-queue';
+
+/**
+ * Una anotación de una partida de stroke play (FE #824, PR 7). Va por otro
+ * endpoint con el mismo cuerpo: sin esta marca el vaciado la mandaba al de la
+ * Ryder, que la rechazaba con un 404, y se daba por perdida. `matchId` es
+ * entonces el de la partida. Las de la Ryder no llevan tipo, como siempre.
+ */
+export const TIPO_PARTIDA_DE_FRANJA = 'TEE_GROUP';
+
+/**
+ * Si una entrada guardada es la misma anotación que la que se busca.
+ *
+ * El participante se compara normalizando lo que falta: las entradas escritas
+ * antes de FE #515 no tienen el campo, y `undefined` y `null` significan aquí
+ * lo mismo —«esta anotación no es de nadie en concreto»—, así que una cola
+ * guardada por una versión anterior se sigue entendiendo.
+ *
+ * **Y el dueño forma parte de la identidad** (FE #521). Sin él, en un móvil
+ * compartido la anotación de la segunda persona borraba la de la primera al
+ * guardarse: mismo partido, mismo hoyo, luego «la misma». Eran dos golpes de
+ * dos personas, y uno desaparecía sin dejar rastro.
+ */
+const mismaAnotacion = (
+  entry,
+  matchId,
+  holeNumber,
+  participantId,
+  userId,
+  marcado,
+) =>
+  entry.matchId === matchId &&
+  entry.holeNumber === holeNumber &&
+  (entry.participantId ?? null) === (participantId ?? null) &&
+  (entry.userId ?? null) === (userId ?? null) &&
+  // Sin decir el marcado (`undefined`), cualquiera: todo el hoyo de esa persona
+  (marcado === undefined || marcadoDe(entry.scoreData) === marcado);
+
+/** Los campos que son golpes, para saber si a una anotación le queda alguno. */
+const GOLPES = ['ownScore', 'markedScore', 'score'];
+
+/**
+ * El golpe propio de un hoyo vive en UNA anotación: la última que lo trae. Si
+ * se quedara también en la de otro marcado —la del rival que iba primero
+ * antes de la retirada, o la de cuando se marcaba al retirado— el vaciado
+ * mandaría los dos, y el más viejo podía llegar el último.
+ */
+const sinElPropioDeOtroHueco = (cola, nueva) => {
+  if (nueva.scoreData?.ownScore === undefined) return cola;
+  return cola.flatMap((entry) => {
+    // Las del mismo hoyo que quedan son de otro hueco
+    if (
+      !mismaAnotacion(
+        entry,
+        nueva.matchId,
+        nueva.holeNumber,
+        nueva.participantId,
+        nueva.userId,
+      )
+    )
+      return [entry];
+    const resto = { ...entry.scoreData };
+    delete resto.ownScore;
+    if (!GOLPES.some((g) => resto[g] !== undefined)) return [];
+    return [
+      {
+        ...entry,
+        scoreData: resto,
+        ...(entry.tocados
+          ? { tocados: entry.tocados.filter((g) => g !== 'ownScore') }
+          : {}),
+      },
+    ];
+  });
+};
+
+/**
+ * Cuánto vale un golpe guardado sin cobertura (FS-03, re-auditoría del 16 nov 2026).
+ *
+ * 48 h para todo, decidido por Agustín el 16 nov 2026: las partidas rápidas se cierran
+ * solas al acabar el día siguiente, y los torneos se cerrarán solos (BE #469, BE #878).
+ * Hasta entonces un partido de torneo todavía aceptaría un golpe más viejo; a cambio,
+ * nada se queda en el móvil más de dos días. A partir de ahí no se envía: el vaciado
+ * lo aparta como un rechazo, dejando aviso a su dueño (`vaciaAnotaciones`), que puede
+ * volver a anotar el hoyo.
+ */
+export const CADUCIDAD_DE_LA_COLA_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * Si un golpe guardado ya no se puede enviar por viejo. Sin fecha, caducado (no se
+ * sabe de cuándo es); con fecha en el futuro —un reloj cambiado—, no: no se tira
+ * nada por un reloj mal puesto.
+ */
+export const estaCaducada = (entrada, ahora = Date.now()) => {
+  const cuando = entrada?.timestamp;
+  if (typeof cuando !== 'number' || !Number.isFinite(cuando)) return true;
+  return ahora - cuando > CADUCIDAD_DE_LA_COLA_MS;
+};
+
+/**
+ * Get all queued scores from localStorage.
+ * @returns {Array} Array of queued score entries
+ */
+export const getAll = () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+// Qué golpes eligió el jugador (FE #813): si el servidor rechaza la anotación,
+// se apuntan como perdidos esos y no los dos del hoyo. Al sustituir la del mismo
+// hoyo se suman —los dos siguen sin enviarse—; si la anterior no lo sabía, no se
+// sabe; y quien reencola sin decirlo —al resolver un desacuerdo— conserva lo que
+// había
+const tocadosTras = (anterior, tocados) => {
+  if (!tocados) return anterior?.tocados ? { tocados: anterior.tocados } : {};
+  if (anterior && !anterior.tocados) return {};
+  return { tocados: [...new Set([...(anterior?.tocados ?? []), ...tocados])] };
+};
+
+/**
+ * Add a score to the offline queue.
+ * If a score for the same match+hole+participant already exists, it is replaced.
+ * @param {string} matchId
+ * @param {number} holeNumber
+ * @param {Object} scoreData - { ownScore, markedPlayerId, markedScore }
+ * @param {string|null} [participantId] - A quién pertenece la anotación, en las
+ *   partidas rápidas. Sin él, dos participantes del mismo hoyo se pisarían
+ * @param {string|null} [userId] - De quién es la anotación
+ * @param {{matchName?: string|null, matchNumber?: number|null}} [laPartida] -
+ *   Cómo se llama la partida, para el aviso del panel. Va en un objeto y no
+ *   como dos parámetros más porque ya son cinco por delante
+ * @returns {boolean} Si de verdad quedó guardada. Un iPhone sin espacio, o una
+ *   ventana privada, rechazan el guardado: quien llame tiene que poder decirlo,
+ *   porque callarlo hace desaparecer el golpe sin ningún aviso
+ */
+const guarda = (cola) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(cola));
+    return true;
+  } catch {
+    // Sin espacio, o en una ventana privada. Dejar que suba convertiría esto en
+    // un rechazo que nadie recoge dentro del `catch` de quien anota
+    return false;
+  }
+};
+
+export const enqueue = (
+  matchId,
+  holeNumber,
+  scoreData,
+  participantId = null,
+  userId = null,
+  laPartida = {},
+  tocados = null,
+) => {
+  const { matchName = null, matchNumber = null, tipo = null } = laPartida;
+  const queue = getAll();
+  const marcado = marcadoDe(scoreData);
+  const anterior = queue.find((entry) =>
+    mismaAnotacion(entry, matchId, holeNumber, participantId, userId, marcado),
+  );
+  const filtered = sinElPropioDeOtroHueco(
+    queue.filter(
+      (entry) =>
+        !mismaAnotacion(
+          entry,
+          matchId,
+          holeNumber,
+          participantId,
+          userId,
+          marcado,
+        ),
+    ),
+    { matchId, holeNumber, participantId, userId, scoreData },
+  );
+  filtered.push({
+    matchId,
+    holeNumber,
+    participantId,
+    scoreData,
+    timestamp: Date.now(),
+    // De quién es esta anotación. Sin esto, en un móvil compartido no hay forma
+    // de saber a quién pertenece un golpe guardado, ni de impedir que lo envíe
+    // otra persona con SU sesión (FE #521)
+    userId,
+    // Cómo se llama esta partida, apuntado AL ENCOLAR: el aviso de «tienes
+    // golpes sin enviar» tiene que decir de cuál son, y cuando haya que
+    // enseñarlo puede no haber cobertura para preguntárselo al servidor. Si
+    // quien reencola no lo sabe —al resolver un desacuerdo solo se toca el
+    // resultado— se conserva el que ya había
+    matchName: matchName ?? anterior?.matchName ?? null,
+    // Y con qué número: en una jornada se juegan varios partidos en el MISMO
+    // campo, así que solo con el nombre del campo el panel enseña dos avisos
+    // idénticos y no se sabe cuál mirar. El número es un dato, no texto: se
+    // guarda crudo y lo redacta la traducción, para que quien tenga la
+    // aplicación en inglés no lea un rótulo congelado en español
+    matchNumber: matchNumber ?? anterior?.matchNumber ?? null,
+    // De qué es (una partida de stroke play), con el mismo criterio: quien
+    // reencola sin decirlo no se lo quita
+    ...((tipo ?? anterior?.tipo) ? { tipo: tipo ?? anterior.tipo } : {}),
+    ...tocadosTras(anterior, tocados),
+  });
+  return guarda(filtered);
+};
+
+/**
+ * Remove a specific entry from the queue.
+ * @param {string} matchId
+ * @param {number} holeNumber
+ * @param {string|null} [participantId]
+ * @param {string|null} [userId] - De quién es la anotación que se quiere
+ *   quitar. **Es obligatorio en la práctica**: omitirlo NO borra «el hoyo 7 de
+ *   quien sea», borra solo la que no tiene dueño, porque `null` es un dueño
+ *   más. Quien llame sin él sobre una anotación con dueño no borra nada, y esa
+ *   anotación se reenvía en cada reconexión para siempre.
+ *
+ *   Ojo, porque omitirlo significa lo CONTRARIO que al leer: `getByMatch` sin
+ *   dueño devuelve las de todo el mundo, y `remove` sin dueño no toca ninguna
+ *   de ellas. Es asimétrico a propósito —leer de más es inofensivo y borrar de
+ *   más no lo es— pero se presta a confusión, así que aquí queda dicho.
+ * @param {string|null} [marcado] - De qué marcado (ver `marcadoDe`); `null`, la
+ *   anotación sin marcado. Sin decirlo, todas las de ese hoyo y esa persona
+ * @returns {boolean} Si de verdad quedó guardado el cambio
+ */
+export const remove = (
+  matchId,
+  holeNumber,
+  participantId = null,
+  userId = null,
+  marcado = undefined,
+) => {
+  const queue = getAll();
+  const filtered = queue.filter(
+    (entry) =>
+      !mismaAnotacion(
+        entry,
+        matchId,
+        holeNumber,
+        participantId,
+        userId,
+        marcado,
+      ),
+  );
+  return guarda(filtered);
+};
+
+/**
+ * Clear all entries from the queue.
+ */
+export const clear = () => {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Nada que hacer: si no se puede tocar, la cola se queda como esté
+  }
+};
+
+/**
+ * Get the number of queued entries.
+ *
+ * Con `matchId`, solo las de esa partida. La cola es una sola y la comparten
+ * los dos modos de juego, así que contarla entera hacía que una pantalla
+ * enseñara «N pendientes» incluyendo anotaciones de otra partida que ella no
+ * va a enviar nunca (FE #515).
+ *
+ * @param {string} [matchId]
+ * @returns {number}
+ */
+export const size = (matchId, userId) => {
+  // Por `undefined` y no por veracidad: con una cadena vacía devolvía la cuenta
+  // global, que es justo lo que se venía a quitar
+  return matchId === undefined
+    ? getAll().length
+    : getByMatch(matchId, userId).length;
+};
+
+/**
+ * Las anotaciones guardadas de una partida.
+ *
+ * Con `userId`, solo las de esa persona **y las que no tienen dueño**: ver
+ * `esVisiblePara`.
+ *
+ * @param {string} matchId
+ * @param {string|null} [userId]
+ * @returns {Array}
+ */
+export const getByMatch = (matchId, userId) => {
+  return getAll().filter((entry) => {
+    if (entry.matchId !== matchId) return false;
+    if (userId === undefined || userId === null) return true;
+    return esVisiblePara(entry, userId);
+  });
+};
+
+/**
+ * Si una anotación guardada se le puede ENSEÑAR a quien tiene la sesión.
+ *
+ * Las que no llevan dueño cuentan como suyas: hasta esta versión la cola no
+ * guardaba de quién era nada, así que el día de actualizar todo lo que hay en
+ * los móviles es huérfano, y dejarlo invisible sería no rescatar justo lo que
+ * esta issue viene a rescatar.
+ *
+ * **Enseñar no es enviar.** Para enviar de fondo está `deQuien`, que es más
+ * estricto y explica por qué.
+ */
+const esVisiblePara = (entrada, userId) =>
+  (entrada.userId ?? null) === null || entrada.userId === userId;
+
+/**
+ * Lo guardado de una persona, agrupado por partida, para el aviso del panel.
+ *
+ * @param {string|null} [userId]
+ * @returns {Array<{matchId: string, matchName: string|null, matchNumber: number|null,
+ *   cuantas: number, esPartidaRapida: boolean, desaparecida: boolean}>}
+ */
+export const resumenPorPartida = (userId = null) => {
+  const porPartida = new Map();
+
+  for (const entrada of getAll()) {
+    // Solo lo de quien está mirando —lo suyo y lo huérfano—: en un móvil
+    // compartido, enseñar lo de otra cuenta filtra el nombre de sus partidas
+    if (userId != null && !esVisiblePara(entrada, userId)) continue;
+
+    const actual = porPartida.get(entrada.matchId) ?? {
+      matchId: entrada.matchId,
+      matchName: entrada.matchName ?? null,
+      matchNumber: entrada.matchNumber ?? null,
+      cuantas: 0,
+      // Una anotación con participante es de una partida rápida: allí cada
+      // participante se envía por separado
+      esPartidaRapida: false,
+      // Una partida de stroke play: su aviso lleva a su pantalla y la nombra como partida (PR 7)
+      esPartidaDeFranja: false,
+      // El servidor dijo que esa partida ya no existe. No se borra nada por
+      // eso: se le ofrece al jugador, que es quien sabe si la borró él o si
+      // ese 404 lo devolvió el portal cautivo de un club
+      desaparecida: false,
+    };
+    actual.cuantas += 1;
+    if (entrada.partidaDesaparecida) actual.desaparecida = true;
+    if (entrada.participantId != null) actual.esPartidaRapida = true;
+    if (entrada.tipo === TIPO_PARTIDA_DE_FRANJA)
+      actual.esPartidaDeFranja = true;
+    if (!actual.matchName && entrada.matchName)
+      actual.matchName = entrada.matchName;
+    if (actual.matchNumber == null && entrada.matchNumber != null) {
+      actual.matchNumber = entrada.matchNumber;
+    }
+    porPartida.set(entrada.matchId, actual);
+  }
+
+  return [...porPartida.values()];
+};
+
+/**
+ * Marca —o desmarca— lo guardado de una partida que el servidor ya no conoce
+ * (FE #557).
+ *
+ * Solo marca: borrar por un 404 es lo que NO hay que hacer, porque ese 404 lo
+ * devuelve igual un proxy mal configurado o el portal cautivo de un club, y el
+ * golpe era bueno. Con la marca, el panel puede ofrecer descartarlo y decidirlo
+ * quien lo anotó. Y se quita en cuanto la partida vuelve a cargar: entonces el
+ * 404 era mentira.
+ *
+ * @param {string} matchId
+ * @param {string|null} [userId] - De quién es lo que se marca
+ * @param {boolean} [desaparecida]
+ * @returns {boolean} Si hizo falta escribir y se pudo
+ */
+export const marcaDesaparecida = (
+  matchId,
+  userId = null,
+  desaparecida = true,
+) => {
+  const queue = getAll();
+  let hayQueEscribir = false;
+
+  const marcada = queue.map((entry) => {
+    // Con el mismo criterio de visibilidad que el aviso que la enseña: en un
+    // móvil compartido, una cuenta que recibe un 403 porque esa partida es de
+    // OTRA marcaba lo de esa otra, y a su dueño se le ofrecía tirarlo
+    if (entry.matchId !== matchId || !esVisiblePara(entry, userId))
+      return entry;
+    if (Boolean(entry.partidaDesaparecida) === desaparecida) return entry;
+    hayQueEscribir = true;
+    return { ...entry, partidaDesaparecida: desaparecida };
+  });
+
+  return hayQueEscribir ? guarda(marcada) : true;
+};
+
+/**
+ * Quita de la cola TODO lo de una partida: lo que el jugador ha decidido no
+ * volver a intentar (FE #557).
+ *
+ * Con el mismo criterio de visibilidad que el aviso que lo ofrece: se borra lo
+ * que esa persona está viendo —lo suyo y lo huérfano—, no lo de otra cuenta
+ * del mismo móvil.
+ *
+ * @returns {boolean} Si se pudo escribir
+ */
+export const olvidaLasDe = (matchId, userId = null) => {
+  const queue = getAll();
+  return guarda(
+    queue.filter(
+      (entry) => !(entry.matchId === matchId && esVisiblePara(entry, userId)),
+    ),
+  );
+};
+
+/**
+ * Le pone nombre a lo que se guardó sin él.
+ *
+ * En un arranque en frío sin cobertura la vista de la partida no llega nunca,
+ * así que todo lo que se anota se guarda sin nombre ni número y el panel
+ * enseña «una partida anterior» — o dos avisos iguales si hay dos partidas.
+ * En cuanto la vista SÍ carga, aunque sea días después, se rellena lo que
+ * quedó suelto. No se pisa lo que ya tenga nombre: lo guardado es de cuando se
+ * anotó, y es más fiable que lo de ahora.
+ *
+ * @returns {boolean} Si hizo falta escribir y se pudo
+ */
+export const ponleNombre = (
+  matchId,
+  { matchName = null, matchNumber = null } = {},
+) => {
+  if (matchName == null && matchNumber == null) return true;
+  const queue = getAll();
+  let hayQueEscribir = false;
+
+  // El MISMO criterio para decidir si falta y para rellenarlo. Con truthiness
+  // arriba y `??` abajo, un nombre vacío se daba por ausente, entraba al
+  // cuerpo, y salía igual de vacío: reescritura completa del almacenamiento
+  // para nada, en cada montaje de la pantalla, y el panel seguía diciendo «una
+  // partida anterior». Y con `matchNumber` nulo —que es lo normal en partida
+  // rápida— pasaba con la cola entera
+  const leFalta = (valor) => valor == null || valor === '';
+
+  const conNombre = queue.map((entry) => {
+    if (entry.matchId !== matchId) return entry;
+    const faltaNombre = leFalta(entry.matchName) && !leFalta(matchName);
+    const faltaNumero = entry.matchNumber == null && matchNumber != null;
+    if (!faltaNombre && !faltaNumero) return entry;
+    hayQueEscribir = true;
+    return {
+      ...entry,
+      matchName: faltaNombre ? matchName : entry.matchName,
+      matchNumber: faltaNumero ? matchNumber : entry.matchNumber,
+    };
+  });
+
+  return hayQueEscribir ? guarda(conNombre) : true;
+};
+
+/**
+ * Las anotaciones que el vaciado DE FONDO puede enviar. Solo las suyas.
+ *
+ * **Lo huérfano no se manda desde aquí**, y esto se intentó al revés: se probó
+ * a incluirlo para rescatar la cola del parque instalado, que no lleva dueño.
+ * Es un error, y de los caros. El servidor atribuye `own_score` al usuario
+ * AUTENTICADO (`submit_hole_score_use_case.py:61-83`), así que en un móvil
+ * compartido donde las dos personas juegan el mismo partido —lo normal en una
+ * Ryder— los golpes de la primera se escriben en la tarjeta de la segunda,
+ * pisando los suyos, con un 200 y sin rechazo. Sin rechazo no hay aviso: la
+ * anotación desaparece en silencio, que es peor que no enviarla.
+ *
+ * Lo huérfano se rescata por otro camino, y con alguien delante: el panel SÍ
+ * lo enseña (`resumenPorPartida`), y al tocar el aviso se abre esa partida,
+ * cuya pantalla vacía al entrar y sí incluye lo huérfano (`getByMatch`). Ahí
+ * hay contexto y un acto explícito de una persona, que es la diferencia.
+ *
+ * @param {string} userId
+ * @returns {Array}
+ */
+export const deQuien = (userId) => {
+  if (!userId) return [];
+  return getAll().filter((entry) => entry.userId === userId);
+};

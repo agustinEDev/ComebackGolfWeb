@@ -1,0 +1,172 @@
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
+
+/**
+ * La fecha del hándicap al editar el perfil (FE #710): salía siempre en inglés
+ * (`en-US` fijo), leída sin huso, y con «Never» / «Not set» sin traducir. El
+ * huso lo prueba `instanteEnTexto`; aquí, que la pantalla lo usa con su idioma.
+ */
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (clave, v) =>
+      v && typeof v === 'object'
+        ? `${clave} ${Object.values(v).join(' ')}`
+        : clave,
+    i18n: { language: 'es' },
+  }),
+}));
+vi.mock('../components/layout/HeaderAuth', () => ({ default: () => null }));
+vi.mock('../components/profile/AvatarPicker', () => ({ default: () => null }));
+vi.mock('../components/ui/CountryAutocomplete', () => ({
+  default: () => null,
+}));
+vi.mock('../components/ui/FullScreenLoader', () => ({ default: () => null }));
+vi.mock('../hooks/useAvatar', () => ({ useAvatar: () => ({}) }));
+
+let usuario;
+let sinConfirmar = false;
+let handicapEscrito = '';
+const cambiar = vi.fn();
+vi.mock('../hooks/useEditProfile', () => ({
+  useEditProfile: () => ({
+    user: usuario,
+    sinConfirmar,
+    formData: {
+      firstName: '',
+      lastName: '',
+      alias: '',
+      countryCode: '',
+      gender: '',
+      currentPassword: '',
+      email: '',
+      newPassword: '',
+      confirmPassword: '',
+      handicap: handicapEscrito,
+    },
+    countries: [],
+    handleInputChange: cambiar,
+  }),
+}));
+
+const EditProfile = (await import('./EditProfile')).default;
+
+const pintar = () =>
+  render(
+    <MemoryRouter>
+      <EditProfile />
+    </MemoryRouter>,
+  );
+
+describe('EditProfile · la fecha del hándicap (FE #710)', () => {
+  it('EP1: en el idioma de la app', () => {
+    usuario = { handicap: 18.2, handicap_updated_at: '2026-09-24T10:00:00' };
+    pintar();
+
+    expect(
+      screen.getByText(
+        /edit\.handicap\.lastUpdated .*24 de septiembre de 2026/,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('EP2: sin fecha ni hándicap, traducido', () => {
+    usuario = { handicap: null, handicap_updated_at: null };
+    pintar();
+
+    expect(
+      screen.getByText('edit.handicap.lastUpdated edit.handicap.never'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('edit.handicap.notSet')).toBeInTheDocument();
+  });
+
+  it('FE #826: el correo actual se parte en el móvil', () => {
+    const largo =
+      'un.correo.muy.largo.sin.espacios.para.partir@ejemplo-de-dominio.com';
+    usuario = { handicap: null, handicap_updated_at: null, email: largo };
+    pintar();
+
+    // Por contenido, sin construir una regex con el correo
+    const linea = screen.getByText((texto) => texto.includes(largo));
+    expect(linea.className).toContain('wrap-anywhere');
+  });
+});
+
+// Un hándicap plus se guarda negativo y se lee con «+» (FE #797)
+describe('EditProfile · hándicap plus (FE #797)', () => {
+  it('H1: el hándicap actual de un plus se lee con «+»', () => {
+    usuario = { handicap: -2, handicap_updated_at: '2026-09-24T10:00:00' };
+    pintar();
+
+    expect(screen.getByText('+2.0')).toBeInTheDocument();
+  });
+
+  it('H3: un positivo, sin signo', () => {
+    usuario = { handicap: 12.4, handicap_updated_at: '2026-09-24T10:00:00' };
+    pintar();
+
+    expect(screen.getByText('12.4')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Auditoría legal del 20 oct 2026 (F4): donde se trae el hándicap de la RFEG,
+ * se dice de dónde sale.
+ */
+describe('EditProfile · fuente del hándicap (F4)', () => {
+  it('F4: con la RFEG disponible, se cita a la federación, con su enlace', () => {
+    usuario = { handicap: 18.2, handicap_updated_at: null, country_code: 'ES' };
+    pintar();
+
+    expect(screen.getByText(/source\.prefix/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'source.rfegName' }),
+    ).toHaveAttribute('href', 'https://www.rfegolf.es');
+  });
+
+  it('F4: sin ella, no', () => {
+    usuario = { handicap: 18.2, handicap_updated_at: null, country_code: 'FR' };
+    pintar();
+
+    expect(screen.queryByRole('link', { name: 'source.rfegName' })).toBeNull();
+  });
+});
+
+// QA del 26 oct (FE #938): el plus se escribía «-2», y el teclado decimal del
+// móvil no tiene signo. Ahora va el número y el «+» de al lado
+describe('EditProfile · el «+» del hándicap a mano', () => {
+  it('P1: un plus en el formulario se ve sin signo y con el «+» pulsado', () => {
+    usuario = { handicap: -2, handicap_updated_at: null };
+    handicapEscrito = '-2';
+    pintar();
+
+    expect(screen.getByLabelText('edit.handicap.manual')).toHaveValue('2');
+    expect(
+      screen.getByRole('button', { name: 'handicapField.plus' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('P2: pulsar «+» deja en el formulario el hándicap en negativo, como antes', () => {
+    usuario = { handicap: 2, handicap_updated_at: null };
+    handicapEscrito = '2';
+    cambiar.mockClear();
+    pintar();
+
+    fireEvent.click(screen.getByRole('button', { name: 'handicapField.plus' }));
+
+    expect(cambiar).toHaveBeenCalledWith({
+      target: { name: 'handicap', value: '-2' },
+    });
+  });
+});
+
+describe('EditProfile · sin conexión (fase 3)', () => {
+  it('EP3: con la sesión sin confirmar dice que no hay conexión, sin formulario', () => {
+    usuario = null;
+    sinConfirmar = true;
+    pintar();
+
+    expect(screen.getByText('common:sinConexion.mensaje')).toBeInTheDocument();
+    sinConfirmar = false;
+  });
+});

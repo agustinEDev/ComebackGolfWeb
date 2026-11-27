@@ -1,0 +1,76 @@
+{
+  "title": "Active Devices",
+  "subtitle": "Manage devices with access to your account",
+  "loading": "Loading devices...",
+  "actions": {
+    "backToProfile": "Back to Profile",
+    "revoke": "Revoke"
+  },
+  "info": {
+    "title": "About Device Management",
+    "description": "These are the devices with an open session. Revoking one closes its session as soon as it does anything in the app, and it will have to sign in again. If you see a device you don't recognise, revoke it and change your password."
+  },
+  "confirmations": {
+    "revokeCurrent": "This is your CURRENT device. Revoking it will log you out immediately. Are you sure?",
+    "revokeOther": "Are you sure you want to revoke this device? All sessions on this device will be closed."
+  },
+  "modals": {
+    "revokeCurrentTitle": "Revoke Current Device",
+    "revokeOtherTitle": "Revoke Device"
+  },
+  "device": {
+    "current": "This device",
+    "ip": "IP",
+    "lastUsed": "Last used",
+    "firstSeen": "First seen",
+    "never": "Never",
+    "unknown": "Unknown device",
+    "noIp": "Unknown IP"
+  },
+  "empty": {
+    "title": "No active devices found",
+    "description": "Devices will appear here after login"
+  },
+  "security": {
+    "title": "Security Tip",
+    "description": "If you notice any suspicious activity or unfamiliar devices, revoke them immediately and consider changing your password. You can do this from your",
+    "profileSettings": "profile settings"
+  },
+  "errors": {
+    "CSRF_VALIDATION_FAILED": "CSRF validation failed. Please refresh the page.",
+    "DEVICE_NOT_FOUND": "Device not found",
+    "DEVICE_ALREADY_REVOKED": "Device already revoked",
+    "FAILED_TO_REVOKE_DEVICE": "Failed to revoke device",
+    "DEVICE_ID_REQUIRED": "Device ID is required",
+    "FAILED_TO_LOAD_DEVICES": "Failed to load devices",
+    "FORBIDDEN": "You can't revoke this device",
+    "TERMS_NOT_ACCEPTED": "Accept the terms of use to continue"
+  },
+  "success": {
+    "deviceRevoked": "Device revoked successfully"
+  },
+  "aria": {
+    "closeErrorMessage": "Close error message"
+  },
+  "platform": {
+    "iphone": "iPhone",
+    "ipad": "iPad",
+    "mac": "Mac",
+    "android": "Android",
+    "windows": "Windows",
+    "chromebook": "Chromebook",
+    "linux": "Linux"
+  },
+  "browser": {
+    "safari": "Safari",
+    "chrome": "Chrome",
+    "firefox": "Firefox",
+    "edge": "Edge",
+    "opera": "Opera",
+    "samsung": "Samsung Internet",
+    "instagram": "Instagram browser",
+    "google": "Google app",
+    "facebook": "Facebook browser",
+    "installedApp": "installed app"
+  }
+}

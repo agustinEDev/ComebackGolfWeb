@@ -1,0 +1,249 @@
+import { ELEGIDO_CON_TEXTO_DENTRO } from '../ui/clasesDeComportamiento';
+import { useState } from 'react';
+import ModalShell, { CAJA_PROPIA } from '../ui/ModalShell';
+import { motion } from 'framer-motion';
+import {
+  X,
+  Loader,
+  UserX,
+  UserCheck,
+  Trash2,
+  AlertTriangle,
+} from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { mensajeDelError } from '../../utils/mensajeDelError';
+import {
+  AL_PULSAR_BOTON,
+  PELIGRO,
+  PRINCIPAL,
+  SECUNDARIO,
+} from '../ui/clasesDeBoton';
+
+/**
+ * ManageAccountModal Component
+ * Lets an admin deactivate/reactivate a user, or permanently delete the account.
+ * Permanent delete may be blocked (409) by the backend if the user has activity
+ * (competitions/quick matches created, courses requested, hole scores) — in that
+ * case we surface the block, fall back to the deactivate/reactivate option, and
+ * let the admin confirm that instead without closing the modal.
+ */
+const ManageAccountModal = ({ user, onToggleActive, onDelete, onCancel }) => {
+  const { t } = useTranslation('admin');
+  const safeOption = user.isActive ? 'deactivate' : 'reactivate';
+  const [option, setOption] = useState(safeOption);
+  const [confirmText, setConfirmText] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState('');
+  const [blocked, setBlocked] = useState(false);
+
+  const fullName = `${user.firstName} ${user.lastName}`;
+  const deleteWord = t('manageModal.confirmDeleteWord');
+
+  const handleConfirm = async () => {
+    setError('');
+    setIsProcessing(true);
+    try {
+      if (option === 'delete') {
+        await onDelete();
+      } else {
+        await onToggleActive();
+      }
+    } catch (err) {
+      if (err.status === 409 || err.statusCode === 409) {
+        setBlocked(true);
+        setOption(safeOption);
+      } else {
+        setError(mensajeDelError(err, t('manageModal.genericError')));
+      }
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const canConfirmDelete = option !== 'delete' || confirmText === deleteWord;
+
+  return (
+    <ModalShell
+      isOpen
+      onClose={onCancel}
+      labelledBy="gestionar-cuenta-titulo"
+      closeOnEscape={!isProcessing}
+      busy={isProcessing}
+      boxClassName={CAJA_PROPIA}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white rounded-xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto"
+      >
+        <div className="flex items-start justify-between p-6 border-b border-gray-200">
+          <div>
+            <h2
+              id="gestionar-cuenta-titulo"
+              className="text-xl font-bold text-gray-900"
+            >
+              {t('manageModal.title', { name: fullName })}
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">
+              {t('manageModal.subtitle')}
+            </p>
+          </div>
+          <button
+            onClick={onCancel}
+            className="text-gray-400 hover:text-gray-600"
+            aria-label={t('manageModal.cancel')}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {error && (
+            <div className="bg-error-suave text-error text-sm rounded-lg p-3">
+              {error}
+            </div>
+          )}
+
+          {blocked && (
+            <div className="bg-aviso-suave text-tinta rounded-lg p-3 flex gap-2">
+              <AlertTriangle className="w-5 h-5 text-aviso flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-tinta">
+                  {t('manageModal.deleteBlockedTitle')}
+                </p>
+                <p className="text-sm text-tinta-suave mt-0.5">
+                  {t('manageModal.deleteBlockedHint')}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {user.isActive ? (
+              <label
+                className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${
+                  option === 'deactivate'
+                    ? ELEGIDO_CON_TEXTO_DENTRO
+                    : 'border-linea'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="manage-option"
+                  checked={option === 'deactivate'}
+                  onChange={() => setOption('deactivate')}
+                  className="mt-1 accent-primary-600"
+                />
+                <span>
+                  <span className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                    <UserX className="w-4 h-4 text-aviso" />
+                    {t('manageModal.deactivateOption')}
+                  </span>
+                  <span className="block text-xs text-gray-500 mt-0.5">
+                    {t('manageModal.deactivateDesc')}
+                  </span>
+                </span>
+              </label>
+            ) : (
+              <label
+                className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${
+                  option === 'reactivate'
+                    ? ELEGIDO_CON_TEXTO_DENTRO
+                    : 'border-linea'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="manage-option"
+                  checked={option === 'reactivate'}
+                  onChange={() => setOption('reactivate')}
+                  className="mt-1 accent-primary-600"
+                />
+                <span className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                  <UserCheck className="w-4 h-4 text-primary-600" />
+                  {t('manageModal.confirmReactivate')}
+                </span>
+              </label>
+            )}
+
+            {!blocked && (
+              <label
+                className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${
+                  option === 'delete'
+                    ? 'border-error bg-error-suave'
+                    : 'border-linea'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="manage-option"
+                  checked={option === 'delete'}
+                  onChange={() => setOption('delete')}
+                  className="mt-1 accent-red-600"
+                />
+                <span className="w-full">
+                  <span className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                    <Trash2 className="w-4 h-4 text-red-600" />
+                    {t('manageModal.deleteOption')}
+                  </span>
+                  <span className="block text-xs text-gray-500 mt-0.5">
+                    {t('manageModal.deleteDesc')}
+                  </span>
+                </span>
+              </label>
+            )}
+
+            {!blocked && option === 'delete' && (
+              <div className="pl-3">
+                <label
+                  htmlFor="manage-confirm-delete"
+                  className="block text-xs font-medium text-gray-700 mb-1"
+                >
+                  {t('manageModal.confirmDeleteLabel')}
+                </label>
+                <input
+                  id="manage-confirm-delete"
+                  type="text"
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  placeholder={t('manageModal.confirmDeletePlaceholder')}
+                  className="w-full px-3 py-2 border border-error/50 rounded-lg text-sm focus:ring-2 focus:ring-error outline-none"
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={isProcessing}
+              className={`px-4 py-2 text-sm ${SECUNDARIO} ${AL_PULSAR_BOTON}`}
+            >
+              {t('manageModal.cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirm}
+              disabled={isProcessing || !canConfirmDelete}
+              className={`flex items-center gap-2 px-5 py-2 text-sm ${
+                option === 'delete' ? PELIGRO : PRINCIPAL
+              } ${AL_PULSAR_BOTON}`}
+            >
+              {isProcessing && <Loader className="w-4 h-4 animate-spin" />}
+              {isProcessing
+                ? t('manageModal.processing')
+                : option === 'delete'
+                  ? t('manageModal.confirmDelete')
+                  : option === 'reactivate'
+                    ? t('manageModal.confirmReactivate')
+                    : t('manageModal.confirmDeactivate')}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </ModalShell>
+  );
+};
+
+export default ManageAccountModal;

@@ -1,0 +1,117 @@
+import { AL_PASAR } from '../ui/clasesDeComportamiento';
+import { Link } from 'react-router';
+import { useTranslation } from 'react-i18next';
+import { Check } from 'lucide-react';
+import Avatar from '../ui/Avatar';
+import FraseDeActividad, { NombreDePersona } from './FraseDeActividad';
+import { fraseCon, horaDeLaTarjeta, personaDe } from './textosDeActividad';
+import NombrePequeno from '../ui/NombrePequeno';
+
+/**
+ * FriendRequestCard - Una solicitud de amistad en Actividad (FE-1).
+ *
+ * Se acepta o se rechaza ahí mismo. Aceptada, la tarjeta se queda diciendo
+ * «Ahora sois amigos»; rechazada, la quita la página. Mientras se envía, los
+ * dos botones se desactivan para no mandar dos respuestas.
+ *
+ * @param {'pendiente'|'enviando'|'aceptada'} estado
+ */
+const FriendRequestCard = ({
+  solicitud,
+  autores,
+  estado,
+  onAceptar,
+  onRechazar,
+  ahora = new Date(),
+}) => {
+  const { t, i18n } = useTranslation(['feed', 'common']);
+  const persona = personaDe(solicitud.requesterId, autores, t);
+  const hora = horaDeLaTarjeta(solicitud.createdAt, ahora, t, i18n.language);
+  const enviando = estado === 'enviando';
+  const aceptada = estado === 'aceptada';
+
+  return (
+    <article
+      data-testid={`solicitud-${solicitud.friendshipId}`}
+      className={`flex gap-3 p-4 bg-tarjeta border rounded-tarjeta ${
+        solicitud.nueva ? 'border-tinta' : 'border-contorno'
+      }`}
+    >
+      {persona.enlace ? (
+        <Link
+          to={persona.enlace}
+          className="shrink-0"
+          aria-hidden="true"
+          tabIndex={-1}
+        >
+          <Avatar userId={solicitud.requesterId} size="md" />
+        </Link>
+      ) : (
+        <span className="shrink-0">
+          <Avatar userId={solicitud.requesterId} size="md" />
+        </span>
+      )}
+
+      <div className="min-w-0 flex-1">
+        {aceptada ? (
+          <p className="text-sm text-tinta break-words">
+            <NombreDePersona persona={persona} />
+            <span className="mt-0.5 flex items-center gap-1 text-exito">
+              <Check className="h-4 w-4" aria-hidden="true" />
+              {t('feed:requests.nowFriends')}
+            </span>
+          </p>
+        ) : (
+          <p className="text-sm text-tinta break-words">
+            <FraseDeActividad
+              frase={fraseCon(t, 'feed:requests.wants', {}, { persona })}
+            />
+          </p>
+        )}
+
+        {/* Quien pide amistad se presenta con sus dos nombres (Agustín, 17 nov) */}
+        <NombrePequeno texto={persona.pequeno} />
+        <p className="mt-1 flex items-center gap-2 text-xs text-tinta-suave">
+          {hora && <span>{hora}</span>}
+          {solicitud.nueva && (
+            <span
+              data-testid="marca-nueva"
+              className="rounded-full bg-contraste px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none text-sobre-contraste"
+            >
+              {t('feed:new')}
+            </span>
+          )}
+        </p>
+
+        {!aceptada && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onAceptar}
+              disabled={enviando}
+              aria-label={t('feed:requests.acceptLabel', {
+                name: persona.nombre,
+              })}
+              className="inline-flex min-h-[40px] items-center justify-center rounded-boton bg-contraste px-4 text-sm font-medium text-sobre-contraste disabled:opacity-60 transition-opacity hover:opacity-90"
+            >
+              {t('feed:requests.accept')}
+            </button>
+            <button
+              type="button"
+              onClick={onRechazar}
+              disabled={enviando}
+              aria-label={t('feed:requests.rejectLabel', {
+                name: persona.nombre,
+              })}
+              className={`inline-flex min-h-[40px] items-center justify-center rounded-boton border border-linea bg-tarjeta px-4 text-sm font-medium text-tinta disabled:opacity-60 ${AL_PASAR}`}
+            >
+              {t('feed:requests.reject')}
+            </button>
+          </div>
+        )}
+      </div>
+    </article>
+  );
+};
+
+export default FriendRequestCard;

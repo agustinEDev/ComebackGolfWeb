@@ -1,0 +1,182 @@
+import { siViene } from '../../../utils/campoSiViene';
+import { CompetitionStatusEnum } from '../../../domain/value_objects/CompetitionStatus';
+import MatchStatus from '../../../domain/value_objects/MatchStatus';
+import { SessionType } from '../../../domain/value_objects/SessionType';
+
+const SESSION_ORDER = {
+  [SessionType.MORNING]: 0,
+  [SessionType.AFTERNOON]: 1,
+  [SessionType.EVENING]: 2,
+};
+const COMPETICIONES_CON_PARTIDOS = [
+  CompetitionStatusEnum.CLOSED,
+  CompetitionStatusEnum.IN_PROGRESS,
+];
+
+/**
+ * Use Case: Get Upcoming Matches
+ *
+ * Los partidos que el jugador tiene por delante, de todas sus competiciones en
+ * curso, del más próximo al más lejano.
+ *
+ * No hay endpoint que responda esto: hay que preguntar el calendario de cada
+ * competición y quedarse con los partidos donde aparece el jugador. Por eso
+ * vive en un caso de uso y no repetido en cada pantalla — antes lo calculaban
+ * por su cuenta la página de próximos partidos y la tarjeta de acciones
+ * pendientes, con criterios que podían separarse sin que nadie se enterara.
+ *
+ * Una competición que falle no tumba al resto: se descarta y se devuelve lo
+ * que sí se pudo leer. Es un resumen, y media lista es más útil que ninguna.
+ */
+class GetUpcomingMatchesUseCase {
+  #listUserCompetitionsUseCase;
+  #getScheduleUseCase;
+  #listEnrollmentsUseCase;
+
+  constructor({
+    listUserCompetitionsUseCase,
+    getScheduleUseCase,
+    listEnrollmentsUseCase,
+  }) {
+    if (
+      !listUserCompetitionsUseCase ||
+      !getScheduleUseCase ||
+      !listEnrollmentsUseCase
+    ) {
+      throw Object.assign(
+        new Error(
+          'GetUpcomingMatchesUseCase requires listUserCompetitionsUseCase, getScheduleUseCase and listEnrollmentsUseCase',
+        ),
+        { mensajeTecnico: true },
+      );
+    }
+    this.#listUserCompetitionsUseCase = listUserCompetitionsUseCase;
+    this.#getScheduleUseCase = getScheduleUseCase;
+    this.#listEnrollmentsUseCase = listEnrollmentsUseCase;
+  }
+
+  /**
+   * @param {string} userId
+   * @param {Array} [competitions] - Competiciones ya cargadas, para no pedirlas otra vez
+   */
+  async execute(userId, competitions = null) {
+    return (await this.executeWithCompleteness(userId, competitions)).matches;
+  }
+
+  /**
+   * Lo mismo, diciendo además si la lista está entera (FE #615). Media lista
+   * sirve para enseñarla, pero quien la guarda para el campo no puede pisar con
+   * ella una completa: faltaría justo el partido de la competición que falló.
+   *
+   * @returns {Promise<{matches: Array, complete: boolean}>}
+   */
+  async executeWithCompleteness(userId, competitions = null) {
+    if (!userId) {
+      throw Object.assign(
+        new Error('GetUpcomingMatchesUseCase requires a userId'),
+        { mensajeTecnico: true },
+      );
+    }
+
+    const all =
+      competitions ?? (await this.#listUserCompetitionsUseCase.execute(userId));
+    // Las que se juegan y las cerradas: en una cerrada los partidos ya están
+    // hechos, y es el primer golpe a su hora lo que la pone en juego
+    // (BE #375). Sin ella en la lista, nadie tendría «Anotar» que pulsar
+    const active = (all || []).filter((competition) =>
+      COMPETICIONES_CON_PARTIDOS.includes(competition.status),
+    );
+    if (active.length === 0) {
+      return { matches: [], complete: true };
+    }
+
+    const results = await Promise.allSettled(
+      active.map((competition) => this.#matchesOf(competition, userId)),
+    );
+
+    return {
+      matches: results
+        .filter((result) => result.status === 'fulfilled')
+        .flatMap((result) => result.value)
+        .sort(this.#byWhenItIsPlayed),
+      complete: results.every((result) => result.status === 'fulfilled'),
+    };
+  }
+
+  async #matchesOf(competition, userId) {
+    const [schedule, enrollments] = await Promise.all([
+      this.#getScheduleUseCase.execute(competition.id),
+      this.#listEnrollmentsUseCase.execute(competition.id),
+    ]);
+
+    // Los partidos traen ids de usuario; los nombres viven en las inscripciones
+    const namesByUserId = new Map();
+    (enrollments || []).forEach((enrollment) => {
+      if (enrollment.userId && enrollment.userName) {
+        namesByUserId.set(enrollment.userId, enrollment.userName);
+      }
+    });
+    const nameOf = (player) =>
+      namesByUserId.get(player.userId) || player.userId;
+
+    const upcoming = [];
+    (schedule?.rounds || []).forEach((round) => {
+      (round.matches || []).forEach((match) => {
+        const teamA = match.teamAPlayers || [];
+        const teamB = match.teamBPlayers || [];
+        const playsInTeamA = teamA.some((player) => player.userId === userId);
+        const playsInTeamB = teamB.some((player) => player.userId === userId);
+
+        if (
+          (!playsInTeamA && !playsInTeamB) ||
+          !MatchStatus.isPlayable(match.status)
+        ) {
+          return;
+        }
+
+        const own = playsInTeamA ? teamA : teamB;
+        const rival = playsInTeamA ? teamB : teamA;
+
+        upcoming.push({
+          ...match,
+          competitionId: competition.id,
+          competitionName: competition.name,
+          // Para la etiqueta de su tarjeta (FE #845)
+          tournamentType: competition.tournamentType,
+          roundDate: round.roundDate,
+          // La hora a la que abre la anotación la manda el servidor en la RONDA
+          // (BE #305) y quien decide si se ofrece anotar mira el PARTIDO, así
+          // que viaja con él. Si la ronda no la trae —servidor anterior— no se
+          // inventa: ausente y vacía significan cosas distintas
+          ...siViene(round, 'scoringOpensAt'),
+          sessionType: round.sessionType,
+          matchFormat: round.matchFormat,
+          golfCourseName: round.golfCourseName,
+          teamAPlayerNames: teamA.map(nameOf),
+          teamBPlayerNames: teamB.map(nameOf),
+          // Vistos desde quien pregunta, que es como se leen: uno juega con sus
+          // compañeros y contra sus rivales, no con "el equipo A"
+          partnerNames: own
+            .filter((player) => player.userId !== userId)
+            .map(nameOf),
+          opponentNames: rival.map(nameOf),
+        });
+      });
+    });
+
+    return upcoming;
+  }
+
+  #byWhenItIsPlayed(a, b) {
+    const byDate = (a.roundDate || '').localeCompare(b.roundDate || '');
+    if (byDate !== 0) {
+      return byDate;
+    }
+    // Mismo día: manda la sesión, que es lo único que ordena mañana y tarde
+    return (
+      (SESSION_ORDER[a.sessionType] ?? 0) - (SESSION_ORDER[b.sessionType] ?? 0)
+    );
+  }
+}
+
+export default GetUpcomingMatchesUseCase;

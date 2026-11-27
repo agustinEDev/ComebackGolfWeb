@@ -1,0 +1,315 @@
+import { AL_PASAR, COLOR_DE_LO_ELEGIDO } from '../ui/clasesDeComportamiento';
+import { useRef } from 'react';
+import GolfCourseSearchBox from '../golf_course/GolfCourseSearchBox';
+import FuenteRfeg from '../golf_course/FuenteRfeg';
+import BarrasDeTuGenero from './BarrasDeTuGenero';
+import {
+  FORMAT_CAPACITY,
+  FORMAT_LABEL_KEY,
+  FREE_PLAY_ALLOWANCE_OPTIONS,
+  MATCH_PLAY_ALLOWANCE_OPTIONS,
+  SCORING_FORMAT_LABEL_KEY,
+} from './createQuickMatchModalConstants';
+
+import { PlayModeType } from '../../domain/value_objects/HandicapSettings';
+import { QuickMatchMode } from '../../domain/value_objects/QuickMatchMode';
+
+// «¿A qué jugáis?»: los tres de match play y los dos de stroke play, en una
+// sola pregunta (FE #1025). Conservan los `data-testid` de antes
+const OPCIONES = [
+  ...Object.keys(FORMAT_CAPACITY).map((formato) => ({
+    modo: QuickMatchMode.MATCH_PLAY,
+    formato,
+    testId: `format-option-${formato}`,
+    etiqueta: FORMAT_LABEL_KEY[formato],
+  })),
+  ...Object.keys(SCORING_FORMAT_LABEL_KEY).map((formato) => ({
+    modo: QuickMatchMode.FREE_PLAY,
+    formato,
+    testId: `scoring-format-option-${formato}`,
+    etiqueta: SCORING_FORMAT_LABEL_KEY[formato],
+  })),
+];
+
+/**
+ * Paso 1 del asistente (FE #1025, tabla aprobada el 3 nov 2026): el campo y
+ * tu barra arriba, luego a qué jugáis, y lo que casi nunca se toca (nombre,
+ * scratch, %) en «Más opciones», plegado. Si algo de ahí no es lo de por
+ * defecto, se dice en su cabecera para que no quede escondido.
+ */
+const CourseStep = ({
+  t,
+  matchName,
+  nombreAMano = false,
+  onMatchNameChange,
+  mode,
+  onModeChange,
+  isFreePlay,
+  scoringFormat,
+  onScoringFormatChange,
+  matchFormat,
+  onMatchFormatChange,
+  countryCode,
+  selectedCourse,
+  onCourseSelect,
+  onRequestNewCourse,
+  courseTees,
+  courseFromRfeg = false,
+  creatorTeeKey,
+  onCreatorTeeKeyChange,
+  generoDeQuienCrea = null,
+  allowancePercentage,
+  allowanceAMano = false,
+  porcentajeCopiado = null,
+  onAllowanceChange,
+  playMode = PlayModeType.HANDICAP,
+  onPlayModeChange,
+  isProcessing,
+  teesLoading,
+  onClose,
+  onNext,
+}) => {
+  const masOpciones = useRef(null);
+  // Un % copiado al repetir que no está entre los botones sale como uno más,
+  // marcado, y solo en la modalidad en que se copió (pasada del Kind y
+  // revisiones, 4 nov 2026). Viene del borrador: el paso se vuelve a montar
+  const base = isFreePlay
+    ? FREE_PLAY_ALLOWANCE_OPTIONS
+    : MATCH_PLAY_ALLOWANCE_OPTIONS;
+  const opcionesDePorcentaje =
+    porcentajeCopiado?.libre === isFreePlay &&
+    !base.includes(porcentajeCopiado.pct)
+      ? [...base, porcentajeCopiado.pct].sort((a, b) => a - b)
+      : base;
+  const elegida = (op) =>
+    op.modo === mode &&
+    (isFreePlay ? scoringFormat : matchFormat) === op.formato;
+  const elige = (op) => {
+    // Al cruzar entre match play y stroke play, el % a mano vuelve al de por
+    // defecto (sus opciones son otras): se abre «Más opciones» para que se vea
+    // (Agustín, 4 nov 2026)
+    if (op.modo !== mode && allowanceAMano && masOpciones.current)
+      masOpciones.current.open = true;
+    if (op.modo !== mode) onModeChange(op.modo);
+    if (op.modo === QuickMatchMode.FREE_PLAY) onScoringFormatChange(op.formato);
+    else onMatchFormatChange(op.formato);
+  };
+  // Lo que no es lo de por defecto, a la vista aunque esté plegado
+  const fueraDeLoNormal = [
+    nombreAMano ? matchName.trim() : null,
+    playMode === PlayModeType.SCRATCH
+      ? t('create.course.playModeScratch')
+      : null,
+    playMode !== PlayModeType.SCRATCH && allowanceAMano
+      ? `${allowancePercentage}%`
+      : null,
+  ].filter(Boolean);
+
+  return (
+    <div className="p-4 space-y-4">
+      <div>
+        <label className="block text-sm font-medium text-tinta mb-1">
+          {t('create.course.courseLabel')}
+        </label>
+        {/* En una partida rápida estás pisando el campo: la cercanía busca en
+          cualquier país (allowOtherCountries) */}
+        <GolfCourseSearchBox
+          countryCode={countryCode}
+          selectedCourse={selectedCourse}
+          onCourseSelect={onCourseSelect}
+          onRequestNewCourse={onRequestNewCourse}
+          allowOtherCountries
+        />
+        {courseFromRfeg && <FuenteRfeg className="mt-1" />}
+      </div>
+
+      {courseTees.length > 0 && (
+        <div>
+          <p className="block text-sm font-medium text-tinta mb-1">
+            {t('create.course.yourTeeLabel')}
+          </p>
+          <BarrasDeTuGenero
+            t={t}
+            courseTees={courseTees}
+            genero={generoDeQuienCrea}
+            value={creatorTeeKey}
+            onChange={onCreatorTeeKeyChange}
+          />
+        </div>
+      )}
+
+      <div>
+        <p className="block text-sm font-medium text-tinta mb-1">
+          {t('create.course.queJugais')}
+        </p>
+        <div
+          className="grid grid-cols-3 gap-2"
+          role="group"
+          aria-label={t('create.course.queJugais')}
+          aria-describedby="quick-match-que-jugais-detalle"
+        >
+          {OPCIONES.map((op) => (
+            <button
+              key={op.testId}
+              type="button"
+              onClick={() => elige(op)}
+              aria-pressed={elegida(op)}
+              data-testid={op.testId}
+              className={`px-2 py-2 rounded-lg border text-sm transition-colors ${
+                elegida(op)
+                  ? `${COLOR_DE_LO_ELEGIDO} font-medium`
+                  : 'border-linea text-tinta'
+              }`}
+            >
+              {t(`create.course.corto.${op.formato}`)}
+            </button>
+          ))}
+        </div>
+        <p
+          id="quick-match-que-jugais-detalle"
+          className="mt-1 text-xs text-tinta-suave"
+        >
+          {t(
+            `create.course.${OPCIONES.find(elegida)?.etiqueta ?? FORMAT_LABEL_KEY.SINGLES}`,
+          )}
+        </p>
+      </div>
+
+      <details
+        ref={masOpciones}
+        className="rounded-lg border border-linea"
+        data-testid="quick-match-mas-opciones"
+      >
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-tinta">
+          {t('create.course.masOpciones')}
+          {fueraDeLoNormal.length > 0 && (
+            <span className="font-normal text-tinta-suave wrap-anywhere">
+              {' '}
+              · {fueraDeLoNormal.join(' · ')}
+            </span>
+          )}
+        </summary>
+        <div className="px-3 pb-3 space-y-4">
+          <div>
+            <label
+              htmlFor="quick-match-name"
+              className="block text-sm font-medium text-tinta mb-1"
+            >
+              {t('create.course.nameLabel')}
+            </label>
+            <input
+              id="quick-match-name"
+              type="text"
+              value={matchName}
+              onChange={(e) => onMatchNameChange(e.target.value)}
+              placeholder={t('create.course.namePlaceholder')}
+              maxLength={100}
+              className="bg-fondo w-full px-3 py-2 border border-borde rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-tinta"
+              data-testid="quick-match-name-input"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-tinta mb-1">
+              {t('create.course.playModeLabel')}
+            </label>
+            <div
+              className="flex gap-2"
+              role="group"
+              aria-label={t('create.course.playModeLabel')}
+            >
+              {[PlayModeType.HANDICAP, PlayModeType.SCRATCH].map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onPlayModeChange(mode)}
+                  aria-pressed={playMode === mode}
+                  data-testid={`quick-match-play-mode-option-${mode}`}
+                  className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                    playMode === mode
+                      ? COLOR_DE_LO_ELEGIDO
+                      : 'border-linea text-tinta'
+                  }`}
+                >
+                  {mode === PlayModeType.SCRATCH
+                    ? t('create.course.playModeScratch')
+                    : t('create.course.playModeHandicap')}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-tinta-suave">
+              {playMode === PlayModeType.SCRATCH
+                ? t('create.course.playModeScratchHint')
+                : t('create.course.playModeHandicapHint')}
+            </p>
+          </div>
+
+          {/* El allowance es el porcentaje del hándicap que se aplica: en scratch no
+        se aplica ninguno, así que el selector se deshabilita en vez de
+        desaparecer, para que se vea que existe y por qué no está disponible. */}
+          <div>
+            <label className="block text-sm font-medium text-tinta mb-1">
+              {t('create.course.allowanceLabel')}
+            </label>
+            <div
+              className="flex gap-2"
+              role="group"
+              aria-label={t('create.course.allowanceLabel')}
+            >
+              {opcionesDePorcentaje.map((pct) => (
+                <button
+                  key={pct}
+                  type="button"
+                  onClick={() => onAllowanceChange(pct)}
+                  disabled={playMode === PlayModeType.SCRATCH}
+                  // El mismo guard que el estilo: si no, el lector anuncia "100%,
+                  // pulsado" sobre un botón que se ve apagado y sin seleccionar
+                  aria-pressed={
+                    allowancePercentage === pct &&
+                    playMode !== PlayModeType.SCRATCH
+                  }
+                  data-testid={`quick-match-allowance-option-${pct}`}
+                  className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    allowancePercentage === pct &&
+                    playMode !== PlayModeType.SCRATCH
+                      ? COLOR_DE_LO_ELEGIDO
+                      : 'border-linea text-tinta'
+                  }`}
+                >
+                  {pct}%
+                </button>
+              ))}
+            </div>
+            {playMode === PlayModeType.SCRATCH && (
+              <p className="mt-1 text-xs text-tinta-suave">
+                {t('create.course.allowanceNotApplied')}
+              </p>
+            )}
+          </div>
+        </div>
+      </details>
+
+      <div className="flex justify-end gap-3 pt-2">
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={isProcessing}
+          className={`px-4 py-2 text-sm font-medium text-tinta border-[1.5px] border-tinta bg-fondo rounded-boton disabled:opacity-50 ${AL_PASAR}`}
+        >
+          {t('create.cancel')}
+        </button>
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={isProcessing || teesLoading}
+          data-testid="quick-match-course-next"
+          className="px-4 py-2 text-sm font-medium text-sobre-contraste bg-contraste rounded-boton disabled:opacity-50 transition-opacity hover:opacity-90"
+        >
+          {isProcessing ? t('create.course.creating') : t('create.course.next')}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default CourseStep;

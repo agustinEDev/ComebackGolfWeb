@@ -1,0 +1,298 @@
+import MatchPlayStrokeAllocator from './MatchPlayStrokeAllocator';
+
+/**
+ * Domain Service: StablefordCalculator
+ *
+ * Puntos Stableford y totales de golpes de una partida rápida. Puro, sin IO.
+ *
+ * NO reparte golpes: recibe el reparto ya resuelto (`allocation`), que sale de
+ * `MatchPlayStrokeAllocator` o viene del backend. Esta clase llegó a tener su
+ * propia copia del reparto y las dos acabaron discrepando, así que ahora solo
+ * cuenta puntos con los golpes que le dan.
+ *
+ * El par sí lo resuelve: cada jugador puntúa contra la tarjeta de SU barra
+ * cuando se le pasan las salidas del campo. `holes` es solo la tarjeta de la
+ * primera barra, y en 25 de los 800 campos federados el par cambia entre
+ * barras. El backend ya puntúa así (`GolfCourse.hole_card_for`), así que
+ * contarlo aquí contra el campo separaba la pantalla del historial. Se resuelve
+ * en esta clase, y no en cada llamante, para que las tres superficies que
+ * puntúan —tarjeta, clasificación y vuelta propia— no puedan volver a
+ * separarse. Ver FE #417.
+ *
+ * Tabla de puntos por hoyo: max(0, 2 - (neto - par)).
+ */
+
+// Doble bogey neto: lo que el WHS (Regla 3.1) manda anotar en un hoyo que no se
+// termina, y con lo que se cuenta la raya. El backend lleva la misma constante
+// en `stableford_calculator.py`; si una se mueve sin la otra, la clasificación
+// de la pantalla deja de cuadrar con la del historial.
+const NET_DOUBLE_BOGEY_OVER_PAR = 2;
+
+// El desempate de la clasificación (H): a igual resultado, delante el de menos
+// hándicap índice EXACTO, el que tenía en la partida. Sin hándicap cuenta como
+// 0. Lo mismo que hace el backend al publicar el resultado
+// (`PublishQuickMatchResultUseCase`); la paridad la fija
+// `StablefordCalculator.parity.test.js`.
+const handicapDeDesempate = (row) => row.handicap ?? 0;
+
+/**
+ * Ordena las filas y les pone su puesto. Solo comparten puesto quienes empatan
+ * en el resultado Y tienen exactamente el mismo hándicap; el siguiente salta
+ * los puestos compartidos (1, 1, 3), como en cualquier clasificación.
+ */
+const ordenaConPuestos = (rows, compareResultado) => {
+  const compara = (a, b) =>
+    compareResultado(a, b) || handicapDeDesempate(a) - handicapDeDesempate(b);
+  // Quien no ha anotado ningún hoyo no tiene resultado: va al final, en el
+  // orden en que llega, sin puesto y sin empatar con nadie
+  const conHoyos = rows.filter((row) => row.holesPlayed > 0).sort(compara);
+  const sinHoyos = rows.filter((row) => !(row.holesPlayed > 0));
+  conHoyos.forEach((row, i) => {
+    const anterior = conHoyos[i - 1];
+    row.position =
+      anterior && compara(anterior, row) === 0 ? anterior.position : i + 1;
+  });
+  conHoyos.forEach((row) => {
+    row.tied =
+      conHoyos.filter((otra) => otra.position === row.position).length > 1;
+  });
+  sinHoyos.forEach((row) => {
+    row.position = null;
+    row.tied = false;
+  });
+  return [...conHoyos, ...sinHoyos];
+};
+
+class StablefordCalculator {
+  /**
+   * Golpes que recibe un participante en un hoyo, según el reparto ya resuelto.
+   *
+   * El reparto lo hace `MatchPlayStrokeAllocator` (o lo manda el backend) y
+   * llega aquí hecho. Antes esta clase lo recalculaba por su cuenta a partir
+   * del hándicap, y esa segunda copia acabó discrepando de la de la tarjeta:
+   * mismo jugador, misma pantalla, dos totales Stableford distintos.
+   *
+   * @param {Object<string, {strokesByHole: Object<number, number>}>} allocation
+   * @param {string} participantId
+   * @param {number} holeNumber
+   * @returns {number} Con signo: negativo si cede golpes (hándicap plus)
+   */
+  static strokesOnHole(allocation, participantId, holeNumber) {
+    return allocation?.[participantId]?.strokesByHole?.[holeNumber] ?? 0;
+  }
+
+  /**
+   * Golpes con los que cuenta un hoyo que no se terminó: la raya.
+   *
+   * `par + 2 + golpes recibidos`, que es lo que el WHS manda anotar cuando el
+   * jugador recoge la bola. En Stableford sale exactamente el cero que vale
+   * recoger, y el resultado contra el par queda penalizado en vez de regalado.
+   *
+   * @param {number} par
+   * @param {number} strokesReceived
+   * @returns {number}
+   */
+  static netDoubleBogey(par, strokesReceived) {
+    return par + NET_DOUBLE_BOGEY_OVER_PAR + strokesReceived;
+  }
+
+  /**
+   * Stableford points scored on a single hole.
+   *
+   * @param {number|null} grossScore
+   * @param {number} par
+   * @param {number} strokesReceived
+   * @returns {number}
+   */
+  static holePoints(grossScore, par, strokesReceived) {
+    if (grossScore == null) return 0;
+    const netScore = grossScore - strokesReceived;
+    return Math.max(0, 2 - (netScore - par));
+  }
+
+  /**
+   * Aggregates Stableford points and gross strokes for one participant,
+   * over the holes that already have a recorded score.
+   *
+   * @param {{participantId: string, handicap: number|null, color?: string|null, teeGender?: string|null}} participant
+   * @param {Array<{holeNumber: number, par: number, strokeIndex: number}>} holes
+   * @param {Array<{holeNumber: number, participantId: string, score: number}>} holeScores
+   * @param {Object<string, {strokesByHole: Object<number, number>}>} allocation - Reparto ya
+   *   resuelto, de `MatchPlayStrokeAllocator.resolve`. Sin entrada para el participante se
+   *   puntúa a bruto, así que pasarle otra cosa (los tees, como pedía la firma vieja) no
+   *   falla: cuenta mal en silencio.
+   * @param {Array<Object>} [tees] - Salidas del campo. Con ellas se puntúa contra el par de
+   *   la barra del participante; sin ellas, contra `holes`, que es la tarjeta de la primera.
+   * @returns {{stablefordPoints: number, totalStrokes: number, netStrokes: number, parPlayed: number, holesPlayed: number}}
+   */
+  static computeParticipantTotals(
+    participant,
+    holes,
+    holeScores,
+    allocation = {},
+    tees = [],
+  ) {
+    let stablefordPoints = 0;
+    let totalStrokes = 0;
+    let netStrokes = 0;
+    let parPlayed = 0;
+    let holesPlayed = 0;
+
+    // Todo o nada, igual que `GolfCourse.hole_card_for` en el backend: con que
+    // la barra traiga tarjeta se usa entera. Completar hoyo a hoyo los huecos
+    // de una tarjeta parcial daría aquí un total que el historial no da. Ver
+    // BE #215.
+    const card = MatchPlayStrokeAllocator.holeCardFor(participant, holes, tees);
+
+    for (const hole of card) {
+      const entry = holeScores.find(
+        (hs) =>
+          hs.participantId === participant.participantId &&
+          hs.holeNumber === hole.holeNumber,
+      );
+      // Sin entrada, el hoyo está por jugar y no cuenta. Con entrada y sin
+      // número está RECOGIDO, que es un hoyo jugado: cuenta, y se carga a doble
+      // bogey neto. Los dos casos eran `score == null` y significan lo
+      // contrario, así que la diferencia está en si hay entrada.
+      if (!entry) continue;
+
+      const strokesReceived = StablefordCalculator.strokesOnHole(
+        allocation,
+        participant.participantId,
+        hole.holeNumber,
+      );
+
+      if (entry.score == null) {
+        // La raya no trae golpes: vale su doble bogey NETO, `par + 2 + golpes
+        // recibidos`, también en el bruto (Agustín, 23 oct 2026: «siempre una
+        // raya es par + golpes recibidos + 2»). El neto queda en `par + 2`, que
+        // es lo que la deja en cero puntos: recoger no puntúa. El bruto pasa
+        // así a depender del reparto, y se aceptó.
+        totalStrokes += StablefordCalculator.netDoubleBogey(
+          hole.par,
+          strokesReceived,
+        );
+        netStrokes += hole.par + NET_DOUBLE_BOGEY_OVER_PAR;
+        parPlayed += hole.par;
+        holesPlayed += 1;
+        continue;
+      }
+
+      stablefordPoints += StablefordCalculator.holePoints(
+        entry.score,
+        hole.par,
+        strokesReceived,
+      );
+      totalStrokes += entry.score;
+      netStrokes += entry.score - strokesReceived;
+      parPlayed += hole.par;
+      holesPlayed += 1;
+    }
+
+    return {
+      stablefordPoints,
+      totalStrokes,
+      netStrokes,
+      parPlayed,
+      holesPlayed,
+    };
+  }
+
+  /**
+   * Formats a net-to-par score in standard golf notation: "PAR" when even,
+   * otherwise a signed number (e.g. "-3", "+4").
+   *
+   * @param {number} toPar - netStrokes - parPlayed
+   * @returns {string}
+   */
+  static formatToPar(toPar) {
+    if (toPar === 0) return 'PAR';
+    return toPar > 0 ? `+${toPar}` : `${toPar}`;
+  }
+
+  /**
+   * Ranks participants by Stableford points (desc), tie-broken by the lower
+   * exact handicap index (none counts as 0). Each row carries its `position`
+   * and `tied`: only the same points AND the same exact index share a place.
+   *
+   * @param {Array<{participantId: string, name: string, handicap: number|null, team?: string|null}>} participants
+   * @param {Array<{holeNumber: number, par: number, strokeIndex: number}>} holes
+   * @param {Array<{holeNumber: number, participantId: string, score: number}>} holeScores
+   * @param {Object<string, {strokesByHole: Object<number, number>}>} allocation
+   * @returns {Array<{participantId: string, name: string, stablefordPoints: number, totalStrokes: number, holesPlayed: number}>}
+   */
+  static rankParticipants(
+    participants,
+    holes,
+    holeScores,
+    allocation = {},
+    tees = [],
+  ) {
+    const rows = participants.map((participant) => ({
+      participantId: participant.participantId,
+      name: participant.name,
+      team: participant.team,
+      handicap: participant.handicap ?? null,
+      ...StablefordCalculator.computeParticipantTotals(
+        participant,
+        holes,
+        holeScores,
+        allocation,
+        tees,
+      ),
+    }));
+
+    return ordenaConPuestos(
+      rows,
+      (a, b) => b.stablefordPoints - a.stablefordPoints,
+    );
+  }
+
+  /**
+   * Ranks participants by score-to-par (net strokes minus par played, asc,
+   * fewer is better) for Medal play — not raw net strokes, so participants
+   * with a partial round (fewer holes played) still rank fairly against
+   * those further along. Participants with no recorded score sink to the
+   * bottom. Ties go to the lower exact handicap index, with `position` and
+   * `tied` as in `rankParticipants`.
+   *
+   * @param {Array<{participantId: string, name: string, handicap: number|null, team?: string|null}>} participants
+   * @param {Array<{holeNumber: number, par: number, strokeIndex: number}>} holes
+   * @param {Array<{holeNumber: number, participantId: string, score: number}>} holeScores
+   * @param {Object<string, {strokesByHole: Object<number, number>}>} allocation
+   * @returns {Array<{participantId: string, name: string, stablefordPoints: number, totalStrokes: number, netStrokes: number, parPlayed: number, holesPlayed: number}>}
+   */
+  static rankParticipantsByMedal(
+    participants,
+    holes,
+    holeScores,
+    allocation = {},
+    tees = [],
+  ) {
+    const rows = participants.map((participant) => ({
+      participantId: participant.participantId,
+      name: participant.name,
+      team: participant.team,
+      handicap: participant.handicap ?? null,
+      ...StablefordCalculator.computeParticipantTotals(
+        participant,
+        holes,
+        holeScores,
+        allocation,
+        tees,
+      ),
+    }));
+
+    return ordenaConPuestos(rows, (a, b) => {
+      if (a.holesPlayed === 0 && b.holesPlayed === 0) return 0;
+      if (a.holesPlayed === 0) return 1;
+      if (b.holesPlayed === 0) return -1;
+      // Score-to-par (net strokes minus par for the holes actually played),
+      // not raw net strokes: fair when participants have played a different
+      // number of holes (partial rounds), matching standard golf leaderboards.
+      return a.netStrokes - a.parPlayed - (b.netStrokes - b.parPlayed);
+    });
+  }
+}
+
+export default StablefordCalculator;

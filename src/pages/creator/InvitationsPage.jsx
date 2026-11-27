@@ -1,0 +1,771 @@
+import { useState, useEffect, useRef } from 'react';
+import { Navigate, useNavigate, useParams } from 'react-router';
+import { ArrowLeft, Plus, Mail } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import customToast from '../../utils/toast';
+import HeaderAuth from '../../components/layout/HeaderAuth';
+import { useAuth } from '../../hooks/useAuth';
+import { useCorreoVerificado } from '../../hooks/useCorreoVerificado';
+import AvisoVerificaParaLlegarAOtros from '../../components/auth/AvisoVerificaParaLlegarAOtros';
+import { useCargaCancelableEffect } from '../../hooks/useCargaCancelableEffect';
+import { useUserRoles } from '../../hooks/useUserRoles';
+import InvitationCard from '../../components/invitation/InvitationCard';
+import SendInvitationModal from '../../components/invitation/SendInvitationModal';
+import ConfirmModal from '../../components/modals/ConfirmModal';
+import {
+  cancelInvitationUseCase,
+  getCompetitionDetailUseCase,
+  listCompetitionInvitationsUseCase,
+  listEnrollmentsUseCase,
+  listFriendsUseCase,
+  searchUsersUseCase,
+  sendInvitationByEmailUseCase,
+  sendInvitationUseCase,
+} from '../../composition';
+import BlockLoader from '../../components/ui/BlockLoader';
+import { PANTALLA_MENOS_BARRA_INFERIOR } from '../../utils/barraInferior';
+import { quienEsElInvitado } from '../../utils/quienEsElInvitado';
+import { CompetitionStatusEnum } from '../../domain/value_objects/CompetitionStatus';
+import EnrollmentStatus from '../../domain/value_objects/EnrollmentStatus';
+import InvitationStatus from '../../domain/value_objects/InvitationStatus';
+import { mensajeDelError } from '../../utils/mensajeDelError';
+import { registraElFallo } from '../../utils/registraElFallo';
+import { ESTADOS_DEL_FILTRO } from '../../components/invitation/estadosDelFiltro';
+
+// Ni `/friends/me` ni el listado de invitaciones dan más de 100 filas por
+// página. Pedir una sola dejaba fuera al amigo 101 y a la invitación pendiente
+// 101, y una pendiente que no se ve es una invitación que se manda otra vez
+const POR_PAGINA = 100;
+
+// Las que se pueden volver a mandar (release social 2): ya no esperan respuesta
+const REINVITABLES = new Set([
+  InvitationStatus.DECLINED,
+  InvitationStatus.EXPIRED,
+  InvitationStatus.CANCELLED,
+  InvitationStatus.NO_ROOM,
+]);
+// Una red por si el total promete más de lo que el servidor acaba dando: sin
+// ella, un `total_count` equivocado deja el bucle dando vueltas
+const TOPE_DE_PAGINAS = 20;
+
+/**
+ * Recorre las páginas de un listado hasta tenerlo entero.
+ *
+ * @param {(page: number) => Promise<Object>} pideLaPagina
+ * @param {(res: Object) => Array} sacaLasFilas
+ * @returns {Promise<Array>}
+ */
+const todasLasPaginas = async (pideLaPagina, sacaLasFilas) => {
+  const filas = [];
+  for (let pagina = 1; pagina <= TOPE_DE_PAGINAS; pagina++) {
+    const respuesta = await pideLaPagina(pagina);
+    const lote = sacaLasFilas(respuesta);
+    filas.push(...lote);
+    // Una página incompleta ya es la última, y el total manda sobre el resto
+    if (
+      lote.length < POR_PAGINA ||
+      filas.length >= (respuesta?.totalCount ?? filas.length)
+    )
+      break;
+  }
+  return filas;
+};
+
+// Las de la lista con el filtro elegido. «En lista de espera» se lee entera y
+// sin estado y se elige aquí (15 nov 2026): el servidor de antes no conoce
+// ON_HOLD, contesta 400 y la pantalla echaría al organizador
+const lasDeLaPantalla = (competitionId, statusFilter) => {
+  if (statusFilter !== InvitationStatus.ON_HOLD)
+    return listCompetitionInvitationsUseCase.execute(
+      competitionId,
+      statusFilter ? { status: statusFilter } : {},
+    );
+  return todasLasPaginas(
+    (page) =>
+      listCompetitionInvitationsUseCase.execute(competitionId, {
+        limit: POR_PAGINA,
+        page,
+      }),
+    (res) => res.invitations ?? [],
+  ).then((lista) => {
+    const enEspera = lista.filter(
+      (inv) => inv.status === InvitationStatus.ON_HOLD,
+    );
+    return { invitations: enEspera, totalCount: enEspera.length };
+  });
+};
+
+// Lo que pinta la pantalla: la competición y sus invitaciones con el filtro
+// elegido
+const pedirLaPantalla = (competitionId, statusFilter) =>
+  Promise.all([
+    getCompetitionDetailUseCase.execute(competitionId),
+    lasDeLaPantalla(competitionId, statusFilter),
+  ]);
+
+// Quién está dentro: solo APPROVED. Sin filtro vienen también REQUESTED,
+// REJECTED, CANCELLED e INVITED, y quien se retiró o fue rechazado SÍ se puede
+// volver a invitar. Marcarlos habría bloqueado a quien el backend acepta
+const idsDeLosInscritos = (competitionId) =>
+  listEnrollmentsUseCase
+    .execute(competitionId, { status: EnrollmentStatus.APPROVED })
+    .then((res) => {
+      const inscripciones = Array.isArray(res) ? res : (res?.enrollments ?? []);
+      return inscripciones.map((e) => e.userId ?? e.user_id).filter(Boolean);
+    });
+
+// Las que siguen vivas: pendientes y en lista de espera (15 nov 2026). A quien
+// ya tiene una de las dos no se le ofrece otra: el servidor la rechazaría.
+// Enteras y sin el filtro de la pantalla (`invitations` está filtrada por lo
+// que el creador haya elegido arriba y paginada), y en UNA lectura sin estado:
+// el servidor de antes no conoce ON_HOLD y contestaría 400 si se le pidiera
+const VIVAS = new Set([InvitationStatus.PENDING, InvitationStatus.ON_HOLD]);
+const lasPendientes = (competitionId) =>
+  todasLasPaginas(
+    (page) =>
+      listCompetitionInvitationsUseCase.execute(competitionId, {
+        limit: POR_PAGINA,
+        page,
+      }),
+    (res) => res.invitations ?? [],
+  ).then((lista) => lista.filter((inv) => VIVAS.has(inv.status)));
+
+// A quién va una invitación: por su usuario y por su correo, los que traiga
+const clavesDe = (invitation) =>
+  [
+    invitation.inviteeUserId && `u:${invitation.inviteeUserId}`,
+    invitation.inviteeEmail && `c:${invitation.inviteeEmail.toLowerCase()}`,
+  ].filter(Boolean);
+
+// Solo se invita con la inscripción por abrir o abierta: es lo que acepta el
+// servidor (#710). Cerrada, en juego o terminada, no
+const SE_PUEDE_INVITAR = new Set([
+  CompetitionStatusEnum.DRAFT,
+  CompetitionStatusEnum.ACTIVE,
+]);
+
+const InvitationsPage = () => {
+  const navigate = useNavigate();
+  const { id } = useParams();
+  const { t } = useTranslation('invitations');
+  const { user, loading: isLoadingUser } = useAuth();
+  const {
+    isAdmin,
+    isCreator: hasCreatorRole,
+    isLoading: isLoadingRoles,
+    error: falloAlPedirLosPermisos,
+    refetch: volverAPedirLosPermisos,
+  } = useUserRoles(id, user?.id);
+
+  const [competition, setCompetition] = useState(null);
+  const [invitations, setInvitations] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
+  // Sin el correo verificado no se invita (B-17): el aviso, antes de llamar a la API, o si
+  // la API lo dice (la copia del usuario podía estar desfasada)
+  const [faltaVerificar, setFaltaVerificar] = useState(false);
+  const { sinVerificar: copiaSinVerificar, confirma } = useCorreoVerificado();
+  const sinVerificar = copiaSinVerificar || faltaVerificar;
+  const [statusFilter, setStatusFilter] = useState('');
+  const [showSendModal, setShowSendModal] = useState(false);
+  // La invitación que se va a retirar, a la espera de confirmarlo (FE #724)
+  const [retirando, setRetirando] = useState(null);
+  const [retirandoEnCurso, setRetirandoEnCurso] = useState(false);
+  // A quién no se le ofrece volver a invitar (release social 2): ya inscritos y
+  // correos con otra pendiente. Sin saberlo, a nadie: el servidor lo rechazaría
+  // De qué competición es (`de`): al cambiar de una a otra no vale la anterior
+  const [situacion, setSituacion] = useState({
+    de: null,
+    sabida: false,
+    inscritos: new Set(),
+    pendientes: new Set(),
+  });
+  // Las mandadas desde aquí: una lectura de antes del envío no las borra (/code-review)
+  // Por competición: las de otra no cuentan aquí
+  const enviadasRef = useRef(new Map());
+  const enviadasAqui = () => enviadasRef.current.get(id) ?? new Set();
+  // Para la pestaña de amigos del modal (FE #409)
+  const [friends, setFriends] = useState([]);
+  const [idsInscritos, setIdsInscritos] = useState([]);
+  const [idsInvitados, setIdsInvitados] = useState([]);
+  const [cargandoAmigos, setCargandoAmigos] = useState(false);
+  const [falloAlCargarAmigos, setFalloAlCargarAmigos] = useState(false);
+  const [falloAlComprobarSituacion, setFalloAlComprobarSituacion] =
+    useState(false);
+  const [falloAlCargar, setFalloAlCargar] = useState(false);
+
+  const canManage = isAdmin || hasCreatorRole;
+
+  // La carga de la pantalla, con useCargaCancelableEffect: al cambiar el filtro,
+  // al volver a pedirla o al salir, la anterior ya no toca nada, ni su espera.
+  // Así, de dos refrescos tras invitar a dos seguidos, el que vuelve tarde no
+  // pisa al de después (CodeRabbit, #721). El aviso no es dependencia: la
+  // pantalla no se vuelve a pedir por cambiar de idioma
+  const { cargando: isLoading, recargar } = useCargaCancelableEffect(
+    () => pedirLaPantalla(id, statusFilter),
+    [user, id, statusFilter],
+    {
+      activa: Boolean(user),
+      alCargar: ([compData, invResult]) => {
+        setCompetition(compData);
+        setInvitations(invResult.invitations);
+        setTotalCount(invResult.totalCount);
+      },
+      alFallar: (error, { silenciosa }) => {
+        registraElFallo(
+          'InvitationsPage.error-loading-invitations',
+          'Error loading invitations:',
+          error,
+        );
+        // En silencio, lo que ya se veía sigue valiendo: echar de la pantalla
+        // con el modal abierto por un refresco fallido no es silencioso
+        // (revisión local)
+        if (silenciosa) return;
+        customToast.error(mensajeDelError(error, t('errors.failedToLoad')));
+        // Marcar y que decida el render, en vez de irse desde aquí: esta carga
+        // y la de los permisos van por su cuenta, y salir corriendo la primera
+        // se llevaba por delante el aviso de la otra (FE #656)
+        setFalloAlCargar(true);
+      },
+    },
+  );
+
+  // Tras invitar o retirar, el listado se pone al día en silencio: sin la
+  // pantalla de carga, que desmontaba el modal abierto (#710)
+  const recargarEnSilencio = () => recargar({ silenciosa: true });
+
+  // Los amigos y la situación de cada uno se piden APARTE, no dentro del
+  // `Promise.all` de arriba: colgarlos ahí haría que un fallo suyo tumbara la
+  // pantalla entera, cuando lo único que se pierde es saber a quién no ofrecer
+  // (FE #409)
+  useEffect(() => {
+    if (!user?.id || !showSendModal) return;
+
+    let vigente = true;
+    // En una microtarea y no aquí mismo: llamar a setState de forma síncrona
+    // dentro del efecto encadena renders, y el linter lo dice con razón
+    globalThis.queueMicrotask(() => {
+      if (!vigente) return;
+      setCargandoAmigos(true);
+      setFalloAlCargarAmigos(false);
+      setFalloAlComprobarSituacion(false);
+    });
+
+    const amigos = todasLasPaginas(
+      (page) =>
+        listFriendsUseCase.execute(user.id, { limit: POR_PAGINA, page }),
+      (res) => res.friendships ?? [],
+    );
+
+    const inscritos = idsDeLosInscritos(id);
+    // Con el desplegable en «Aceptadas» no habría ninguna pendiente en la
+    // lista, y se ofrecería invitar a quien ya está invitado
+    const invitados = lasPendientes(id).then((lista) =>
+      lista.map((inv) => inv.inviteeUserId).filter(Boolean),
+    );
+
+    // Las tres a la vez, pero la pestaña no se da por cargada hasta que están
+    // las tres: con solo los amigos, las filas salían pulsables durante un
+    // instante y se podía invitar a quien ya estaba dentro
+    Promise.allSettled([amigos, inscritos, invitados]).then(
+      ([losAmigos, losInscritos, losInvitados]) => {
+        if (!vigente) return;
+
+        // Vaciar la lista diría «no tienes amigos», que es afirmar lo que no se
+        // ha podido preguntar. Se distingue de no tenerlos
+        setFriends(losAmigos.status === 'fulfilled' ? losAmigos.value : []);
+        setFalloAlCargarAmigos(losAmigos.status === 'rejected');
+
+        setIdsInscritos(
+          losInscritos.status === 'fulfilled' ? losInscritos.value : [],
+        );
+        setIdsInvitados(
+          losInvitados.status === 'fulfilled' ? losInvitados.value : [],
+        );
+        // Si no se sabe quién está ya dentro, no se ofrece a nadie: darlo por
+        // vacío habilitaba justo a quien el servidor va a rechazar
+        setFalloAlComprobarSituacion(
+          losInscritos.status === 'rejected' ||
+            losInvitados.status === 'rejected',
+        );
+
+        setCargandoAmigos(false);
+      },
+    );
+
+    return () => {
+      vigente = false;
+    };
+  }, [user?.id, id, showSendModal]);
+
+  // Quién está dentro y a qué correos ya hay una pendiente, para «Volver a
+  // invitar» (release social 2). Se relee con la lista: tras invitar o retirar.
+  // Solo si hay alguna que volver a mandar: si no, son dos consultas de más
+  const hayReinvitables = invitations.some((inv) =>
+    REINVITABLES.has(inv.status),
+  );
+  useEffect(() => {
+    if (!user?.id || !hayReinvitables) return undefined;
+    let vigente = true;
+    // Las pendientes, por usuario y por correo: una invitación por usuario
+    // puede no traer el correo (/code-review)
+    const pendientes = lasPendientes(id).then((lista) =>
+      lista.flatMap(clavesDe),
+    );
+    Promise.allSettled([idsDeLosInscritos(id), pendientes]).then(
+      ([losInscritos, lasDeAhora]) => {
+        if (!vigente) return;
+        const sabida =
+          losInscritos.status === 'fulfilled' &&
+          lasDeAhora.status === 'fulfilled';
+        setSituacion({
+          de: id,
+          sabida,
+          inscritos: new Set(sabida ? losInscritos.value : []),
+          pendientes: new Set(
+            sabida
+              ? [...lasDeAhora.value, ...(enviadasRef.current.get(id) ?? [])]
+              : [],
+          ),
+        });
+      },
+    );
+    return () => {
+      vigente = false;
+    };
+  }, [user?.id, id, invitations, hayReinvitables]);
+
+  // Lo que se dice si no se pudo invitar, por id o por correo
+  const avisarDelEnvioFallido = (error) => {
+    if (error?.errorCode === 'EMAIL_NOT_VERIFIED') {
+      setFaltaVerificar(true);
+      setShowSendModal(false);
+      globalThis.scrollTo?.({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    // Sin plazas (FE #724): se dice así y se recarga, que la pantalla ya no
+    // ofrezca invitar. Antes del 409 genérico, que lo daba por duplicada
+    if (error?.errorCode === 'COMPETITION_FULL') {
+      customToast.error(t('errors.competitionFull'));
+      setShowSendModal(false);
+      recargarEnSilencio();
+      // Con los equipos formados no se invita (29-30 oct 2026): igual, que la
+      // pantalla deje de ofrecerlo
+    } else if (error?.errorCode === 'TEAMS_FORMED') {
+      customToast.error(t('errors.teamsFormedOrganizer'));
+      setShowSendModal(false);
+      recargarEnSilencio();
+      // Pasado el plazo de inscripción (15 nov 2026): su texto, no el genérico
+    } else if (error?.errorCode === 'ENROLLMENT_DEADLINE_PASSED') {
+      customToast.error(t('errors.enrollmentDeadlinePassed'));
+      setShowSendModal(false);
+      recargarEnSilencio();
+      // Con la sala de draft abierta no se invita (15 nov 2026): su texto, no
+      // «ya estaba invitado», que es lo que decía el 409 genérico
+      // Un enlace en el mensaje (SB-05): el modal ya lo frena; si el servidor
+      // lo ve antes, el mismo texto y el modal sigue abierto para corregirlo
+    } else if (error?.errorCode === 'MESSAGE_HAS_LINK') {
+      customToast.error(t('errors.messageHasLink'));
+    } else if (error?.errorCode === 'DRAFT_IN_PROGRESS') {
+      customToast.error(t('errors.draftInProgress'));
+      // Ya tiene una en lista de espera: su texto, no «ya estaba invitado»
+    } else if (error?.errorCode === 'INVITATION_ON_HOLD_EXISTS') {
+      customToast.error(t('errors.onHoldExists'));
+      // El freno por hora de la competición: con cuántas admite, y no el «espera
+      // un minuto» del 429 general, que es de otro límite (probado en el Kind)
+    } else if (
+      error?.errorCode === 'INVITATION_RATE_LIMIT' ||
+      error?.errorCode === 'INVITATION_USER_RATE_LIMIT'
+    ) {
+      // Sin el número no hay frase que decir: el aviso genérico (CodeRabbit). El de
+      // la competición o el del organizador, que suma todas las suyas (C7, B-03)
+      const limite = error.data?.limit;
+      const frase =
+        error.errorCode === 'INVITATION_USER_RATE_LIMIT'
+          ? 'errors.userRateLimited'
+          : 'errors.rateLimited';
+      customToast.error(
+        Number.isFinite(limite)
+          ? t(frase, { count: limite })
+          : t('errors.failedToSend'),
+      );
+      // Por el estado: el texto del servidor no lleva «409» (revisión local)
+    } else if (error?.status === 409) {
+      customToast.error(t('errors.duplicateInvitation'));
+    } else {
+      customToast.error(mensajeDelError(error, t('errors.failedToSend')));
+    }
+  };
+
+  const handleSendInvitation = async (email, personalMessage) => {
+    // Solo se espera si la copia dice que no: verificado, sale en el acto, como antes
+    const verificado = copiaSinVerificar ? await confirma() : true;
+    // Otro toque mientras se pregunta: no cuenta
+    if (verificado === null) return false;
+    setFaltaVerificar(!verificado);
+    if (!verificado) {
+      setShowSendModal(false);
+      // El aviso está arriba: que se vea (/code-review)
+      globalThis.scrollTo?.({ top: 0, behavior: 'smooth' });
+      return false;
+    }
+    setIsProcessing(true);
+    try {
+      await sendInvitationByEmailUseCase.execute(id, email, personalMessage);
+      customToast.success(t('success.sent'));
+      // Abierto, para invitar al siguiente sin volver a abrirlo (#710)
+      recargarEnSilencio();
+      return true;
+    } catch (error) {
+      registraElFallo(
+        'InvitationsPage.error-sending-invitation',
+        'Error sending invitation:',
+        error,
+      );
+      avisarDelEnvioFallido(error);
+      return false;
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleSendByUserId = async (userId, personalMessage) => {
+    // Solo se espera si la copia dice que no: verificado, sale en el acto, como antes
+    const verificado = copiaSinVerificar ? await confirma() : true;
+    // Otro toque mientras se pregunta: no cuenta
+    if (verificado === null) return false;
+    setFaltaVerificar(!verificado);
+    if (!verificado) {
+      setShowSendModal(false);
+      // El aviso está arriba: que se vea (/code-review)
+      globalThis.scrollTo?.({ top: 0, behavior: 'smooth' });
+      return false;
+    }
+    setIsProcessing(true);
+    try {
+      await sendInvitationUseCase.execute(id, userId, personalMessage);
+      customToast.success(t('success.sent'));
+      // Abierto, y el invitado ya como tal: el siguiente sin volver a abrirlo (#710)
+      setIdsInvitados((antes) => [...antes, userId]);
+      recargarEnSilencio();
+      return true;
+    } catch (error) {
+      registraElFallo(
+        'InvitationsPage.error-sending-invitation-2',
+        'Error sending invitation:',
+        error,
+      );
+      avisarDelEnvioFallido(error);
+      return false;
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Retirar una pendiente (FE #724). Si ya no lo estaba —la aceptaron o
+  // rechazaron entre medias— se dice y se recarga: la lista ya no es la de ahora
+  const handleWithdraw = async () => {
+    if (!retirando) return;
+    setRetirandoEnCurso(true);
+    try {
+      await cancelInvitationUseCase.execute(retirando.id);
+      customToast.success(t('success.withdrawn'));
+      // Ya no está pendiente: si se mandó desde aquí, deja de contarse como
+      // enviada y su invitación cerrada vuelve a ofrecer «Volver a invitar»
+      // (CodeRabbit). Antes de la recarga del `finally`
+      const retiradas = new Set(clavesDe(retirando));
+      enviadasRef.current.set(
+        id,
+        new Set([...enviadasAqui()].filter((clave) => !retiradas.has(clave))),
+      );
+    } catch (error) {
+      registraElFallo(
+        'InvitationsPage.error-withdrawing-invitation',
+        'Error withdrawing invitation:',
+        error,
+      );
+      customToast.error(
+        error?.status === 409
+          ? t('errors.notPendingAnymore')
+          : mensajeDelError(error, t('errors.failedToWithdraw')),
+      );
+    } finally {
+      setRetirandoEnCurso(false);
+      setRetirando(null);
+      recargarEnSilencio();
+    }
+  };
+
+  // Volver a invitar (release social 2): una nueva, al usuario si lo era, o al
+  // correo. Los avisos de fallo, los de siempre al invitar
+  const handleReinvitar = async (invitation) => {
+    const enviada = await (invitation.inviteeUserId
+      ? handleSendByUserId(invitation.inviteeUserId, null)
+      : handleSendInvitation(invitation.inviteeEmail, null));
+    // Ya hay una pendiente: el botón se va al momento, sin esperar a releer
+    // las pendientes (un segundo toque daba «ya enviada»; revisor)
+    if (enviada) {
+      const claves = clavesDe(invitation);
+      enviadasRef.current.set(id, new Set([...enviadasAqui(), ...claves]));
+      setSituacion((antes) => ({
+        ...antes,
+        pendientes: new Set([...antes.pendientes, ...claves]),
+      }));
+    }
+  };
+
+  const handleSearchUsers = async (query) => {
+    if (!query || query.trim().length < 2) return [];
+    // El fallo se propaga al modal, como en FriendsPage: devolviendo [] se
+    // presentaba una API caida como una busqueda sin resultados, y el modal
+    // enseñaba «no se ha encontrado a nadie» por un error de red.
+    return searchUsersUseCase.execute(query);
+  };
+
+  const isPageLoading = isLoadingUser || isLoadingRoles || isLoading;
+
+  // Si la competición deja de admitir invitaciones con el modal abierto, se
+  // cierra: si no, se mandaba una que el servidor rechaza (CodeRabbit, #720)
+  const sePuedeInvitar =
+    !competition || SE_PUEDE_INVITAR.has(competition.status);
+  // Sin plazas no se invita (FE #724, BE #359): el servidor lo rechaza, y
+  // ofrecerlo era enterarse al enviar
+  const inscritos = competition?.enrolledCount ?? 0;
+  const lleno =
+    Boolean(competition?.maxPlayers) && inscritos >= competition.maxPlayers;
+  // Formados, los equipos quedan así: para que entre alguien se deshacen en la
+  // agenda, y el servidor rechaza invitar (29-30 oct 2026)
+  const equiposFormados = Boolean(competition?.teamsAssigned);
+  // A quién se le ofrece volver a invitar (R1-R3): cerrada, con sitio, y ni
+  // dentro ni con otra pendiente
+  const puedeReinvitar = (invitation) =>
+    REINVITABLES.has(invitation.status) &&
+    situacion.sabida &&
+    situacion.de === id &&
+    sePuedeInvitar &&
+    !lleno &&
+    !equiposFormados &&
+    !situacion.inscritos.has(invitation.inviteeUserId) &&
+    !clavesDe(invitation).some((clave) => situacion.pendientes.has(clave));
+
+  // `useUserRoles` deja los tres roles a false ante CUALQUIER error, así que un
+  // 500 o un corte de red se parecen a «no tienes permiso». Echar por eso sería
+  // afirmar lo que no se ha podido preguntar, y con `replace` ni siquiera
+  // quedaría el atrás para reintentar
+  if (falloAlPedirLosPermisos) {
+    return (
+      <div className={`${PANTALLA_MENOS_BARRA_INFERIOR} bg-fondo`}>
+        <HeaderAuth user={user} />
+        <div className="max-w-4xl mx-auto px-4 py-6">
+          <div className="py-12 text-center" data-testid="roles-error">
+            <p className="text-sm text-tinta-suave mb-4">
+              {t('errors.rolesCheckFailed')}
+            </p>
+            <button
+              type="button"
+              onClick={volverAPedirLosPermisos}
+              data-testid="roles-retry"
+              className="px-4 py-2 text-sm font-medium text-sobre-contraste bg-contraste rounded-boton transition-opacity hover:opacity-90"
+            >
+              {t('errors.retry')}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isPageLoading) {
+    // La cabecera se queda puesta durante la espera: aparecer de golpe al
+    // terminar es un salto, y de eso va justamente FE #495. El dibujo si es el
+    // compartido.
+    return (
+      <div className={`${PANTALLA_MENOS_BARRA_INFERIOR} bg-fondo`}>
+        <HeaderAuth user={user} />
+        <BlockLoader texto={t('loading')} />
+      </div>
+    );
+  }
+
+  // Sin datos no hay pantalla que enseñar, así que se sale — pero después del
+  // aviso de permisos, que es el que sabe si se puede reintentar
+  if (falloAlCargar) {
+    return <Navigate to={`/competitions/${id}`} replace />;
+  }
+
+  // Un elemento y no `navigate()`: llamarlo aquí cambia el router en pleno
+  // render («Cannot update a component while rendering a different component»),
+  // y sin `replace` la pantalla prohibida se queda en el historial, así que
+  // atrás vuelve a ella y de ahí no se sale (FE #656)
+  if (!canManage) {
+    return <Navigate to={`/competitions/${id}`} replace />;
+  }
+
+  return (
+    <div className={`${PANTALLA_MENOS_BARRA_INFERIOR} bg-fondo`}>
+      <HeaderAuth user={user} />
+
+      <div className="max-w-4xl mx-auto px-4 py-6">
+        {/* Header */}
+        <div className="mb-6">
+          <button
+            onClick={() => navigate(`/competitions/${id}`)}
+            className="hidden md:flex items-center gap-1 text-sm text-tinta-suave hover:text-tinta mb-3 transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            {competition?.name || 'Back'}
+          </button>
+
+          {/* Con salto: en el móvil el aviso de lleno o cerrado baja a su propia
+              línea; al lado del subtítulo los dos quedaban en columnas estrechas */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="hidden md:block text-2xl font-bold text-tinta">
+                {t('creator.title')}
+              </h1>
+              <p className="text-sm text-tinta-suave mt-1">
+                {t('creator.subtitle')}
+              </p>
+              {sinVerificar && (
+                <div className="mt-3">
+                  <AvisoVerificaParaLlegarAOtros correo={user?.email} />
+                </div>
+              )}
+              {totalCount > 0 && (
+                <p className="text-xs text-tinta-suave mt-1">
+                  {t('creator.sentCount', { count: totalCount })}
+                </p>
+              )}
+            </div>
+
+            {/* Cerrada la inscripción no quedan plazas: el servidor ya no deja
+                invitar (#710). La lista sigue, que es donde se ve quién se
+                quedó sin plaza */}
+            {!sePuedeInvitar ? (
+              <p
+                data-testid="invitar-cerrada"
+                className="w-full sm:w-auto sm:max-w-xs text-sm text-tinta-suave"
+              >
+                {t('creator.enrollmentClosed')}
+              </p>
+            ) : equiposFormados ? (
+              <p
+                data-testid="invitar-equipos-formados"
+                className="w-full sm:w-auto sm:max-w-xs text-sm text-tinta-suave"
+              >
+                {t('creator.teamsFormed')}
+              </p>
+            ) : lleno ? (
+              <p
+                data-testid="invitar-lleno"
+                className="w-full sm:w-auto sm:max-w-xs text-sm text-tinta-suave"
+              >
+                {t('creator.competitionFull', { count: inscritos })}
+              </p>
+            ) : (
+              <button
+                onClick={() => {
+                  const acceptedCount = invitations.filter(
+                    (inv) => inv.status === InvitationStatus.ACCEPTED,
+                  ).length;
+                  if (
+                    competition?.maxPlayers &&
+                    acceptedCount >= competition.maxPlayers - 1
+                  ) {
+                    customToast.warning(
+                      t('creator.nearCapacity', {
+                        accepted: acceptedCount,
+                        max: competition.maxPlayers,
+                      }),
+                    );
+                  }
+                  setShowSendModal(true);
+                }}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-sobre-contraste bg-contraste rounded-boton transition-opacity hover:opacity-90"
+              >
+                <Plus className="h-4 w-4" />
+                {t('creator.sendNew')}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Filter */}
+        <div className="mb-4">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-3 py-2 border border-borde rounded-lg text-sm bg-fondo focus:outline-none focus:ring-2 focus:ring-tinta focus:border-transparent"
+            data-testid="status-filter"
+          >
+            <option value="">{t('filter.allStatuses')}</option>
+            {ESTADOS_DEL_FILTRO.map((estado) => (
+              <option key={estado} value={estado}>
+                {t(`status.${estado}`)}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Invitation List */}
+        {invitations.length === 0 ? (
+          <div className="text-center py-12">
+            <Mail className="h-12 w-12 text-tinta-suave mx-auto mb-3" />
+            <p className="text-tinta-suave">{t('noInvitations')}</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {invitations.map((invitation) => (
+              <InvitationCard
+                key={invitation.id}
+                invitation={invitation}
+                mode="creator"
+                onWithdraw={setRetirando}
+                onReinvite={
+                  puedeReinvitar(invitation) ? handleReinvitar : undefined
+                }
+                isProcessing={retirandoEnCurso || isProcessing}
+                t={t}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Retirar, con sus palabras y no «Confirmar» / «Cancelar» (FE #742) */}
+      <ConfirmModal
+        isOpen={retirando !== null}
+        title={t('creator.withdrawDialog.title', {
+          // Como la tarjeta: nunca en blanco (B-01/B-03)
+          name: quienEsElInvitado(retirando, t),
+        })}
+        message={t('creator.withdrawDialog.body')}
+        confirmText={t('creator.withdrawDialog.confirm')}
+        cancelText={t('creator.withdrawDialog.keep')}
+        onConfirm={handleWithdraw}
+        onCancel={() => setRetirando(null)}
+        isLoading={retirandoEnCurso}
+        isDestructive
+      />
+
+      {/* Send Modal */}
+      <SendInvitationModal
+        isOpen={showSendModal && sePuedeInvitar && !lleno && !equiposFormados}
+        onClose={() => setShowSendModal(false)}
+        onSend={handleSendInvitation}
+        onSendByUserId={handleSendByUserId}
+        onSearchUsers={handleSearchUsers}
+        isProcessing={isProcessing}
+        t={t}
+        friends={friends}
+        idsInvitados={idsInvitados}
+        idsInscritos={idsInscritos}
+        cargandoAmigos={cargandoAmigos}
+        falloAlCargarAmigos={falloAlCargarAmigos}
+        falloAlComprobarSituacion={falloAlComprobarSituacion}
+      />
+    </div>
+  );
+};
+
+export default InvitationsPage;

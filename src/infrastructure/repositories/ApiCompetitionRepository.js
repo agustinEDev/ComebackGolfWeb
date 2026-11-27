@@ -1,0 +1,490 @@
+import { ICompetitionRepository } from '../../domain/repositories/ICompetitionRepository';
+import CompetitionMapper from '../mappers/CompetitionMapper';
+import apiRequest from '../http/api.js';
+import { segmento } from '../http/api';
+import { conExtras } from '../mappers/conExtras';
+
+/** @typedef {import('../../domain/entities/Competition').default} Competition */
+/** @typedef {import('../../domain/repositories/ICompetitionRepository').CompetitionWithExtras} CompetitionWithExtras */
+
+class ApiCompetitionRepository extends ICompetitionRepository {
+  /**
+   * Creates a new competition via the API.
+   * @override
+   * @param {Object} competitionData - The data for the new competition (API DTO format).
+   * @returns {Promise<Competition>} - The newly created competition entity.
+   */
+  async save(competitionData) {
+    const apiData = await apiRequest('/api/v1/competitions', {
+      method: 'POST',
+      body: JSON.stringify(competitionData),
+    });
+
+    // Map API response to Competition domain entity
+    const competition = CompetitionMapper.toDomain(apiData);
+
+    return competition;
+  }
+
+  /**
+   * Finds a competition by its unique ID.
+   * @override
+   * @param {string} competitionId - The ID of the competition to find.
+   * @returns {Promise<CompetitionWithExtras>} - La entidad y lo que la ficha
+   *   enseña y la entidad no guarda.
+   * @throws {Error} If the competition is not found or the request fails.
+   */
+  async findById(competitionId) {
+    const apiData = await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}`,
+    );
+
+    return conExtras(CompetitionMapper.toDomain(apiData), apiData);
+  }
+
+  /**
+   * El resumen público de una competición, sin sesión (release social 3).
+   * @override
+   * @param {string} competitionId - The ID of the competition.
+   * @returns {Promise<Object>} id, name, hasTeams, tournamentType, status, visibility y fechas.
+   */
+  async findSummary(competitionId) {
+    const data = await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/summary`,
+    );
+    return {
+      id: data.id,
+      name: data.name,
+      tournamentType: data.tournament_type,
+      hasTeams: data.has_teams,
+      status: data.status,
+      visibility: data.visibility,
+      startDate: data.start_date,
+      endDate: data.end_date,
+    };
+  }
+
+  /**
+   * Finds all competitions for a specific user (creator OR enrolled).
+   * @override
+   * @param {string} userId - The ID of the user/creator.
+   * @param {Record<string, string>} [filters] - Optional filters (status, etc.), sent as query parameters
+   * @returns {Promise<CompetitionWithExtras[]>} - Cada competición con sus extras.
+   */
+  async findByCreator(userId, filters = {}) {
+    // Build query parameters
+    // Note: Backend automatically filters by authenticated user from JWT token
+    // No need to send creator_id explicitly
+    const queryParams = new URLSearchParams(filters);
+
+    // CRITICAL: Add my_competitions=true to get competitions where user is creator OR enrolled
+    queryParams.append('my_competitions', 'true');
+
+    const endpoint = `/api/v1/competitions${queryParams.toString() ? '?' + queryParams : ''}`;
+
+    const apiDataArray = await apiRequest(endpoint);
+
+    return apiDataArray.map((apiData) =>
+      conExtras(CompetitionMapper.toDomain(apiData), apiData),
+    );
+  }
+
+  /**
+   * Finds public competitions with optional filters.
+   * @override
+   * @param {object} [filters] - Optional filters for the search.
+   * @param {string|string[]} [filters.status] - Competition status (e.g., CompetitionStatusEnum.ACTIVE, or
+   *   [CompetitionStatusEnum.CLOSED, CompetitionStatusEnum.IN_PROGRESS])
+   * @param {string} [filters.searchName] - Search by competition name (partial match)
+   * @param {string} [filters.searchCreator] - Search by creator name (partial match)
+   * @param {boolean} [filters.excludeMyCompetitions] - If true, excludes competitions where user is creator or enrolled
+   * @param {number} [filters.limit] - Maximum number of results
+   * @param {number} [filters.offset] - Pagination offset
+   * @returns {Promise<CompetitionWithExtras[]>} - Cada competición pública con sus extras.
+   */
+  async findPublic(filters = {}) {
+    // Build query parameters
+    const queryParams = new URLSearchParams();
+
+    // Handle status filter (can be string or array)
+    if (filters.status) {
+      if (Array.isArray(filters.status)) {
+        // Multiple statuses: add each one as a separate query param
+        filters.status.forEach((status) => {
+          queryParams.append('status', status);
+        });
+      } else {
+        // Single status
+        queryParams.append('status', filters.status);
+      }
+    }
+
+    // Handle search filters
+    if (filters.searchName) {
+      queryParams.append('search_name', filters.searchName);
+    }
+
+    if (filters.searchCreator) {
+      queryParams.append('search_creator', filters.searchCreator);
+    }
+
+    // Handle my_competitions filter
+    if (filters.excludeMyCompetitions) {
+      queryParams.append('my_competitions', 'false');
+    }
+
+    // Handle pagination
+    if (filters.limit !== undefined) {
+      queryParams.append('limit', filters.limit.toString());
+    }
+
+    if (filters.offset !== undefined) {
+      queryParams.append('offset', filters.offset.toString());
+    }
+
+    const endpoint = `/api/v1/competitions${queryParams.toString() ? '?' + queryParams : ''}`;
+
+    const apiDataArray = await apiRequest(endpoint);
+
+    return apiDataArray.map((apiData) =>
+      conExtras(CompetitionMapper.toDomain(apiData), apiData),
+    );
+  }
+
+  /**
+   * Adds a golf course to a competition.
+   * @override
+   * @param {string} competitionId - The ID of the competition.
+   * @param {string} golfCourseId - The ID of the golf course to add.
+   * @returns {Promise<object>} - The association details (competition_id, golf_course_id, display_order, added_at).
+   */
+  async addGolfCourse(competitionId, golfCourseId) {
+    const response = await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/golf-courses`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ golf_course_id: golfCourseId }),
+      },
+    );
+
+    return response;
+  }
+
+  /**
+   * Removes a golf course from a competition.
+   * @override
+   * @param {string} competitionId - The ID of the competition.
+   * @param {string} golfCourseId - The ID of the golf course to remove.
+   * @returns {Promise<object>} - The removal confirmation (competition_id, golf_course_id, removed_at).
+   */
+  async removeGolfCourse(competitionId, golfCourseId) {
+    const response = await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/golf-courses/${segmento(golfCourseId)}`,
+      {
+        method: 'DELETE',
+      },
+    );
+
+    return response;
+  }
+
+  /**
+   * Reorders golf courses in a competition.
+   * @override
+   * @param {string} competitionId - The ID of the competition.
+   * @param {string[]} golfCourseIds - Array of golf course IDs in the new order.
+   * @returns {Promise<object>} - The reordered golf courses with display_order.
+   */
+  async reorderGolfCourses(competitionId, golfCourseIds) {
+    const response = await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/golf-courses/reorder`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ golf_course_ids: golfCourseIds }),
+      },
+    );
+
+    return response;
+  }
+
+  /**
+   * Gets all golf courses associated with a competition.
+   * @override
+   * @param {string} competitionId - The ID of the competition.
+   * @returns {Promise<object>} - Object containing competition_id and golf_courses array.
+   */
+  async getCompetitionGolfCourses(competitionId) {
+    const response = await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/golf-courses`,
+    );
+
+    return response;
+  }
+
+  /**
+   * Updates a competition.
+   * @override
+   * @param {string} competitionId - The ID of the competition to update.
+   * @param {object} competitionData - The updated competition data.
+   * @returns {Promise<Competition>} - The updated competition entity.
+   */
+  async updateCompetition(competitionId, competitionData) {
+    const apiData = await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(competitionData),
+      },
+    );
+
+    // Map API response to Competition domain entity
+    return CompetitionMapper.toDomain(apiData);
+  }
+  /** POST /competitions/{id}/handicap-updates → 202 (BE #509). */
+  async launchHandicapUpdate(competitionId) {
+    const data = await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/handicap-updates`,
+      { method: 'POST' },
+    );
+    // HandicapUpdateLaunchedDTO: {id, status: IN_PROGRESS, origin, started_at, resumed}
+    return { status: data?.status, resumed: data?.resumed === true };
+  }
+
+  /** PUT /competitions/{id}/handicap-updates/schedule (BE #510). */
+  async scheduleHandicapUpdate(competitionId, runAt) {
+    const data = await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/handicap-updates/schedule`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ run_at: runAt }),
+      },
+    );
+    return { runAt: data?.run_at ?? runAt };
+  }
+
+  /**
+   * Mis hándicaps sin actualizar con la RFEG (15 nov 2026; BE #864):
+   * como organizador, cuántos en cada competición; como jugador, dónde no me
+   * encontró. De los jugadores solo hace falta la cuenta.
+   */
+  async getMyHandicapsNotUpdated() {
+    const data = await apiRequest(
+      '/api/v1/competitions/me/handicaps-not-updated',
+    );
+    return {
+      asOrganizer: (data?.as_organizer || []).map((c) => ({
+        competitionId: c.competition_id,
+        competitionName: c.competition_name,
+        count: c.count,
+      })),
+      asPlayer: (data?.as_player || []).map((c) => ({
+        competitionId: c.competition_id,
+        competitionName: c.competition_name,
+      })),
+    };
+  }
+
+  /** DELETE /competitions/{id}/handicap-updates/schedule → 204. */
+  async cancelScheduledHandicapUpdate(competitionId) {
+    await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/handicap-updates/schedule`,
+      { method: 'DELETE' },
+    );
+  }
+
+  /**
+   * Cambia los ajustes del stroke play (FE #824, BE #536). Un PATCH con
+   * SOLO lo que llega: mandar los límites, aunque vacíos, cambia de modo.
+   * @override
+   */
+  async updateStrokePlay(competitionId, cambios) {
+    const nombres = {
+      categoryLimits: 'category_limits',
+      categoryCount: 'category_count',
+      maxMatchdaysPerPlayer: 'max_matchdays_per_player',
+      overallStanding: 'overall_standing',
+    };
+    const cuerpo = Object.fromEntries(
+      Object.entries(cambios)
+        .filter(([campo, valor]) => nombres[campo] && valor !== undefined)
+        .map(([campo, valor]) => [nombres[campo], valor]),
+    );
+    const apiData = await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/stroke-play`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(cuerpo),
+      },
+    );
+    return CompetitionMapper.ajustesDeStrokePlay({ stroke_play: apiData });
+  }
+
+  /**
+   * Activates a competition (DRAFT → ACTIVE).
+   * @override
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async activate(competitionId) {
+    return await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/activate`,
+      {
+        method: 'POST',
+      },
+    );
+  }
+
+  /**
+   * Closes enrollments for a competition (ACTIVE → CLOSED).
+   * @override
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async closeEnrollments(competitionId) {
+    return await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/close-enrollments`,
+      {
+        method: 'POST',
+      },
+    );
+  }
+
+  /**
+   * Nombra a los dos capitanes; con las inscripciones abiertas, las cierra (FE #692).
+   * @override
+   * @param {string} competitionId
+   * @param {{team_a_captain_id: string, team_b_captain_id: string}} capitanes
+   * @returns {Promise<Object>} Estado, capitanes, total de inscritos y el aviso de impares
+   */
+  async nameCaptains(competitionId, capitanes) {
+    return await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/captains`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(capitanes),
+      },
+    );
+  }
+
+  /**
+   * Cubre el puesto de capitán de un equipo, vacío tras una baja (FE #692).
+   * @override
+   * @param {string} competitionId
+   * @param {'A'|'B'} team
+   * @param {{player_id: string}} jugador
+   * @returns {Promise<Object>} Capitanes y subcapitanes tras el cambio
+   */
+  async fillTeamCaptain(competitionId, team, jugador) {
+    return await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/teams/${segmento(team)}/captain`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(jugador),
+      },
+    );
+  }
+
+  /**
+   * Starts a competition (CLOSED → IN_PROGRESS).
+   * @override
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async start(competitionId) {
+    return await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/start`,
+      {
+        method: 'POST',
+      },
+    );
+  }
+
+  /**
+   * Completes a competition (IN_PROGRESS → COMPLETED).
+   * @override
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async complete(competitionId) {
+    return await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/complete`,
+      {
+        method: 'POST',
+      },
+    );
+  }
+
+  /**
+   * Cancels a competition (any state → CANCELLED).
+   * @override
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async cancel(competitionId) {
+    return await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/cancel`,
+      {
+        method: 'POST',
+      },
+    );
+  }
+
+  /**
+   * Deletes a competition (only in DRAFT state).
+   * @override
+   * @param {string} competitionId
+   * @returns {Promise<void>}
+   */
+  async delete(competitionId) {
+    await apiRequest(`/api/v1/competitions/${segmento(competitionId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Reopens enrollments for a competition (CLOSED → ACTIVE).
+   * @override
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async reopenEnrollments(competitionId) {
+    return await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/reopen-enrollments`,
+      {
+        method: 'POST',
+      },
+    );
+  }
+
+  /**
+   * Reverts a competition status (IN_PROGRESS → CLOSED).
+   * @override
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async revertStatus(competitionId) {
+    return await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/revert-status`,
+      {
+        method: 'PUT',
+      },
+    );
+  }
+
+  /**
+   * Reverts a completed competition back to IN_PROGRESS (COMPLETED → IN_PROGRESS).
+   * @override
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Updated competition data
+   */
+  async revertToInProgress(competitionId) {
+    return await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/revert-to-in-progress`,
+      {
+        method: 'PUT',
+      },
+    );
+  }
+}
+
+export default ApiCompetitionRepository;

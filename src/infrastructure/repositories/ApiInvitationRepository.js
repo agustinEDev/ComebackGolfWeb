@@ -1,0 +1,144 @@
+import IInvitationRepository from '../../domain/repositories/IInvitationRepository';
+import InvitationMapper from '../mappers/InvitationMapper';
+import apiRequest from '../http/api.js';
+import { segmento } from '../http/api';
+import { conExtras, conExtrasLista } from '../mappers/conExtras';
+
+/**
+ * ApiInvitationRepository - REST API implementation
+ *
+ * Endpoints:
+ * - POST   /api/v1/competitions/{id}/invitations
+ * - POST   /api/v1/competitions/{id}/invitations/by-email
+ * - GET    /api/v1/invitations/me
+ * - POST   /api/v1/invitations/{id}/respond
+ * - POST   /api/v1/invitations/{id}/cancel
+ * - GET    /api/v1/competitions/{id}/invitations
+ */
+class ApiInvitationRepository extends IInvitationRepository {
+  constructor() {
+    super();
+  }
+
+  #buildQueryString(filters) {
+    const params = new URLSearchParams();
+
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== null && value !== undefined && value !== '') {
+        params.append(key, value);
+      }
+    });
+
+    const queryString = params.toString();
+    return queryString ? `?${queryString}` : '';
+  }
+
+  async sendInvitation(competitionId, inviteeUserId, personalMessage = null) {
+    const payload = {
+      invitee_user_id: inviteeUserId,
+    };
+    if (personalMessage) {
+      payload.personal_message = personalMessage;
+    }
+
+    const apiData = await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/invitations`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    );
+
+    return conExtras(InvitationMapper.toDomain(apiData), apiData);
+  }
+
+  async sendInvitationByEmail(
+    competitionId,
+    inviteeEmail,
+    personalMessage = null,
+  ) {
+    const payload = {
+      invitee_email: inviteeEmail,
+    };
+    if (personalMessage) {
+      payload.personal_message = personalMessage;
+    }
+
+    const apiData = await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/invitations/by-email`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    );
+
+    return conExtras(InvitationMapper.toDomain(apiData), apiData);
+  }
+
+  async getMyInvitations(filters = {}) {
+    const apiFilters = {};
+    if (filters.status) apiFilters.status = filters.status;
+    if (filters.page) apiFilters.page = filters.page;
+    if (filters.limit) apiFilters.limit = filters.limit;
+
+    const queryString = this.#buildQueryString(apiFilters);
+    const response = await apiRequest(`/api/v1/invitations/me${queryString}`);
+
+    const apiDataArray = response.invitations || [];
+    const invitations = conExtrasLista(
+      InvitationMapper.toDomainMany(apiDataArray),
+      apiDataArray,
+    );
+
+    return {
+      invitations,
+      totalCount: response.total_count || 0,
+    };
+  }
+
+  /**
+   * Retira una invitación pendiente (FE #724). El servidor contesta 204.
+   */
+  async cancelInvitation(invitationId) {
+    await apiRequest(`/api/v1/invitations/${segmento(invitationId)}/cancel`, {
+      method: 'POST',
+    });
+  }
+
+  async respondToInvitation(invitationId, action) {
+    const apiData = await apiRequest(
+      `/api/v1/invitations/${segmento(invitationId)}/respond`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ action }),
+      },
+    );
+
+    return conExtras(InvitationMapper.toDomain(apiData), apiData);
+  }
+
+  async getCompetitionInvitations(competitionId, filters = {}) {
+    const apiFilters = {};
+    if (filters.status) apiFilters.status = filters.status;
+    if (filters.page) apiFilters.page = filters.page;
+    if (filters.limit) apiFilters.limit = filters.limit;
+
+    const queryString = this.#buildQueryString(apiFilters);
+    const response = await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/invitations${queryString}`,
+    );
+
+    const apiDataArray = response.invitations || [];
+    const invitations = conExtrasLista(
+      InvitationMapper.toDomainMany(apiDataArray),
+      apiDataArray,
+    );
+
+    return {
+      invitations,
+      totalCount: response.total_count || 0,
+    };
+  }
+}
+
+export default ApiInvitationRepository;

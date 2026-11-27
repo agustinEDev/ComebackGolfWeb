@@ -1,0 +1,912 @@
+import {
+  AL_PASAR,
+  CLASE_DE_LA_LISTA_DE_PESTANAS,
+  ELEGIDO_CON_ANILLO,
+  TEXTO_DE_DENTRO_EN_FOREST,
+  claseDePestana,
+} from '../ui/clasesDeComportamiento';
+import {
+  useState,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useCallback,
+} from 'react';
+import ModalShell, { CAJA_PROPIA } from '../ui/ModalShell';
+import { nombrePequeno, nombreVisible } from '../../utils/nombreVisible';
+import { Loader, Search, UserPlus, X } from 'lucide-react';
+import Avatar from '../ui/Avatar';
+import {
+  GrupoDePestanas,
+  ListaDePestanas,
+  PanelDePestana,
+} from '../ui/Pestanas';
+import NombrePequeno from '../ui/NombrePequeno';
+import { contieneEnlace } from '../../domain/services/textoSinEnlaces';
+
+const SendInvitationModalContent = ({
+  onClose,
+  onSend,
+  onSendByUserId,
+  onSearchUsers,
+  isProcessing,
+  t,
+  // Los amigos de quien invita, y en qué situación está cada uno respecto a esta
+  // competición. Lo trae la pantalla, que es la que lo sabe (FE #409)
+  friends = [],
+  idsInvitados = [],
+  idsInscritos = [],
+  cargandoAmigos = false,
+  falloAlCargarAmigos = false,
+  falloAlComprobarSituacion = false,
+}) => {
+  // Se abre por amigos: invitar a una competición es, casi siempre, invitar a
+  // los de siempre. Buscar y correo quedan para quien todavía no lo es
+  const [activeTab, setActiveTab] = useState('friends');
+  const [email, setEmail] = useState('');
+  const [personalMessage, setPersonalMessage] = useState('');
+  const [error, setError] = useState('');
+  // El del mensaje va aparte y debajo de él: es lo que hay que cambiar
+  const [errorDelMensaje, setErrorDelMensaje] = useState('');
+  // Booleano, no el texto traducido: `t` viene por props y meterlo en las
+  // dependencias del efecto de busqueda relanzaria la peticion.
+  const [searchFailed, setSearchFailed] = useState(false);
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const dropdownRef = useRef(null);
+  const searchRequestIdRef = useRef(0);
+  const highlightedIndexRef = useRef(highlightedIndex);
+  const showDropdownRef = useRef(showDropdown);
+  const searchResultsRef = useRef(searchResults);
+  // A que busqueda pertenecen los resultados que hay en memoria
+  const resultsQueryRef = useRef('');
+  // La búsqueda con el `onSearchUsers` de ahora, también si cambió mientras
+  // corría el temporizador: no es una dependencia del efecto que la lanza
+  const buscar = useEffectEvent((consulta) => onSearchUsers(consulta));
+  // Si ya está dentro o invitado: una sola regla para la pestaña de amigos, la
+  // búsqueda y el teclado (/code-review)
+  const situacionDe = (id) => {
+    const yaInscrito = idsInscritos.includes(id);
+    const yaInvitado = idsInvitados.includes(id);
+    // Sin saber todavía quién está dentro, o sin haberlo podido saber, nadie:
+    // el servidor rechazaría justo a esos (CodeRabbit)
+    const sinComprobar = cargandoAmigos || falloAlComprobarSituacion;
+    return {
+      yaInscrito,
+      yaInvitado,
+      noSePuede: sinComprobar || yaInscrito || yaInvitado,
+    };
+  };
+  // El teclado, que se escucha desde un efecto montado una sola vez, la lee
+  // con los inscritos e invitados de ahora: que tampoco elija a quien la lista
+  // enseña bloqueado (QA, 26 oct)
+  const noSePuedeElegir = useEffectEvent((id) => situacionDe(id).noSePuede);
+
+  // El resaltado se mueve SIEMPRE por aqui, y la ref se escribe a la vez que
+  // el estado. Copiarla en el cuerpo del componente la dejaba al dia solo
+  // DESPUES de re-renderizar: un `Enter` pisandole los talones al `ArrowDown`
+  // la leia todavia en -1 y no seleccionaba a nadie. El listener se registra
+  // una sola vez, asi que la ref es su unica fuente. Mismo fallo que FE #440
+  // en AddFriendModal, del que este modal es copia.
+  const highlight = useCallback((next) => {
+    highlightedIndexRef.current = next;
+    setHighlightedIndex(next);
+  }, []);
+
+  // Igual que `highlight`: el teclado las lee por ref, asi que se escriben en
+  // el momento y no al re-renderizar. Copiadas en el cuerpo del componente el
+  // hueco era mas estrecho, pero seguia ahi.
+  const openDropdown = useCallback((next) => {
+    showDropdownRef.current = next;
+    setShowDropdown(next);
+  }, []);
+
+  // La pestana activa, legible desde el efecto de busqueda sin meterla en sus
+  // dependencias; y la busqueda cuyo desplegable cerro el propio usuario.
+  const activeTabRef = useRef('friends');
+  const searchInputRef = useRef(null);
+  const modalRef = useRef(null);
+  const descartadaRef = useRef('');
+  // La busqueda que fallo mientras el usuario estaba en la otra pestana
+  const falloPendienteRef = useRef('');
+
+  const putResults = useCallback((next, deQuery = '') => {
+    searchResultsRef.current = next;
+    resultsQueryRef.current = deQuery;
+    setSearchResults(next);
+  }, []);
+
+  // Todo cambio del texto pasa por aquí: teclear, elegir a alguien (con clic o
+  // con Enter) y quitar al elegido. Lo que estuviera en vuelo deja de valer y,
+  // por debajo de dos letras, la lista se cierra en ese mismo pintado; el
+  // efecto de la búsqueda solo espera los 300 ms. Estable: el teclado la usa
+  // desde un listener que se registra una sola vez
+  const cambiaLaBusqueda = useCallback(
+    (texto) => {
+      setSearchQuery(texto);
+      // Invalida lo que este en vuelo: sin esto, una respuesta tardia aterrizaba
+      // sobre el campo ya vacio —la buena reabriendo resultados de una busqueda
+      // que ya no se lee, y la mala plantando el aviso rojo bajo un buscador en
+      // blanco—, o la de un texto anterior sobre la del actual.
+      searchRequestIdRef.current += 1;
+      setSearchFailed(false);
+      if (texto.trim().length < 2) {
+        putResults([]);
+        openDropdown(false);
+        setIsSearching(false);
+        // Como en el camino de error: sin esto el `aria-activedescendant` se
+        // queda apuntando a una opcion que ya no esta en el DOM.
+        highlight(-1);
+        return;
+      }
+      setIsSearching(true);
+      falloPendienteRef.current = '';
+    },
+    [putResults, openDropdown, highlight],
+  );
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        // Pulsar una pestana NO es descartar el desplegable: este cierre llega
+        // antes que su `click`, asi que contarlo como tal impedia devolver los
+        // resultados al volver.
+        // Descartar es pulsar Escape o el fondo. Pinchar en el mensaje, en la
+        // barra de pestanas o en cualquier otro sitio del propio formulario es
+        // seguir usandolo: cierra el desplegable, pero no cuenta como que el
+        // usuario lo haya descartado, o la restauracion al volver de la otra
+        // pestana no llegaba a ocurrir nunca en el camino mas normal.
+        if (
+          showDropdownRef.current &&
+          !modalRef.current?.contains(event.target)
+        ) {
+          descartadaRef.current = resultsQueryRef.current;
+        }
+        openDropdown(false);
+      }
+    };
+    // En el `click` y no en el `mousedown`, como en AddFriendModal: la lista
+    // va en el flujo y cerrarla al apretar subia el pie antes de soltar, y el
+    // clic caia en otro boton. En captura, para seguir cerrando antes que el
+    // manejador del destino: una pestana que restaura la lista lo hace despues
+    document.addEventListener('click', handleClickOutside, true);
+    return () =>
+      document.removeEventListener('click', handleClickOutside, true);
+  }, [openDropdown]);
+
+  // Keyboard navigation for dropdown (document-level to avoid focus issues)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Escape el PRIMERO de todos: es la unica tecla que cierra el
+      // desplegable, y tiene que funcionar aunque el foco se haya ido al
+      // mensaje —se llega tabulando, sin ningun clic que lo cierre— y aunque la
+      // busqueda no haya devuelto a nadie, que deja el desplegable abierto con
+      // el aviso y la guarda de mas abajo pide lista con elementos.
+      if (e.key === 'Escape' && showDropdownRef.current) {
+        descartadaRef.current = resultsQueryRef.current;
+        openDropdown(false);
+        highlight(-1);
+        return;
+      }
+
+      // El listener es de `document` a proposito, para que las flechas
+      // funcionen sin tener que enfocar el desplegable. Pero eso mismo hacia
+      // que se comiera las flechas y el Enter de quien estaba escribiendo el
+      // mensaje: si el foco esta en otro campo de escritura, el teclado es
+      // suyo, no del desplegable.
+      const enfocado = document.activeElement;
+      const escribiendoEnOtroSitio =
+        enfocado &&
+        enfocado !== searchInputRef.current &&
+        (enfocado.tagName === 'TEXTAREA' ||
+          enfocado.tagName === 'INPUT' ||
+          enfocado.isContentEditable);
+      if (escribiendoEnOtroSitio) return;
+
+      if (!showDropdownRef.current || searchResultsRef.current.length === 0)
+        return;
+
+      // Las flechas se saltan a quien no se puede elegir; si no hay nadie, no
+      // resaltan nada (CodeRabbit)
+      const siguienteElegible = (paso) => {
+        const lista = searchResultsRef.current;
+        const len = lista.length;
+        let i = highlightedIndexRef.current;
+        for (let vueltas = 0; vueltas < len; vueltas++) {
+          i = i < 0 && paso < 0 ? len - 1 : (i + paso + len) % len;
+          if (!noSePuedeElegir(lista[i].id)) return i;
+        }
+        return -1;
+      };
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        highlight(siguienteElegible(1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        highlight(siguienteElegible(-1));
+      } else if (e.key === 'Enter') {
+        const idx = highlightedIndexRef.current;
+        if (idx >= 0 && idx < searchResultsRef.current.length) {
+          e.preventDefault();
+          const user = searchResultsRef.current[idx];
+          if (noSePuedeElegir(user.id)) return;
+          setSelectedUser(user);
+          cambiaLaBusqueda('');
+          openDropdown(false);
+          setError('');
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [highlight, openDropdown, cambiaLaBusqueda]);
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (highlightedIndex >= 0) {
+      const el = document.getElementById(`search-option-${highlightedIndex}`);
+      if (el?.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+    }
+  }, [highlightedIndex]);
+
+  // Debounced search. Lo que cambia con el texto ya lo hizo `cambiaLaBusqueda`
+  // al teclear: aquí solo se esperan los 300 ms y se pide
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (trimmed.length < 2) return undefined;
+
+    const currentRequestId = searchRequestIdRef.current;
+    const temporizador = setTimeout(async () => {
+      try {
+        const results = await buscar(trimmed);
+        if (currentRequestId !== searchRequestIdRef.current) return;
+        putResults(results, trimmed);
+        // Una busqueda nueva borra el descarte anterior: guardarlo por texto y
+        // no limpiarlo dejaba esa cadena envenenada para siempre —quien pulso
+        // Escape una vez sobre «Jo» ya no podia recuperar ningun «Jo» futuro
+        // al volver de la otra pestana—.
+        descartadaRef.current = '';
+        // Solo si seguimos en la busqueda: si el usuario ya se fue a la pestana
+        // de correo, abrirlo aqui resucita el listener de `document` y le come
+        // el Enter del formulario —y le selecciona a alguien sin decirselo—.
+        openDropdown(activeTabRef.current === 'search');
+        highlight(-1);
+      } catch {
+        if (currentRequestId !== searchRequestIdRef.current) return;
+        // Cerrado, no «vacio»: dejarlo abierto enseñaba el aviso de «no se ha
+        // encontrado a nadie» para lo que en realidad fue un error de red. Y
+        // con un mensaje propio, que si no la pantalla se queda igual que si
+        // nunca hubieras buscado y lo natural es reescribir y volver a fallar.
+        // Si el usuario ya se fue a la otra pestana, el aviso no se pinta ahi
+        // —le saltaria a la cara denunciando una busqueda que dejo atras—,
+        // pero se guarda: al volver se levanta, que si no se queda el campo
+        // escrito y sin lista, sin aviso y sin error, que es justo el silencio
+        // que este cambio viene a quitar.
+        const enBusqueda = activeTabRef.current === 'search';
+        falloPendienteRef.current = enBusqueda ? '' : trimmed;
+        setSearchFailed(enBusqueda);
+        putResults([]);
+        openDropdown(false);
+        // Simetrico con el camino de exito: sin esto el `aria-activedescendant`
+        // se queda apuntando a una opcion que ya no esta en el DOM, y un lector
+        // de pantalla anuncia algo que no existe.
+        highlight(-1);
+      } finally {
+        if (currentRequestId === searchRequestIdRef.current) {
+          setIsSearching(false);
+        }
+      }
+    }, 300);
+
+    return () => clearTimeout(temporizador);
+  }, [searchQuery, highlight, openDropdown, putResults]);
+
+  // Salen TODOS, y quien no se puede invitar lo dice. Esconderlos era peor: al
+  // no encontrar a alguien que sabes que está en tu lista, lo que parece es que
+  // la aplicación falla, no que esa persona ya está dentro
+  const amigosConSuSituacion = friends.map((amigo) => ({
+    ...amigo,
+    ...situacionDe(amigo.otherUserId),
+  }));
+
+  // El mensaje sale en el correo que firma la app: sin enlaces (SB-05, 17 nov 2026).
+  // Lo dice aquí y no espera a que lo rechace la API
+  const mensajeConEnlace = () => {
+    if (!contieneEnlace(personalMessage)) return false;
+    setErrorDelMensaje(t('errors.messageHasLink'));
+    return true;
+  };
+
+  const handleEmailSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setErrorDelMensaje('');
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setError(t('errors.invalidEmail'));
+      return;
+    }
+    if (mensajeConEnlace()) return;
+
+    // Enviada, el formulario queda listo para la siguiente (#710; el mensaje
+    // también, Kind 17 nov): si no, salía con el texto de la anterior
+    if (await onSend(trimmedEmail, personalMessage.trim() || null)) {
+      setEmail('');
+      setPersonalMessage('');
+    }
+  };
+
+  const handleUserSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setErrorDelMensaje('');
+
+    if (!selectedUser) {
+      setError(t('send.noUserSelected'));
+      return;
+    }
+    if (mensajeConEnlace()) return;
+
+    if (await onSendByUserId(selectedUser.id, personalMessage.trim() || null)) {
+      setSelectedUser(null);
+      setPersonalMessage('');
+    }
+  };
+
+  const handleSelectUser = (user) => {
+    setSelectedUser(user);
+    cambiaLaBusqueda('');
+    openDropdown(false);
+    setError('');
+  };
+
+  const handleClearUser = () => {
+    setSelectedUser(null);
+    cambiaLaBusqueda('');
+  };
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    setError('');
+    setErrorDelMensaje('');
+    // El mensaje personal se escribe en las pestañas de búsqueda y correo, y no
+    // se ve desde la de amigos: conservarlo enviaría, sin decirlo, un texto que
+    // el organizador no tiene delante. Se limpia al cambiar
+    setPersonalMessage('');
+    highlight(-1);
+    activeTabRef.current = tab;
+    if (tab !== 'search') {
+      // Al salir de la busqueda hay que cerrar el desplegable: su marcado
+      // desaparece con la pestana pero su estado no, y el listener de teclado
+      // es de `document`, asi que en la pestana de correo se tragaba el Enter y
+      // las flechas del mensaje.
+      openDropdown(false);
+      return;
+    }
+    // Al volver se recupera lo que ya se habia encontrado —sigue en memoria, no
+    // hace falta repetir la peticion—, porque el campo conservaba el texto y no
+    // habia forma de ver los resultados otra vez sin editarlo. Con dos
+    // condiciones: que el usuario no lo hubiera cerrado el mismo, y que la
+    // lista sea de la busqueda que se lee ahora en el campo —si la cambio y hay
+    // una peticion en vuelo, resucitar la anterior le ofreceria a alguien que
+    // no ha buscado—.
+    // Se devuelve lo que corresponda a lo que se lee en el campo —vacio
+    // tambien, que entonces toca el aviso de «no se ha encontrado a nadie»,
+    // que depende de esto mismo—, salvo que el usuario cerrara el desplegable
+    // de esa misma busqueda: eso si se respeta.
+    const consulta = searchQuery.trim();
+    if (falloPendienteRef.current === consulta && consulta.length >= 2) {
+      falloPendienteRef.current = '';
+      setSearchFailed(true);
+    }
+    openDropdown(
+      consulta.length >= 2 &&
+        resultsQueryRef.current === consulta &&
+        descartadaRef.current !== consulta,
+    );
+  };
+
+  return (
+    <ModalShell
+      isOpen
+      onClose={onClose}
+      labelledBy="enviar-invitacion-titulo"
+      // Con la lista de resultados abierta, Escape es de la lista: la cierra
+      // su manejador (más arriba), y el siguiente Escape ya cierra el modal
+      closeOnEscape={!isProcessing && !showDropdown}
+      busy={isProcessing}
+      boxClassName={CAJA_PROPIA}
+    >
+      {/* Alto maximo con desplazamiento propio, como en AddFriendModal: la
+          lista de resultados ocupa sitio dentro y no debe sacarla de la pantalla */}
+      <div
+        ref={modalRef}
+        data-testid="caja-enviar-invitacion"
+        className="bg-fondo rounded-tarjeta border border-contorno w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto"
+      >
+        <div className="flex items-center justify-between p-4 border-b border-linea">
+          <h2
+            id="enviar-invitacion-titulo"
+            className="text-lg font-semibold text-tinta"
+          >
+            {t('send.title')}
+          </h2>
+          <button
+            onClick={onClose}
+            aria-label={t('common:close')}
+            disabled={isProcessing}
+            className="text-tinta-suave transition-colors hover:text-tinta"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <GrupoDePestanas actual={activeTab} onElegir={handleTabChange}>
+          <ListaDePestanas
+            etiqueta={t('send.tabsLabel')}
+            className={CLASE_DE_LA_LISTA_DE_PESTANAS}
+            data-testid="invitation-tabs"
+            pestanas={[
+              {
+                id: 'friends',
+                contenido: t('send.tabFriends'),
+                testId: 'tab-friends',
+              },
+              {
+                id: 'search',
+                contenido: t('send.tabSearchUser'),
+                testId: 'tab-search-user',
+              },
+              {
+                id: 'email',
+                contenido: t('send.tabByEmail'),
+                testId: 'tab-by-email',
+              },
+            ]}
+            claseDePestana={(abierta) =>
+              `flex-1 px-4 py-2.5 ${claseDePestana(abierta)}`
+            }
+          />
+
+          {/* Amigos: la lista, sin teclear ni esperar a nada */}
+          <PanelDePestana id="friends" className="p-4">
+            {cargandoAmigos ? (
+              <div className="py-8 text-center" data-testid="friends-loading">
+                <p className="text-sm text-tinta-suave">
+                  {t('send.loadingFriends')}
+                </p>
+              </div>
+            ) : falloAlComprobarSituacion ? (
+              // Distinto de no poder cargar los amigos: los amigos están, lo que
+              // no se sabe es quién de ellos ya está invitado o dentro. Ofrecerlos
+              // igualmente sería ofrecer lo que el servidor va a rechazar
+              <div
+                className="py-8 text-center"
+                data-testid="friends-eligibility-error"
+              >
+                <p className="text-sm text-tinta-suave">
+                  {t('send.eligibilityLoadFailed')}
+                </p>
+              </div>
+            ) : falloAlCargarAmigos ? (
+              // No es lo mismo que no tener amigos: decirlo sería afirmar lo que
+              // no se ha podido preguntar
+              <div className="py-8 text-center" data-testid="friends-error">
+                <p className="text-sm text-tinta-suave">
+                  {t('send.friendsLoadFailed')}
+                </p>
+              </div>
+            ) : amigosConSuSituacion.length === 0 ? (
+              <div className="py-8 text-center" data-testid="friends-empty">
+                <p className="text-sm text-tinta-suave mb-2">
+                  {t('send.noFriends')}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => handleTabChange('search')}
+                  className="text-sm font-medium text-tinta hover:text-tinta/80"
+                >
+                  {t('send.tabSearchUser')}
+                </button>
+              </div>
+            ) : (
+              <ul className="space-y-2 max-h-72 overflow-y-auto">
+                {amigosConSuSituacion.map((amigo) => {
+                  const { noSePuede } = amigo;
+                  return (
+                    <li key={amigo.otherUserId}>
+                      <button
+                        type="button"
+                        onClick={() => onSendByUserId(amigo.otherUserId, null)}
+                        disabled={isProcessing || noSePuede}
+                        data-testid={`invite-friend-${amigo.otherUserId}`}
+                        className="w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left border border-linea rounded-lg enabled:hover:bg-tarjeta disabled:cursor-default"
+                      >
+                        <span
+                          className={`min-w-0 truncate text-sm font-medium ${
+                            noSePuede ? 'text-tinta-suave' : 'text-tinta'
+                          }`}
+                        >
+                          {amigo.otherUserName}
+                          <NombrePequeno texto={amigo.otherUserSubName} />
+                        </span>
+                        {amigo.yaInscrito ? (
+                          <span className="shrink-0 text-xs text-tinta-suave">
+                            {t('send.alreadyEnrolled')}
+                          </span>
+                        ) : amigo.yaInvitado ? (
+                          <span className="shrink-0 text-xs text-tinta-suave">
+                            {t('send.alreadyInvited')}
+                          </span>
+                        ) : (
+                          <UserPlus className="w-5 h-5 shrink-0 text-tinta" />
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </PanelDePestana>
+
+          {/* Search User Tab */}
+          <PanelDePestana
+            id="search"
+            como="form"
+            onSubmit={handleUserSubmit}
+            className="p-4 space-y-4"
+          >
+            <div>
+              {selectedUser ? (
+                <div
+                  className="flex items-center gap-2 px-3 py-2 bg-realce border border-linea rounded-md"
+                  data-testid="selected-user-chip"
+                >
+                  <Avatar userId={selectedUser.id} size="sm" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-tinta truncate">
+                      {nombreVisible(selectedUser)}
+                    </p>
+                    <NombrePequeno texto={nombrePequeno(selectedUser)} />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleClearUser}
+                    aria-label={t('common:removeSelected', {
+                      name: nombreVisible(selectedUser),
+                    })}
+                    disabled={isProcessing}
+                    className="text-tinta-suave flex-shrink-0"
+                    data-testid="clear-selected-user"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="relative" ref={dropdownRef}>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-tinta-suave" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => {
+                        cambiaLaBusqueda(e.target.value);
+                        setError('');
+                      }}
+                      placeholder={t('send.searchPlaceholder')}
+                      disabled={isProcessing}
+                      className="bg-fondo w-full pl-9 pr-8 py-2 border border-borde rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-tinta focus:border-transparent disabled:opacity-50"
+                      ref={searchInputRef}
+                      data-testid="user-search-input"
+                      role="combobox"
+                      aria-expanded={showDropdown && searchResults.length > 0}
+                      aria-haspopup="listbox"
+                      aria-controls="user-search-listbox"
+                      aria-activedescendant={
+                        highlightedIndex >= 0
+                          ? `search-option-${highlightedIndex}`
+                          : undefined
+                      }
+                    />
+                    {isSearching && (
+                      <Loader className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-tinta-suave animate-spin" />
+                    )}
+                  </div>
+
+                  {/* Search hint */}
+                  {searchQuery.trim().length > 0 &&
+                    searchQuery.trim().length < 2 && (
+                      <p className="text-xs text-tinta-suave mt-1">
+                        {t('send.searchMinChars')}
+                      </p>
+                    )}
+
+                  {/* Resultados en el flujo y no `absolute`: flotando no ocupaban
+                      sitio y asomaban por debajo de la caja (QA, 20 oct) */}
+                  {showDropdown && searchResults.length > 0 && (
+                    <div
+                      id="user-search-listbox"
+                      className="w-full mt-1 bg-tarjeta border border-linea rounded-md max-h-48 overflow-y-auto"
+                      data-testid="search-results-dropdown"
+                      role="listbox"
+                    >
+                      {searchResults.map((user, index) => {
+                        // Como en la pestaña de amigos: sale, pero marcado y sin
+                        // poder elegirlo, que el servidor lo rechazaría (QA, 26 oct)
+                        const { yaInscrito, yaInvitado, noSePuede } =
+                          situacionDe(user.id);
+                        return (
+                          <button
+                            key={user.id}
+                            id={`search-option-${index}`}
+                            type="button"
+                            onClick={() => handleSelectUser(user)}
+                            onMouseEnter={() => highlight(index)}
+                            disabled={noSePuede}
+                            className={`w-full px-3 py-2 text-left transition-colors border-b border-linea last:border-b-0 disabled:cursor-default ${
+                              index === highlightedIndex
+                                ? `${ELEGIDO_CON_ANILLO} ${TEXTO_DE_DENTRO_EN_FOREST}`
+                                : 'hover:bg-fondo'
+                            }`}
+                            role="option"
+                            aria-selected={index === highlightedIndex}
+                            aria-disabled={noSePuede || undefined}
+                            data-testid={`search-result-${user.id}`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <Avatar userId={user.id} size="sm" />
+                              {/* `truncate` no basta en un hijo de flex: sin `min-w-0`
+                                  su ancho mínimo es el del contenido, así que un
+                                  nombre largo desborda en vez de recortarse */}
+                              {/* Gemelo de AddFriendModal: los dos consumen la
+                                  misma busqueda, que desde BE #239 casa tambien
+                                  por alias. Sin el nombre real debajo, una
+                                  busqueda por apodo devuelve filas donde no
+                                  aparece por ningun lado lo que se escribio */}
+                              <div className="min-w-0 flex-1">
+                                <p
+                                  className={`text-sm font-medium truncate ${
+                                    noSePuede
+                                      ? 'text-tinta-suave'
+                                      : 'text-tinta'
+                                  }`}
+                                >
+                                  {nombreVisible(user)}
+                                </p>
+                                <NombrePequeno texto={nombrePequeno(user)} />
+                              </div>
+                              {yaInscrito ? (
+                                <span className="shrink-0 text-xs text-tinta-suave">
+                                  {t('send.alreadyEnrolled')}
+                                </span>
+                              ) : yaInvitado ? (
+                                <span className="shrink-0 text-xs text-tinta-suave">
+                                  {t('send.alreadyInvited')}
+                                </span>
+                              ) : null}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* No results */}
+                  {showDropdown &&
+                    searchResults.length === 0 &&
+                    searchQuery.trim().length >= 2 &&
+                    !isSearching && (
+                      <p
+                        className="text-xs text-tinta-suave mt-1"
+                        data-testid="no-users-found"
+                      >
+                        {t('send.noUsersFound')}
+                      </p>
+                    )}
+                </div>
+              )}
+
+              {searchFailed && (
+                <p
+                  role="alert"
+                  className="text-sm text-error mt-1"
+                  data-testid="search-error"
+                >
+                  {t('send.searchFailed')}
+                </p>
+              )}
+
+              {error && <p className="text-sm text-error mt-1">{error}</p>}
+            </div>
+
+            <div>
+              <label
+                htmlFor="invitation-message-search"
+                className="block text-sm font-medium text-tinta mb-1"
+              >
+                {t('send.personalMessage')}
+              </label>
+              <textarea
+                id="invitation-message-search"
+                value={personalMessage}
+                onChange={(e) => {
+                  setPersonalMessage(e.target.value);
+                  setErrorDelMensaje('');
+                }}
+                placeholder={t('send.personalMessagePlaceholder')}
+                disabled={isProcessing}
+                maxLength={500}
+                rows={3}
+                className="bg-fondo w-full px-3 py-2 border border-borde rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-tinta focus:border-transparent disabled:opacity-50 resize-none"
+                data-testid="invitation-message-input"
+              />
+              {errorDelMensaje && (
+                <p
+                  role="alert"
+                  className="text-sm text-error mt-1"
+                  data-testid="message-error"
+                >
+                  {errorDelMensaje}
+                </p>
+              )}
+              <p className="text-xs text-tinta-suave mt-1 text-right">
+                {personalMessage.length}/500
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={isProcessing}
+                className={`px-4 py-2 text-sm font-medium text-tinta border-[1.5px] border-tinta bg-fondo rounded-boton disabled:opacity-50 ${AL_PASAR}`}
+              >
+                {t('cancel', { ns: 'schedule' })}
+              </button>
+              <button
+                type="submit"
+                disabled={isProcessing || !selectedUser}
+                className="px-4 py-2 text-sm font-medium text-sobre-contraste bg-contraste rounded-boton disabled:opacity-50 disabled:cursor-not-allowed transition-opacity hover:opacity-90"
+                data-testid="send-invitation-button"
+              >
+                {isProcessing ? t('send.sending') : t('send.send')}
+              </button>
+            </div>
+          </PanelDePestana>
+
+          {/* By Email Tab */}
+          <PanelDePestana
+            id="email"
+            como="form"
+            onSubmit={handleEmailSubmit}
+            className="p-4 space-y-4"
+          >
+            <div>
+              <label
+                htmlFor="invitation-email"
+                className="block text-sm font-medium text-tinta mb-1"
+              >
+                {t('send.emailLabel')}
+              </label>
+              <input
+                id="invitation-email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setError('');
+                }}
+                placeholder={t('send.emailPlaceholder')}
+                disabled={isProcessing}
+                className="bg-fondo w-full px-3 py-2 border border-borde rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-tinta focus:border-transparent disabled:opacity-50"
+                data-testid="invitation-email-input"
+              />
+              {error && <p className="text-sm text-error mt-1">{error}</p>}
+            </div>
+
+            <div>
+              <label
+                htmlFor="invitation-message-email"
+                className="block text-sm font-medium text-tinta mb-1"
+              >
+                {t('send.personalMessage')}
+              </label>
+              <textarea
+                id="invitation-message-email"
+                value={personalMessage}
+                onChange={(e) => {
+                  setPersonalMessage(e.target.value);
+                  setErrorDelMensaje('');
+                }}
+                placeholder={t('send.personalMessagePlaceholder')}
+                disabled={isProcessing}
+                maxLength={500}
+                rows={3}
+                className="bg-fondo w-full px-3 py-2 border border-borde rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-tinta focus:border-transparent disabled:opacity-50 resize-none"
+                data-testid="invitation-message-input"
+              />
+              {errorDelMensaje && (
+                <p
+                  role="alert"
+                  className="text-sm text-error mt-1"
+                  data-testid="message-error"
+                >
+                  {errorDelMensaje}
+                </p>
+              )}
+              <p className="text-xs text-tinta-suave mt-1 text-right">
+                {personalMessage.length}/500
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={isProcessing}
+                className={`px-4 py-2 text-sm font-medium text-tinta border-[1.5px] border-tinta bg-fondo rounded-boton disabled:opacity-50 ${AL_PASAR}`}
+              >
+                {t('cancel', { ns: 'schedule' })}
+              </button>
+              <button
+                type="submit"
+                disabled={isProcessing}
+                className="px-4 py-2 text-sm font-medium text-sobre-contraste bg-contraste rounded-boton disabled:opacity-50 disabled:cursor-not-allowed transition-opacity hover:opacity-90"
+                data-testid="send-invitation-button"
+              >
+                {isProcessing ? t('send.sending') : t('send.send')}
+              </button>
+            </div>
+          </PanelDePestana>
+        </GrupoDePestanas>
+      </div>
+    </ModalShell>
+  );
+};
+
+const SendInvitationModal = ({
+  isOpen,
+  onClose,
+  onSend,
+  onSendByUserId,
+  onSearchUsers,
+  isProcessing,
+  t,
+  friends,
+  idsInvitados,
+  idsInscritos,
+  cargandoAmigos,
+  falloAlCargarAmigos,
+  falloAlComprobarSituacion,
+}) => {
+  if (!isOpen) return null;
+  return (
+    <SendInvitationModalContent
+      onClose={onClose}
+      onSend={onSend}
+      onSendByUserId={onSendByUserId}
+      onSearchUsers={onSearchUsers}
+      isProcessing={isProcessing}
+      t={t}
+      friends={friends}
+      idsInvitados={idsInvitados}
+      idsInscritos={idsInscritos}
+      cargandoAmigos={cargandoAmigos}
+      falloAlCargarAmigos={falloAlCargarAmigos}
+      falloAlComprobarSituacion={falloAlComprobarSituacion}
+    />
+  );
+};
+
+export default SendInvitationModal;

@@ -1,0 +1,199 @@
+// src/infrastructure/mappers/ScoringMapper.js
+
+import { siViene } from '../../utils/campoSiViene';
+import { ValidationStatus } from '../../domain/value_objects/ValidationStatus';
+
+/**
+ * Mapper for converting between API DTOs (snake_case) and
+ * frontend DTOs (camelCase) for Scoring.
+ *
+ * Follows the same pattern as ScheduleMapper:
+ * - Static methods only
+ * - Returns plain DTOs (no domain entities)
+ * - Null-safe with sensible defaults
+ */
+class ScoringMapper {
+  /**
+   * Maps GET /matches/{id}/scoring-view response to camelCase DTO.
+   * @param {Object} apiData - API response (snake_case)
+   * @returns {Object} ScoringView DTO (camelCase)
+   */
+  static toScoringViewDTO(apiData) {
+    return {
+      matchId: apiData.match_id,
+      matchNumber: apiData.match_number,
+      matchFormat: apiData.match_format,
+      matchStatus: apiData.match_status,
+      // Cuando abre la anotacion de un partido aun programado (BE #305). Como
+      // en ScheduleMapper: ausente y null no son lo mismo
+      ...siViene(apiData, 'scoring_opens_at', 'scoringOpensAt'),
+      isDecided: apiData.is_decided || false,
+      decidedResult: apiData.decided_result
+        ? {
+            winner: apiData.decided_result.winner,
+            score: apiData.decided_result.score,
+          }
+        : null,
+      roundInfo: apiData.round_info
+        ? {
+            id: apiData.round_info.id,
+            date: apiData.round_info.date,
+            sessionType: apiData.round_info.session_type,
+            golfCourseName: apiData.round_info.golf_course_name,
+            // Para pedir el mapa de hoyos del campo (BE #532)
+            golfCourseId: apiData.round_info.golf_course_id ?? null,
+            // Su país: el mapa solo tiene imagen en España (19 oct)
+            golfCourseCountryCode:
+              apiData.round_info.golf_course_country_code ?? null,
+          }
+        : null,
+      competitionId: apiData.competition_id,
+      teamAName: apiData.team_a_name,
+      teamBName: apiData.team_b_name,
+      markerAssignments: (apiData.marker_assignments || []).map((ma) => ({
+        scorerUserId: ma.scorer_user_id,
+        scorerName: ma.scorer_name,
+        marksUserId: ma.marks_user_id,
+        marksName: ma.marks_name,
+        markedByUserId: ma.marked_by_user_id,
+        markedByName: ma.marked_by_name,
+      })),
+      players: (apiData.players || []).map((p) => ({
+        userId: p.user_id,
+        userName: p.user_name,
+        team: p.team,
+        // El DTO manda `tee_color`; leer `p.color` dejaba el color en undefined
+        color: p.tee_color ?? p.color ?? null,
+        // El sexo de su barra: con el color, el mapa envía las muestras por barra (#880)
+        teeGender: p.tee_gender ?? null,
+        playingHandicap: p.playing_handicap,
+        strokesReceived: p.strokes_received || [],
+        // La tarjeta de SU barra: par, índice y metros. El backend la resuelve y
+        // la manda por jugador desde BE #213 —«para que el cliente no
+        // tenga que volver a resolverlo, y no lo resuelva de otra manera»— y
+        // aquí se estaba tirando, así que la pantalla seguía puntuando contra la
+        // tarjeta del campo. Ver FE #417.
+        holeCard: (p.hole_card || []).map((h) => ({
+          holeNumber: h.hole_number,
+          par: h.par,
+          strokeIndex: h.stroke_index,
+          meters: h.meters ?? null,
+        })),
+      })),
+      holes: (apiData.holes || []).map((h) => ({
+        holeNumber: h.hole_number,
+        par: h.par,
+        strokeIndex: h.stroke_index,
+      })),
+      scores: (apiData.scores || []).map((s) => ({
+        holeNumber: s.hole_number,
+        playerScores: (s.player_scores || []).map((ps) => ({
+          userId: ps.user_id,
+          ownScore: ps.own_score ?? null,
+          ownSubmitted: ps.own_submitted ?? false,
+          markerScore: ps.marker_score ?? null,
+          markerSubmitted: ps.marker_submitted ?? false,
+          validationStatus: ps.validation_status || ValidationStatus.PENDING,
+          netScore: ps.net_score ?? null,
+          strokesReceivedThisHole: ps.strokes_received_this_hole ?? 0,
+        })),
+        holeResult: s.hole_result
+          ? {
+              winner: s.hole_result.winner,
+              standing: s.hole_result.standing,
+              standingTeam: s.hole_result.standing_team,
+              bestBallPlayerA: s.hole_result.best_ball_player_a ?? [],
+              bestBallPlayerB: s.hole_result.best_ball_player_b ?? [],
+            }
+          : null,
+      })),
+      matchStanding: apiData.match_standing
+        ? {
+            status: apiData.match_standing.status,
+            leadingTeam: apiData.match_standing.leading_team,
+            holesPlayed: apiData.match_standing.holes_played,
+            holesRemaining: apiData.match_standing.holes_remaining,
+          }
+        : null,
+      scorecardSubmittedBy: apiData.scorecard_submitted_by || [],
+      // Fourball: los retirados (BE #665). Su bola sin validar no
+      // cuenta, no entregan y las asignaciones ya vienen sin ellos
+      withdrawnPlayerIds: apiData.withdrawn_player_ids || [],
+    };
+  }
+
+  /**
+   * Maps GET /competitions/{id}/leaderboard response to camelCase DTO.
+   * @param {Object} apiData - API response (snake_case)
+   * @returns {Object} Leaderboard DTO (camelCase)
+   */
+  static toLeaderboardDTO(apiData) {
+    return {
+      competitionId: apiData.competition_id,
+      competitionName: apiData.competition_name,
+      teamAName: apiData.team_a_name,
+      teamBName: apiData.team_b_name,
+      teamAPoints: apiData.team_a_points ?? 0,
+      teamBPoints: apiData.team_b_points ?? 0,
+      matches: (apiData.matches || []).map((m) => ({
+        matchId: m.match_id,
+        matchNumber: m.match_number,
+        matchFormat: m.match_format,
+        // De qué sesión es: el número de partido se repite entre sesiones
+        // (FE #738). Sin ellos en rondas antiguas o un backend anterior
+        roundDate: m.round_date ?? null,
+        sessionType: m.session_type ?? null,
+        status: m.status,
+        currentHole: m.current_hole ?? null,
+        standing: m.standing ?? null,
+        leadingTeam: m.leading_team ?? null,
+        teamAPlayers: (m.team_a_players || []).map((p) => ({
+          userId: p.user_id,
+          userName: p.user_name,
+        })),
+        teamBPlayers: (m.team_b_players || []).map((p) => ({
+          userId: p.user_id,
+          userName: p.user_name,
+        })),
+        result: m.result
+          ? {
+              winner: m.result.winner,
+              score: m.result.score,
+            }
+          : null,
+      })),
+    };
+  }
+
+  /**
+   * Maps POST /matches/{id}/scorecard/submit response to camelCase DTO.
+   * @param {Object} apiData - API response (snake_case)
+   * @returns {Object} MatchSummary DTO (camelCase)
+   */
+  static toMatchSummaryDTO(apiData) {
+    return {
+      matchId: apiData.match_id,
+      submittedBy: apiData.submitted_by,
+      result: apiData.result
+        ? {
+            winner: apiData.result.winner,
+            score: apiData.result.score,
+            teamAPoints: apiData.result.team_a_points ?? 0,
+            teamBPoints: apiData.result.team_b_points ?? 0,
+          }
+        : null,
+      stats: apiData.stats
+        ? {
+            playerGrossTotal: apiData.stats.player_gross_total,
+            playerNetTotal: apiData.stats.player_net_total,
+            holesWon: apiData.stats.holes_won,
+            holesLost: apiData.stats.holes_lost,
+            holesHalved: apiData.stats.holes_halved,
+          }
+        : null,
+      matchComplete: apiData.match_complete || false,
+    };
+  }
+}
+
+export default ScoringMapper;

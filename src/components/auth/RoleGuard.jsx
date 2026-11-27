@@ -1,0 +1,134 @@
+import { Navigate, useLocation } from 'react-router';
+import { useTranslation } from 'react-i18next';
+import { respaldoDeCarga } from '../ui/textoDeEspera';
+import { useAuth } from '../../hooks/useAuth';
+import { estadoParaElLogin } from '../../utils/vueltaTrasEntrar';
+import { Role } from '../../domain/value_objects/Role';
+
+/**
+ * RoleGuard Component
+ * Route-level guard that verifies user has required global role(s)
+ * Redirects to unauthorized page if user doesn't have the required role
+ *
+ * @param {Object} props
+ * @param {string|string[]} props.allowedRoles - Single role or array of allowed roles ('ADMIN', 'CREATOR', 'PLAYER')
+ * @param {React.ReactNode} props.children - Protected content to render if authorized
+ * @param {boolean} [props.requireAll=false] - If true, requires ALL roles. If false, requires AT LEAST ONE
+ * @param {string} [props.redirectTo='/unauthorized'] - Path to redirect when unauthorized
+ *
+ * @example
+ * // Protect admin route
+ * <Route path="/admin/users" element={
+ *   <RoleGuard allowedRoles="ADMIN">
+ *     <AdminUsersPage />
+ *   </RoleGuard>
+ * } />
+ *
+ * // Allow ADMIN or CREATOR
+ * <Route path="/competitions/create" element={
+ *   <RoleGuard allowedRoles={['ADMIN', 'CREATOR']}>
+ *     <CreateCompetition />
+ *   </RoleGuard>
+ * } />
+ */
+const RoleGuard = ({
+  allowedRoles,
+  children,
+  requireAll = false,
+  redirectTo = '/unauthorized',
+}) => {
+  const { t, i18n } = useTranslation('common');
+  const location = useLocation();
+  const { user, loading, sinConfirmar } = useAuth();
+
+  // Show loading state while checking authentication.
+  //
+  // Y tambien mientras la sesion este sin confirmar: la que se apunta en el
+  // dispositivo no lleva privilegios a proposito —`is_admin: false`—, asi que
+  // decidir con ella mandaba a `/unauthorized` a un administrador que recargara
+  // `/admin` con un bache de red. Y con `replace`: la respuesta buena que llega
+  // tres segundos despues ya no lo devuelve donde estaba (FE #529)
+  if (loading || sinConfirmar) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100vh',
+          fontFamily: 'system-ui, sans-serif',
+          color: 'var(--cbg-tinta-suave, #6b7280)',
+        }}
+      >
+        {/* Con `common` aún sin bajar, el respaldo en su idioma y no la clave */}
+        {t('loading', { defaultValue: respaldoDeCarga(i18n) })}
+      </div>
+    );
+  }
+
+  // If no user, redirect to login (this shouldn't happen if ProtectedRoute is also used)
+  if (!user) {
+    // Con la última cuenta de la pestaña: si entra otra, irá a su panel (FE #1064, R1)
+    return <Navigate to="/login" state={estadoParaElLogin(location)} replace />;
+  }
+
+  // Normalize allowedRoles to array
+  const rolesArray = Array.isArray(allowedRoles)
+    ? allowedRoles
+    : [allowedRoles];
+
+  // Validate that allowedRoles is not empty
+  if (rolesArray.length === 0) {
+    console.error('[RoleGuard] allowedRoles cannot be empty');
+    return <Navigate to={redirectTo} state={{ from: location }} replace />;
+  }
+
+  // Extract user's role names
+  // Support multiple backend formats (RBAC simplified - see ROADMAP.md):
+  // 1. user.is_admin = true (current backend format for global admin access)
+  // 2. user.roles = [{ name: 'ADMIN' }] or ['ADMIN'] (future format)
+  let userRoleNames = [];
+
+  // Check for global admin flag (current backend implementation)
+  if (user.is_admin === true) {
+    userRoleNames.push(Role.ADMIN);
+  }
+
+  // Check for roles array (future implementation)
+  if (user.roles && Array.isArray(user.roles)) {
+    const rolesFromArray = user.roles.map((role) =>
+      typeof role === 'string' ? role : role.name,
+    );
+    userRoleNames = [...new Set([...userRoleNames, ...rolesFromArray])];
+  }
+
+  // Check if user has required role(s)
+  const hasAccess = requireAll
+    ? rolesArray.every((role) => userRoleNames.includes(role))
+    : rolesArray.some((role) => userRoleNames.includes(role));
+
+  // Special case: ADMIN has access to everything
+  const isAdmin = userRoleNames.includes(Role.ADMIN);
+
+  // CREATOR can access PLAYER routes (ADR-009: Admin > Creator > Player)
+  const isCreator = userRoleNames.includes(Role.CREATOR);
+  const playerAccessGranted =
+    rolesArray.includes(Role.PLAYER) && (isCreator || isAdmin);
+
+  if (!hasAccess && !isAdmin && !playerAccessGranted) {
+    console.warn(
+      `[RoleGuard] Access denied. Required: ${rolesArray.join(', ')}, User has: ${userRoleNames.join(', ')}`,
+    );
+    return (
+      <Navigate
+        to={redirectTo}
+        state={{ from: location, reason: 'insufficient_permissions' }}
+        replace
+      />
+    );
+  }
+
+  return children;
+};
+
+export default RoleGuard;

@@ -1,0 +1,114 @@
+{
+  "backToFeed": "Volver a actividad",
+  "backToFriends": "Volver a amigos",
+  "title": "Perfil",
+  "loading": "Cargando perfil...",
+  "friendsCount": "{{count}} amigo",
+  "friendsCount_other": "{{count}} amigos",
+  "notFound": {
+    "title": "No encontramos a este jugador",
+    "hint": "Puede que haya dado de baja su cuenta o que el enlace no sea correcto.",
+    "back": "Volver a la actividad"
+  },
+  "friendship": {
+    "add": "Añadir amigo",
+    "sent": "Solicitud enviada",
+    "received": "Te ha enviado una solicitud",
+    "accept": "Aceptar",
+    "decline": "Rechazar",
+    "friends": "Amigos",
+    "blocked": "Bloqueado",
+    "requestSent": "Solicitud enviada",
+    "accepted": "Ya sois amigos",
+    "declined": "Solicitud rechazada",
+    "unblock": "Desbloquear",
+    "cancelRequest": "Cancelar solicitud",
+    "cancelled": "Solicitud cancelada",
+    "removed": "Ya no sois amigos",
+    "blockedNow": "Jugador bloqueado",
+    "unblocked": "Jugador desbloqueado",
+    "onlyBlockerCanUnblock": "Solo quien ha bloqueado puede desbloquear"
+  },
+  "private": {
+    "title": "Solo entre amigos",
+    "hint": "Hazte su amigo para ver sus estadísticas y actividad"
+  },
+  "stats": {
+    "title": "Estadísticas",
+    "handicap": "Hándicap",
+    "estimatedIndex": "Índice estimado",
+    "scoringAvg": "Media al par",
+    "roundsPlayed": "Vueltas",
+    "bestDifferential": "Mejor diferencial",
+    "tournaments": "Torneos",
+    "estimatedIndexHint": "No es el índice oficial de la federación.",
+    "empty": "Todavía no tiene ninguna vuelta que contar.",
+    "noValue": "—"
+  },
+  "activity": {
+    "title": "Su actividad",
+    "empty": "No ha publicado nada todavía.",
+    "hidden": "No publica su actividad.",
+    "loadMore": "Ver más"
+  },
+  "handicap": "Hándicap",
+  "menu": {
+    "label": "Más opciones",
+    "remove": "Eliminar amigo",
+    "block": "Bloquear"
+  },
+  "confirm": {
+    "remove": {
+      "title": "¿Eliminar a {{name}} de tus amigos?",
+      "message": "Dejaréis de ver vuestras estadísticas y actividad. Podéis volver a ser amigos con una nueva solicitud.",
+      "confirm": "Eliminar amigo"
+    },
+    "block": {
+      "title": "¿Bloquear a {{name}}?",
+      "message": "Se eliminará vuestra amistad o cualquier solicitud pendiente, y no podrá enviarte solicitudes. Puedes desbloquearle cuando quieras.",
+      "confirm": "Bloquear"
+    }
+  },
+  "headToHead": {
+    "title": "Cara a cara",
+    "against": "Contra él",
+    "alongside": "Con él",
+    "won": "Ganadas",
+    "halved": "Empatadas",
+    "lost": "Perdidas"
+  },
+  "gamesTogether": {
+    "title": "Partidas juntos",
+    "loadMore": "Ver más",
+    "unknownCourse": "Campo sin nombre",
+    "unknownTournament": "Torneo sin nombre",
+    "positions": "{{mine}} y {{theirs}} de {{total}}",
+    "tied": "{{position}} (empatado)",
+    "position_ordinal_one": "{{count}}.º",
+    "position_ordinal_two": "{{count}}.º",
+    "position_ordinal_few": "{{count}}.º",
+    "position_ordinal_other": "{{count}}.º",
+    "format": {
+      "SINGLES": "Individual",
+      "FOURBALL": "Fourball",
+      "FOURSOMES": "Foursomes",
+      "STABLEFORD": "Stableford",
+      "MEDAL": "Medal"
+    },
+    "relation": {
+      "AGAINST": "Contra él",
+      "WITH": "Con él"
+    },
+    "result": {
+      "WON": "Ganada",
+      "HALVED": "Empatada",
+      "LOST": "Perdida",
+      "UNFINISHED": "Sin terminar",
+      "none": "Sin resultado"
+    }
+  },
+  "errors": {
+    "reloadFailed": "Hecho, pero no hemos podido actualizar el perfil. Vuelve a abrirlo en un momento.",
+    "requestNotSent": "No se ha podido enviar la solicitud"
+  }
+}

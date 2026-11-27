@@ -1,0 +1,591 @@
+import {
+  CaseSensitive,
+  Hash,
+  RulerDimensionLine,
+  ShieldCheck,
+} from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Link, useNavigate, useSearchParams, useParams } from 'react-router';
+import { motion } from 'framer-motion';
+import customToast from '../utils/toast';
+import {
+  stripSecretsFromAddressBar,
+  readStrippedSecret,
+} from '../utils/stripSecretsFromAddressBar';
+import { useTranslation } from 'react-i18next';
+import { passwordErrorMessage, validatePassword } from '../utils/validation';
+import { broadcastLogout } from '../utils/broadcastAuth';
+import { olvidaLaUltimaCuenta } from '../utils/vueltaTrasEntrar';
+import PasswordInput from '../components/ui/PasswordInput';
+import PasswordStrengthIndicator from '../components/ui/PasswordStrengthIndicator';
+import MarcoDeAcceso from '../components/auth/MarcoDeAcceso';
+import LoadingMark from '../components/ui/LoadingMark';
+import { esFalloDeRedDeLaApi } from '../utils/sinCobertura';
+import {
+  validateResetTokenUseCase,
+  resetPasswordUseCase,
+} from '../composition';
+import { mensajeDelError } from '../utils/mensajeDelError';
+import { registraElFallo } from '../utils/registraElFallo';
+import EstadoDeAcceso from '../components/auth/EstadoDeAcceso';
+import {
+  BOTON_PRINCIPAL,
+  ENLACE_PRINCIPAL,
+  ENLACE_SECUNDARIO,
+  TARJETA_DE_ACCESO,
+} from '../components/auth/clasesDeAcceso';
+
+/**
+ * ResetPasswordPage Component
+ *
+ * Permite al usuario cambiar su contraseña usando un token de reset recibido por email.
+ *
+ * Flujo:
+ * 1. Usuario llega con token en URL: /reset-password/:token o /reset-password?token=xxx
+ * 2. Pre-validación automática del token (useEffect)
+ * 3. Si token válido: muestra formulario
+ * 4. Si token inválido/expirado: muestra error y link a /forgot-password
+ *    Enlace malo SOLO con valid:false, un 4xx que no sea 408 ni 429, o el
+ *    token vacío; todo lo demás es «no se pudo comprobar» + «Reintentar» (FE #785)
+ * 5. Usuario ingresa nueva contraseña (2 inputs: nueva + confirmar)
+ * 6. Validación OWASP: 12+ chars, complejidad
+ * 7. Submit → resetPasswordUseCase → redirección a /login
+ *
+ * Seguridad:
+ * - Token 256-bit del backend
+ * - Expiración 24h
+ * - Single-use token (backend invalida tras uso exitoso)
+ * - Backend invalida TODAS las sesiones activas tras reset
+ * - Password policy OWASP ASVS V2.1 (12+ chars)
+ * - Rate limiting 3 intentos/hora (backend)
+ */
+const ResetPassword = () => {
+  const { t } = useTranslation(['auth', 'common']);
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const params = useParams();
+
+  // Soportar ambos formatos: /reset-password/:token y /reset-password?token=xxx.
+  // Tras quitarlo de la barra, una recarga lo recupera del historial
+  const token =
+    params.token || searchParams.get('token') || readStrippedSecret('token');
+
+  // Leido: fuera de la barra, antes de que Replay grabe el href de la pagina
+  // y de que acabe en el Referer (utils/stripSecretsFromAddressBar.js)
+  useEffect(() => {
+    stripSecretsFromAddressBar();
+  }, []);
+
+  // Estados del token
+  // 'unchecked': la API no dijo que el enlace fuera malo (sin conexión, 408, 429,
+  // 5xx, una respuesta que no es JSON…); se ofrece reintentar, no pedir otro (FE #785)
+  const [tokenState, setTokenState] = useState('validating'); // 'validating' | 'valid' | 'invalid' | 'unchecked'
+  const [tokenMessage, setTokenMessage] = useState('');
+  const [checkFailure, setCheckFailure] = useState(null); // clave i18n del motivo
+  // Cada «Reintentar» lo sube y vuelve a lanzar la comprobación con el mismo token
+  const [checkAttempt, setCheckAttempt] = useState(0);
+
+  // Estados del formulario
+  const [formData, setFormData] = useState({
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [errors, setErrors] = useState({});
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Ref para cleanup del timer de navegación (prevenir memory leak)
+  const navigationTimerRef = useRef(null);
+
+  /**
+   * Cleanup: limpiar timer de navegación al desmontar
+   * Previene memory leak si el componente se desmonta antes de que se ejecute setTimeout
+   */
+  useEffect(() => {
+    return () => {
+      if (navigationTimerRef.current) {
+        clearTimeout(navigationTimerRef.current);
+      }
+    };
+  }, []);
+
+  /**
+   * Pre-validación del token al montar el componente
+   * Mejora UX: usuario sabe si el token es válido antes de llenar el formulario
+   */
+  useEffect(() => {
+    const validateToken = async () => {
+      // Vacío o en blanco: enlace malo sin preguntar a nadie
+      if (!token?.trim()) {
+        setTokenState('invalid');
+        setTokenMessage(t('resetPassword.tokenInvalidMessage'));
+        return;
+      }
+
+      try {
+        const result = await validateResetTokenUseCase.execute(token);
+
+        if (result.valid) {
+          setTokenState('valid');
+          setTokenMessage(result.message);
+        } else {
+          setTokenState('invalid');
+          // Texto propio y traducido: el del backend viene siempre en español
+          setTokenMessage(t('resetPassword.tokenInvalidMessage'));
+        }
+      } catch (error) {
+        // Regla final (21 oct): el enlace es malo SOLO si la API lo dice —valid:false,
+        // o un 4xx que no sea 408 ni 429—. Todo lo demás no dice nada del enlace
+        // —sin conexión, 408, 429, 5xx, un 200 que no es JSON (el portal de una
+        // wifi), un error sin status— y se ofrece reintentar (FE #785)
+        registraElFallo(
+          'ResetPassword.token-validation-error',
+          'Token validation error:',
+          error,
+        );
+        const status = error?.status;
+        const sinRed = esFalloDeRedDeLaApi(error);
+        const enlaceMalo =
+          !sinRed &&
+          status >= 400 &&
+          status < 500 &&
+          status !== 408 &&
+          status !== 429;
+        if (enlaceMalo) {
+          setTokenState('invalid');
+          setTokenMessage(t('resetPassword.tokenInvalidMessage'));
+          return;
+        }
+        setTokenState('unchecked');
+        if (sinRed) {
+          setCheckFailure('resetPassword.checkNoConnection');
+        } else if (status === 429) {
+          setCheckFailure('resetPassword.checkTooManyRequests');
+        } else {
+          setCheckFailure('resetPassword.checkServerError');
+        }
+      }
+    };
+
+    validateToken();
+  }, [token, t, checkAttempt]);
+
+  const retryCheck = () => {
+    setTokenState('validating');
+    setCheckAttempt((n) => n + 1);
+  };
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+
+    // Limpiar error al escribir
+    if (errors[name]) {
+      setErrors((prev) => ({ ...prev, [name]: '' }));
+    }
+  };
+
+  const validateForm = () => {
+    const newErrors = {};
+
+    // Validación 1: Nueva contraseña con requisitos OWASP
+    const passwordValidation = validatePassword(formData.newPassword);
+    if (!passwordValidation.isValid) {
+      newErrors.newPassword = t(
+        passwordValidation.messageKey,
+        passwordValidation.messageOptions,
+      );
+    }
+
+    // Validación 2: Confirmación de contraseña
+    if (!formData.confirmPassword) {
+      newErrors.confirmPassword = t('validation.confirmPasswordRequired', {
+        ns: 'auth',
+      });
+    } else if (formData.newPassword !== formData.confirmPassword) {
+      newErrors.confirmPassword = t('validation.passwordsDoNotMatch', {
+        ns: 'auth',
+      });
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!validateForm()) {
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      await resetPasswordUseCase.execute(token, formData.newPassword);
+
+      // Broadcast logout to all open tabs after successful password reset
+      try {
+        broadcastLogout();
+      } catch {
+        // Non-critical: only affects multi-tab sync
+      }
+      // Ni la última cuenta de esta pestaña: es el final de esa sesión (FE #1064, R3). Y
+      // el usuario guardado, que una recarga en los dos segundos de antes de ir al login
+      // volvería a leer: el backend ya cerró todas sus sesiones (CodeRabbit en #1069)
+      olvidaLaUltimaCuenta();
+      try {
+        localStorage.removeItem('user');
+      } catch {
+        // Sin almacenamiento no hay nada que volver a leer
+      }
+
+      customToast.success(t('resetPassword.success'), {
+        duration: 5000,
+      });
+
+      // Redireccionar a login tras 2 segundos
+      // Guardar timer ID para cleanup (prevenir memory leak)
+      navigationTimerRef.current = setTimeout(() => {
+        navigate('/login', {
+          replace: true,
+          state: { message: t('resetPassword.successMessage') },
+        });
+      }, 2000);
+    } catch (error) {
+      registraElFallo(
+        'ResetPassword.reset-password-error',
+        'Reset password error:',
+        error,
+      );
+
+      // Manejo de errores específicos
+      const contrasena = passwordErrorMessage(error, t);
+      if (contrasena) {
+        // El backend la rechaza con un código (BE #519): en el idioma de la app
+        customToast.error(contrasena, { duration: 6000 });
+      } else if (error.errorCode === 'RESET_TOKEN_INVALID') {
+        // Por su código (BE #519): el texto va en español («inválido») y buscar
+        // «invalid» en él no lo encontraba nunca
+        customToast.error(t('resetPassword.tokenInvalidMessage'), {
+          duration: 6000,
+        });
+        setTokenState('invalid');
+        setTokenMessage(t('resetPassword.tokenInvalidMessage'));
+      } else if (error.status === 429) {
+        customToast.error(t('resetPassword.rateLimitError'), {
+          duration: 6000,
+        });
+      } else {
+        customToast.error(mensajeDelError(error, t('resetPassword.error')), {
+          duration: 5000,
+        });
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  /**
+   * UI: Loading State (validando token)
+   */
+  if (tokenState === 'validating') {
+    // El mismo dibujo que el resto de las esperas (FE #495). La tarjeta se
+    // queda: esta pantalla no solo espera, cuenta lo que hace con el enlace
+    return (
+      <EstadoDeAcceso
+        conEntrada
+        encima={<LoadingMark tamano="pequeno" tinta="tema" />}
+        titulo={t('resetPassword.validatingToken')}
+        texto={t('resetPassword.validatingMessage')}
+      />
+    );
+  }
+
+  /**
+   * UI: no se ha podido comprobar el enlace (FE #785)
+   * Sin «pedir otro enlace»: no se sabe que este no valga
+   */
+  if (tokenState === 'unchecked') {
+    return (
+      <EstadoDeAcceso
+        conEntrada
+        dibujo="bunker"
+        titulo={t('resetPassword.checkFailedTitle')}
+        texto={t(checkFailure)}
+      >
+        <button type="button" onClick={retryCheck} className={BOTON_PRINCIPAL}>
+          {t('resetPassword.retry')}
+        </button>
+        <Link to="/login" className={ENLACE_SECUNDARIO}>
+          {t('resetPassword.backToLoginButton')}
+        </Link>
+      </EstadoDeAcceso>
+    );
+  }
+
+  /**
+   * UI: Invalid Token State
+   */
+  if (tokenState === 'invalid') {
+    return (
+      <EstadoDeAcceso
+        conEntrada
+        dibujo="bunker"
+        titulo={t('resetPassword.invalidTokenTitle')}
+        texto={tokenMessage}
+      >
+        <Link to="/forgot-password" className={ENLACE_PRINCIPAL}>
+          {t('resetPassword.requestNewLink')}
+        </Link>
+        <Link to="/login" className={ENLACE_SECUNDARIO}>
+          {t('resetPassword.backToLoginButton')}
+        </Link>
+      </EstadoDeAcceso>
+    );
+  }
+
+  /**
+   * UI: Valid Token - Reset Password Form
+   */
+  return (
+    <MarcoDeAcceso
+      titulo={t('resetPassword.heroTitle')}
+      subtitulo={t('resetPassword.heroSubtitle')}
+      ventajas={[
+        {
+          Icono: RulerDimensionLine,
+          text: t('resetPassword.securityTips.tip1'),
+        },
+        { Icono: CaseSensitive, text: t('resetPassword.securityTips.tip2') },
+        { Icono: Hash, text: t('resetPassword.securityTips.tip3') },
+        { Icono: ShieldCheck, text: t('resetPassword.securityTips.tip4') },
+      ]}
+      textoDeVolver={t('resetPassword.backToHome')}
+    >
+      {/* Form Card */}
+      <div className={TARJETA_DE_ACCESO}>
+        {/* Header */}
+        <div className="mb-6">
+          <h2 className="text-3xl font-black text-gray-900 font-poppins mb-2">
+            {t('resetPassword.title')}
+          </h2>
+          <p className="text-gray-600">{t('resetPassword.subtitle')}</p>
+        </div>
+
+        {/* Password Requirements */}
+        <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+          <p className="text-sm font-semibold text-blue-900 mb-2">
+            {t('resetPassword.requirementsTitle')}
+          </p>
+          <ul className="space-y-1 text-sm text-blue-700">
+            <li className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {t('resetPassword.requirement1')}
+            </li>
+            <li className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {t('resetPassword.requirement2')}
+            </li>
+            <li className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {t('resetPassword.requirement3')}
+            </li>
+            <li className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {t('resetPassword.requirement4')}
+            </li>
+            <li className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {t('resetPassword.requirement5')}
+            </li>
+          </ul>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* New Password */}
+          <div>
+            <PasswordInput
+              name="newPassword"
+              value={formData.newPassword}
+              onChange={handleChange}
+              placeholder={t('resetPassword.newPasswordPlaceholder')}
+              error={!!errors.newPassword}
+              disabled={isLoading}
+              label={t('resetPassword.newPasswordLabel')}
+              autoComplete="new-password"
+              className={`w-full px-4 py-3 rounded-lg border-2 transition-all duration-200 ${
+                errors.newPassword
+                  ? 'border-red-300 focus:border-red-500 focus:ring-2 focus:ring-red-200'
+                  : 'border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20'
+              } outline-none`}
+            />
+
+            {/* Password Strength Indicator */}
+            {formData.newPassword && (
+              <PasswordStrengthIndicator password={formData.newPassword} />
+            )}
+
+            {errors.newPassword && (
+              <motion.p
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-red-500 text-xs mt-2 flex items-center gap-1"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                {errors.newPassword}
+              </motion.p>
+            )}
+          </div>
+
+          {/* Confirm Password */}
+          <div>
+            <PasswordInput
+              name="confirmPassword"
+              value={formData.confirmPassword}
+              onChange={handleChange}
+              placeholder={t('resetPassword.confirmPasswordPlaceholder')}
+              error={!!errors.confirmPassword}
+              disabled={isLoading}
+              label={t('resetPassword.confirmPasswordLabel')}
+              autoComplete="new-password"
+              className={`w-full px-4 py-3 rounded-lg border-2 transition-all duration-200 ${
+                errors.confirmPassword
+                  ? 'border-red-300 focus:border-red-500 focus:ring-2 focus:ring-red-200'
+                  : 'border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20'
+              } outline-none`}
+            />
+
+            {errors.confirmPassword && (
+              <motion.p
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-red-500 text-xs mt-2 flex items-center gap-1"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                {errors.confirmPassword}
+              </motion.p>
+            )}
+          </div>
+
+          {/* Submit Button */}
+          <motion.button
+            type="submit"
+            disabled={isLoading}
+            whileHover={{ scale: isLoading ? 1 : 1.02 }}
+            whileTap={{ scale: isLoading ? 1 : 0.98 }}
+            className={BOTON_PRINCIPAL}
+          >
+            {isLoading ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg
+                  className="animate-spin h-5 w-5"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  ></circle>
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  ></path>
+                </svg>
+                {t('resetPassword.resetting')}
+              </span>
+            ) : (
+              t('resetPassword.resetButton')
+            )}
+          </motion.button>
+        </form>
+
+        {/* Divider */}
+        <div className="relative my-6">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-200"></div>
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="px-4 bg-tarjeta text-tinta-suave">
+              {t('google.orDivider')}
+            </span>
+          </div>
+        </div>
+
+        {/* Back to Login */}
+        <div className="text-center">
+          <p className="text-gray-600 text-sm">
+            {t('resetPassword.rememberPassword')}{' '}
+            <Link
+              to="/login"
+              className="font-semibold text-primary hover:text-primary-600 transition-colors"
+            >
+              {t('resetPassword.backToLogin')}
+            </Link>
+          </p>
+        </div>
+      </div>
+    </MarcoDeAcceso>
+  );
+};
+
+export default ResetPassword;

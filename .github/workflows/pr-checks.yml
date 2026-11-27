@@ -1,0 +1,84 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [develop, main]
+    types: [opened, synchronize, reopened]
+
+# Mínimos: los dos jobs solo leen la PR (CodeQL actions/missing-workflow-permissions)
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # El «📏 PR Size Check» que había aquí era un echo que siempre pasaba y main lo
+  # exigía. Se quitó el 30 sep 2026: las PRs grandes a propósito (formateos,
+  # releases) son normales aquí, y un límite bloqueante solo estorbaría
+  pr-conventional-commits:
+    name: 📝 Conventional Commits Check
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'pull_request'
+    steps:
+      # Solo los scripts: la tarjeta del resumen (.github/scripts/summary_card.py)
+      - name: Checkout the summary scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+
+      # Wait for auto-fix to complete for Dependabot PRs
+      - name: Wait for auto-fix workflow
+        if: github.actor == 'dependabot[bot]' || github.actor == 'dependabot-preview[bot]'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        with:
+          script: |
+            console.log('⏳ Waiting for auto-fix workflow to complete...');
+            await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
+            console.log('✅ Proceeding with validation');
+
+      - name: Check PR title
+        id: title
+        uses: amannn/action-semantic-pull-request@2252a14e810aa9b85c2d560bd7070c802206ecf6  # v6.1.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+          requireScope: false
+          subjectPattern: ^[A-Z].+$
+          subjectPatternError: |
+            The subject found in the pull request title
+            didn't match the configured pattern. Please ensure that the subject
+            starts with an uppercase character (e.g., "Add feature" or "Fix bug").
+            Note: Dependabot PRs are automatically fixed by the auto-fix-pr-title workflow.
+
+      - name: Summary card
+        if: always()
+        continue-on-error: true  # la tarjeta nunca tumba el job
+        env:
+          STATUS: ${{ job.status }}
+          OUTCOME: ${{ steps.title.outcome }}
+          TITLE: ${{ github.event.pull_request.title }}
+          ERROR: ${{ steps.title.outputs.error_message }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # El título de AHORA, el que ha comprobado la acción: el del evento es el
+          # del momento en que se lanzó (un re-run tras editarlo mostraría el viejo)
+          TITLE=$(gh pr view "$PR_NUMBER" -R "$GITHUB_REPOSITORY" --json title --jq .title 2>/dev/null || printf '%s' "$TITLE")
+          RESULT=$(python3 .github/scripts/summary_results.py pr-title outcome="$OUTCOME" \
+            title="$TITLE" error="$ERROR")
+          python3 .github/scripts/summary_card.py \
+            --title "📝 Conventional Commits Check" \
+            --what "The PR title must follow Conventional Commits (type(scope): Subject, with a lowercase type from the allowed list and a subject that starts with a capital letter), so the history and the release notes read the same way." \
+            --status "$STATUS" --result "$RESULT" \
+            --if-fails "Edit the PR title, e.g. 'feat(scoring): Add offline sync'. This check does not re-run on a title edit: push a commit or re-run the job."

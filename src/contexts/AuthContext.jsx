@@ -1,0 +1,252 @@
+/**
+ * Authentication Context
+ * Manages user authentication state and CSRF token for v1.13.0 security features
+ *
+ * @see docs/FRONTEND_INTEGRATION_v1.13.0.md - CSRF Protection section
+ */
+
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+} from 'react';
+import {
+  setCsrfTokenGlobal,
+  olvidaLoGuardadoDeLaCuenta,
+  copiaDelUsuarioEnElDispositivo,
+  esLaCopiaReducida,
+} from '../composition/http';
+import { olvidaLaSesion } from '../services/sesionCompartida';
+import { olvidaLasAccionesPendientes } from '../services/accionesPendientes';
+import { abreLoGuardadoParaLaCuenta } from '../services/loUltimoConocido';
+import { abreLosMarcadoresParaLaCuenta } from '../services/marcadoresVistos';
+// Rellena el registro que usa `olvidaLoDeLaCuenta` (también lo carga main.jsx)
+import { anotaLaCuentaDeEstaPestana } from '../utils/vueltaTrasEntrar';
+import { registraElFallo } from '../utils/registraElFallo';
+
+// Create the context
+const AuthContext = createContext(null);
+
+/**
+ * AuthProvider component
+ * Wraps the application to provide authentication state globally
+ *
+ * State managed:
+ * - user: Current authenticated user (null if not authenticated)
+ * - csrfToken: CSRF token from backend (required for POST/PUT/PATCH/DELETE)
+ */
+export const AuthProvider = ({ children }) => {
+  /**
+   * Initialize user from localStorage using lazy initializer
+   * This avoids calling setState in useEffect (better performance + no lint warning)
+   */
+  const [user, setUser] = useState(() => {
+    // Guard for SSR and environments without localStorage
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+      return null;
+    }
+
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        const guardado = JSON.parse(storedUser);
+        // Una copia completa de antes de la fase 3 (con correo, género…) se reescribe
+        // reducida: aquí solo se lee `id` y si hay usuario (FE-06)
+        if (!esLaCopiaReducida(guardado)) {
+          const reducida = copiaDelUsuarioEnElDispositivo(guardado);
+          if (!reducida) throw new Error('Stored user is not an object');
+          try {
+            localStorage.setItem('user', JSON.stringify(reducida));
+          } catch (error) {
+            // Sin espacio para reescribirla: se sigue con la reducida en memoria, sin
+            // perder al usuario; se reescribe en el próximo arranque o al entrar
+            registraElFallo(
+              'AuthContext.failed-to-rewrite-the-stored-user',
+              'Failed to rewrite the stored user:',
+              error,
+            );
+          }
+          return reducida;
+        }
+        return guardado;
+      }
+    } catch (error) {
+      registraElFallo(
+        'AuthContext.failed-to-parse-stored-user',
+        'Failed to parse stored user:',
+        error,
+      );
+      // Safe cleanup: only remove if localStorage is available
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('user');
+      }
+    }
+    return null;
+  });
+
+  // La última cuenta de esta pestaña (`vueltaTrasEntrar`), al arrancar, al entrar y al salir: si otra
+  // pestaña borra o pisa el usuario de `localStorage`, un cierre forzado aquí sigue
+  // sabiendo de quién es la página que guarda (regla 6 de `vueltaTrasEntrar`)
+  useEffect(() => {
+    anotaLaCuentaDeEstaPestana(user?.id);
+  }, [user]);
+
+  const [csrfToken, setCsrfToken] = useState(null);
+  const [isInitialized] = useState(true); // Always true since we use lazy initializer
+
+  /**
+   * Update user state
+   * @param {Object} userData - User data from backend
+   */
+  const setUserData = useCallback((userData) => {
+    setUser(userData);
+    // Entrar o salir INVALIDAN la consulta compartida, las dos (FE #489). Al
+    // entrar no se siembra con esto aunque ahorraria un viaje: aqui llega una
+    // **entidad de dominio** —camelCase, con el correo como objeto— y quien lee
+    // de `useAuth` espera el DTO del backend en snake_case.
+    //
+    // Y no basta con invalidar al salir: si antes hubo un 401 —un enlace publico
+    // abierto sin sesion basta— quedaba guardado como «no hay usuario», y al
+    // entrar sin recargar el guardia leia eso y devolvia al formulario, que
+    // confirmaba la sesion y volvia a mandar al destino. Un ida y vuelta sin fin
+    // que solo cortaba una recarga.
+    olvidaLaSesion();
+    // Y lo que enseñó el panel era de quien estuviera antes: salir ya lo
+    // olvidaba, pero entrar con otra cuenta sin salir ni recargar lo pintaba
+    // un instante, con los avisos —y desde la BE #361 las competiciones— de
+    // la otra persona
+    olvidaLasAccionesPendientes();
+
+    if (userData) {
+      // Entra una cuenta: lo que se guarda para anotar sin cobertura vuelve a poder
+      // escribirse, aunque una limpieza «sin sesión» de esta carga lo cerrara
+      abreLoGuardadoParaLaCuenta();
+      abreLosMarcadoresParaLaCuenta();
+      // Solo lo permitido (fase 3, FE-06): ni correo, ni el pendiente, ni género. En
+      // memoria sigue completo
+      try {
+        localStorage.setItem(
+          'user',
+          JSON.stringify(copiaDelUsuarioEnElDispositivo(userData)),
+        );
+      } catch (error) {
+        // Sin espacio (o sin almacenamiento): se entra igual, con el usuario en memoria,
+        // como en el arranque. Solo se pierde poder recordarlo al recargar
+        registraElFallo(
+          'AuthContext.failed-to-store-the-user',
+          'Failed to store the user:',
+          error,
+        );
+      }
+    } else {
+      try {
+        localStorage.removeItem('user');
+      } catch {
+        // Nada que borrar
+      }
+    }
+  }, []);
+
+  /**
+   * Update CSRF token
+   * Called after login and token refresh
+   * @param {string} token - New CSRF token from backend
+   */
+  const updateCsrfToken = useCallback((token) => {
+    setCsrfToken(token);
+  }, []);
+
+  /**
+   * Clear authentication state
+   * Called on logout or session expiration
+   */
+  const clearAuth = useCallback(() => {
+    setUser(null);
+    setCsrfToken(null);
+    // Sin esto, lo que la consulta compartida tuviera guardado sobreviviria al
+    // cierre de sesion y el siguiente componente que montara veria un usuario
+    // que ya no esta (FE #489).
+    //
+    // Por aqui pasan el aviso de otra pestaña y —desde FE
+    // #531— el boton de salir, que antes se limpiaba a medias: hacia su
+    // peticion y redirigia, y el almacenamiento se quedaba entero.
+    //
+    // Los dos cierres duros NO pasan: `handleDeviceRevocationLogout` y
+    // `handleCsrfLogout` limpian a mano y salen con `window.location.href`, y
+    // esa recarga se lleva por delante el estado del modulo. Lo que la recarga
+    // NO se lleva es el almacenamiento, asi que lo que viva ahi hay que
+    // borrarlo en los tres sitios. Si algun dia esas salidas pasan a ser
+    // navegacion de cliente, tendran que invalidar tambien
+    olvidaLaSesion();
+    // Y lo que el panel llegara a enseñar: son datos de ESTA cuenta, y asomarian
+    // un instante en la siguiente que entrara sin recargar (FE #502)
+    olvidaLasAccionesPendientes();
+    // El usuario guardado (lo primero: si una limpieza de abajo fallara, la cuenta no
+    // puede quedarse apuntada en este dispositivo), el token de antes y lo que otros
+    // guardan de la cuenta, con la MISMA función que los cierres
+    // forzados (`composition/limpiezaAlCerrarLaSesion`): las partidas guardadas
+    // para anotar sin cobertura (FE #524), lo pendiente del hándicap (FE #677) y
+    // el número de Actividad y el del icono de la app. En un móvil compartido, la
+    // siguiente persona vería la lista de la anterior, o el modal con su
+    // hándicap, y aceptarlo lo guardaría en su perfil. Si una falla, las demás se
+    // hacen igual (lo garantiza el registro) y el cierre sigue: salir no puede
+    // quedarse a medias por un almacenamiento lleno
+    try {
+      olvidaLoGuardadoDeLaCuenta();
+    } catch (error) {
+      registraElFallo(
+        'AuthContext.auth-logout-cleanup-failed',
+        '[Auth] Logout cleanup failed:',
+        error,
+      );
+    }
+    // Los avisos de golpes que no se pudieron guardar NO se tocan, ni aquí ni
+    // en los cierres duros. Se intentó borrarlos y es un error: no se pueden
+    // regenerar —el golpe que describen ya salió de la cola al escribirlos— y
+    // el borrado llega a dispararse DENTRO del propio vaciado, porque un 403
+    // de CSRF cierra la sesión desde `api.js` en mitad del bucle y se lleva
+    // avisos escritos milisegundos antes. La privacidad ya está resuelta sin
+    // borrar nada: `golpesPerdidos.pendientes(userId)` solo devuelve los de
+    // quien mira, así que la siguiente persona del móvil no los ve (FE #521)
+  }, []);
+
+  const value = {
+    user,
+    csrfToken,
+    isInitialized,
+    setUser: setUserData,
+    updateCsrfToken,
+    clearAuth,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
+
+/**
+ * Enhanced AuthProvider that syncs CSRF token to global variable
+ * This allows api.js to access the token synchronously
+ */
+export const AuthProviderWithGlobalSync = ({ children }) => {
+  return (
+    <AuthProvider>
+      <CsrfTokenSyncWrapper>{children}</CsrfTokenSyncWrapper>
+    </AuthProvider>
+  );
+};
+
+/**
+ * Internal component to sync CSRF token to global variable
+ */
+const CsrfTokenSyncWrapper = ({ children }) => {
+  const { csrfToken } = useContext(AuthContext);
+
+  useEffect(() => {
+    setCsrfTokenGlobal(csrfToken);
+  }, [csrfToken]);
+
+  return children;
+};
+
+export default AuthContext;

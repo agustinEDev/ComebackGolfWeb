@@ -1,0 +1,49 @@
+import CompetitionAssembler from '../../assemblers/CompetitionAssembler';
+
+/** @typedef {import('../../../domain/repositories/ICompetitionRepository').ICompetitionRepository} ICompetitionRepository */
+
+/**
+ * Use Case: Get Competition Detail
+ *
+ * Retrieves the full details of a competition by its ID.
+ * Returns a simple DTO optimized for the UI, including all competition
+ * information such as location details, dates, settings, and status.
+ */
+class GetCompetitionDetailUseCase {
+  /**
+   * @param {Object} deps - The dependencies object.
+   * @param {ICompetitionRepository} deps.competitionRepository - The competition repository.
+   */
+  constructor({ competitionRepository }) {
+    this.competitionRepository = competitionRepository;
+  }
+
+  /**
+   * Executes the use case to get competition details.
+   *
+   * @param {string} competitionId - The ID of the competition to retrieve.
+   * @returns {Promise<Object>} - A simple DTO for the UI with all competition details.
+   * @throws {Error} If competitionId is not provided or competition is not found.
+   */
+  async execute(competitionId) {
+    // Validate input
+    if (!competitionId) {
+      throw new Error('Competition ID is required');
+    }
+
+    // Fetch competition from repository (domain entity + extras)
+    const found = await this.competitionRepository.findById(competitionId);
+
+    // If competition is not found, throw an error
+    if (!found) {
+      throw new Error('Competition not found');
+    }
+
+    // Convert domain entity to simple DTO for UI, with what the entity
+    // doesn't keep (location names, creator, etc.)
+    const { entity, extras } = found;
+    return CompetitionAssembler.toSimpleDTO(entity, extras);
+  }
+}
+
+export default GetCompetitionDetailUseCase;

@@ -1,0 +1,411 @@
+import { COLOR_DE_LO_ELEGIDO } from '../components/ui/clasesDeComportamiento';
+import { useState, useEffect, useMemo } from 'react';
+import { motion } from 'framer-motion';
+import {
+  Target,
+  TrendingDown,
+  TrendingUp,
+  Minus,
+  Flag,
+  Award,
+} from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import HeaderAuth from '../components/layout/HeaderAuth';
+import RecentMatches from '../components/dashboard/RecentMatches';
+import ScoringBreakdown from '../components/stats/ScoringBreakdown';
+import { useAuth } from '../hooks/useAuth';
+import { useEntryMotion } from '../hooks/useEntryMotion';
+import { useCargaCancelableEffect } from '../hooks/useCargaCancelableEffect';
+import { slideUp, staggerContainer, getEntryProps } from '../utils/animations';
+import {
+  getPlayerStatsUseCase,
+  getRecentMatchesUseCase,
+  getPlayerStatsByGolfCourseUseCase,
+  getScoringBreakdownUseCase,
+} from '../composition';
+import FullScreenLoader from '../components/ui/FullScreenLoader';
+import BlockLoader from '../components/ui/BlockLoader';
+import { formatoDeIndice } from '../utils/formatoDeHandicap';
+import { PANTALLA_MENOS_BARRA_INFERIOR } from '../utils/barraInferior';
+import { registraElFallo } from '../utils/registraElFallo';
+
+/**
+ * Las estadísticas completas del jugador (FE #306, fase 2).
+ *
+ * Vive en su propia página y no dentro del panel ni del perfil: el panel acaba
+ * de adelgazar a propósito, y aquí caben las tres cosas que la vista pedía —
+ * el resumen entero, el desglose por campo y el historial completo, que es el
+ * "ver todas" que la lista del panel no tenía a dónde enlazar.
+ *
+ * **El índice estimado no es el oficial de la federación**: le falta el PCC y
+ * los topes de la Regla 5.8. Se dice en la página, no solo en la API, porque
+ * quien lo lee aquí es quien puede confundirlo con su hándicap real.
+ */
+
+const StatBlock = ({ icon: Icon, label, value, hint, testId }) => (
+  <div
+    data-testid={testId}
+    className="rounded-tarjeta border border-contorno bg-tarjeta p-4"
+  >
+    <div className="mb-1 flex items-center gap-2">
+      <Icon className="h-4 w-4 text-tinta-suave" aria-hidden="true" />
+      <span className="text-xs font-medium text-tinta-suave">{label}</span>
+    </div>
+    <p className="text-2xl font-bold text-tinta">{value}</p>
+    {hint && <p className="mt-0.5 text-xs text-tinta-suave">{hint}</p>}
+  </div>
+);
+
+// Distingue "el desglose falló" de "no hay desglose". Sin esto, un error de red
+// se pintaría como "todavía no tienes vueltas", que es afirmar algo que no se
+// ha podido preguntar.
+const FALLO_DEL_DESGLOSE = Symbol('fallo-del-desglose');
+
+const leeLasEstadisticas = () =>
+  Promise.all([
+    getPlayerStatsUseCase.execute(),
+    getRecentMatchesUseCase.execute(),
+    // El desglose cae solo si falla, y no se lleva por delante el resumen
+    // ni el historial. Su endpoint es más nuevo que ellos: mientras no
+    // esté desplegado responde 404, y un `Promise.all` convertiría eso en
+    // una pantalla de estadísticas vacía para todo el mundo
+    getScoringBreakdownUseCase.execute().catch((error) => {
+      registraElFallo(
+        'PlayerStatsPage.failed-to-load-the-scoring-breakdown',
+        'Failed to load the scoring breakdown:',
+        error,
+      );
+      return FALLO_DEL_DESGLOSE;
+    }),
+  ]);
+
+const PlayerStatsPage = () => {
+  const { t } = useTranslation('dashboard');
+  const { user, loading: isLoadingUser } = useAuth();
+  const { animateEntry } = useEntryMotion();
+
+  const [globalStats, setGlobalStats] = useState(null);
+  const [matches, setMatches] = useState([]);
+  const [breakdown, setBreakdown] = useState(null);
+  const [breakdownFailed, setBreakdownFailed] = useState(false);
+  const [selectedCourseId, setSelectedCourseId] = useState(null);
+  const [courseStats, setCourseStats] = useState(null);
+  const [isLoadingCourse, setIsLoadingCourse] = useState(false);
+
+  // Se depende del id y no del objeto: un refetch del perfil devuelve un
+  // `user` distinto que es la misma persona, y recargar entonces sería pedir
+  // otra vez lo mismo. Si cambia de verdad con una en vuelo, la vieja no se pinta
+  const userId = user?.id;
+  const { cargando: isLoading } = useCargaCancelableEffect(
+    leeLasEstadisticas,
+    [userId],
+    {
+      activa: Boolean(userId),
+      alCargar: ([stats, history, scoringBreakdown]) => {
+        setGlobalStats(stats);
+        setMatches(history);
+        const fallo = scoringBreakdown === FALLO_DEL_DESGLOSE;
+        setBreakdown(fallo ? null : scoringBreakdown);
+        setBreakdownFailed(fallo);
+      },
+      alFallar: (error) => {
+        registraElFallo(
+          'PlayerStatsPage.failed-to-load-player-statistics',
+          'Failed to load player statistics:',
+          error,
+        );
+        setGlobalStats(null);
+        setMatches([]);
+        setBreakdown(null);
+        setBreakdownFailed(true);
+      },
+    },
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCourse = async () => {
+      if (!selectedCourseId) {
+        setCourseStats(null);
+        return;
+      }
+
+      setIsLoadingCourse(true);
+      try {
+        const stats =
+          await getPlayerStatsByGolfCourseUseCase.execute(selectedCourseId);
+        if (!cancelled) {
+          setCourseStats(stats);
+        }
+      } catch (error) {
+        registraElFallo(
+          'PlayerStatsPage.failed-to-load-golf-course-statistics',
+          'Failed to load golf course statistics:',
+          error,
+        );
+        if (!cancelled) {
+          setCourseStats(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingCourse(false);
+        }
+      }
+    };
+
+    loadCourse();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCourseId]);
+
+  /**
+   * Los campos donde ha jugado salen de su propio historial: no hay endpoint
+   * que los liste, y tampoco haría falta — nadie puede tener estadísticas de un
+   * campo donde no ha jugado.
+   */
+  const playedCourses = useMemo(() => {
+    const byId = new Map();
+    matches.forEach((match) => {
+      if (match.golfCourseId && !byId.has(match.golfCourseId)) {
+        byId.set(
+          match.golfCourseId,
+          match.golfCourseName || match.golfCourseId,
+        );
+      }
+    });
+    return [...byId.entries()].map(([id, name]) => ({ id, name }));
+  }, [matches]);
+
+  const shown = selectedCourseId ? courseStats : globalStats;
+  const format = (value, suffix = '') =>
+    value === null || value === undefined
+      ? '--'
+      : `${value.toFixed(1)}${suffix}`;
+  const formatToPar = (value) => {
+    if (value === null || value === undefined) return '--';
+    if (value === 0) return t('playerStats.levelPar');
+    return value > 0 ? `+${value.toFixed(1)}` : value.toFixed(1);
+  };
+
+  if (isLoadingUser && !user) {
+    return <FullScreenLoader />;
+  }
+
+  if (!user) {
+    return null;
+  }
+
+  const trend = shown?.handicapTrend;
+  const isSteady = trend === 0;
+  const isImproving = shown?.isImproving?.() ?? false;
+  const TrendIcon = isSteady ? Minus : isImproving ? TrendingDown : TrendingUp;
+
+  return (
+    <div
+      className={`relative flex ${PANTALLA_MENOS_BARRA_INFERIOR} w-full flex-col bg-fondo`}
+    >
+      <div className="layout-container flex h-full grow flex-col">
+        <HeaderAuth user={user} />
+
+        <div className="flex flex-1 justify-center px-4 py-5 md:px-40">
+          <motion.div
+            {...getEntryProps(animateEntry)}
+            variants={staggerContainer}
+            className="layout-content-container flex max-w-[960px] flex-1 flex-col"
+          >
+            <motion.div variants={slideUp} className="p-4">
+              <h1 className="hidden md:block text-3xl font-bold tracking-tight text-tinta">
+                {t('playerStats.title')}
+              </h1>
+              <p className="mt-1 text-sm text-tinta-suave">
+                {t('playerStats.subtitle')}
+              </p>
+            </motion.div>
+
+            {/* Selector de campo */}
+            {playedCourses.length > 0 && (
+              <motion.div variants={slideUp} className="px-4 pb-2">
+                <div
+                  className="flex flex-wrap gap-2"
+                  data-testid="course-filter"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCourseId(null)}
+                    aria-pressed={selectedCourseId === null}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                      selectedCourseId === null
+                        ? COLOR_DE_LO_ELEGIDO
+                        : 'border-linea bg-tarjeta text-tinta'
+                    }`}
+                  >
+                    {t('playerStats.allCourses')}
+                  </button>
+                  {playedCourses.map((course) => (
+                    <button
+                      key={course.id}
+                      type="button"
+                      onClick={() => setSelectedCourseId(course.id)}
+                      aria-pressed={selectedCourseId === course.id}
+                      data-testid={`course-filter-${course.id}`}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                        selectedCourseId === course.id
+                          ? COLOR_DE_LO_ELEGIDO
+                          : 'border-linea bg-tarjeta text-tinta'
+                      }`}
+                    >
+                      {course.name}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {/* Resumen */}
+            <motion.div variants={slideUp} className="p-4">
+              {/* El dibujo compartido, no cuatro rectangulos grises (FE #495) */}
+              {isLoading || isLoadingCourse ? (
+                <div aria-busy="true">
+                  <BlockLoader />
+                </div>
+              ) : shown && shown.roundsPlayed > 0 ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    <StatBlock
+                      testId="stat-rounds"
+                      icon={Flag}
+                      label={t('playerStats.roundsPlayed')}
+                      value={shown.roundsPlayed}
+                    />
+                    <StatBlock
+                      testId="stat-scoring-avg"
+                      icon={Target}
+                      label={t('playerStats.scoringAvg')}
+                      value={formatToPar(shown.scoringAvg)}
+                      hint={t('playerStats.scoringAvgHint')}
+                    />
+                    <StatBlock
+                      testId="stat-playing-avg"
+                      icon={TrendIcon}
+                      label={t('playerStats.playingAverage')}
+                      value={format(shown.playingAvg)}
+                      hint={
+                        shown.hasPlayingAverage()
+                          ? t('playerStats.overRounds', {
+                              count: shown.roundsWithDifferential,
+                            })
+                          : t('playerStats.needsMoreRounds')
+                      }
+                    />
+                    <StatBlock
+                      testId="stat-best"
+                      icon={Award}
+                      label={t('playerStats.bestRound')}
+                      value={format(shown.bestDifferential)}
+                    />
+                  </div>
+
+                  {shown.hasRoundsWithoutDifferential() && (
+                    <p
+                      data-testid="rounds-without-tee-note"
+                      className="mt-3 rounded-lg border border-aviso bg-aviso-suave px-3 py-2 text-xs text-aviso"
+                    >
+                      {/* Con cero computadas no está "calculado sobre 0": es
+                          que no se pudo calcular, y decirlo de otra forma
+                          suena a que el número existe pero sale mal */}
+                      {shown.roundsWithDifferential === 0
+                        ? t('playerStats.noRoundsWithTee', {
+                            count: shown.roundsPlayed,
+                          })
+                        : t('playerStats.roundsWithoutTee', {
+                            counted: shown.roundsWithDifferential,
+                            count: shown.roundsPlayed,
+                          })}
+                    </p>
+                  )}
+
+                  {/* El índice se saca del resumen y se explica aparte: mira
+                      solo las mejores vueltas, así que sin contexto se lee como
+                      el nivel al que se está jugando, que es otra cosa */}
+                  <div
+                    data-testid="estimated-index-block"
+                    className="mt-4 rounded-tarjeta border border-contorno bg-tarjeta p-4"
+                  >
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-sm font-semibold text-tinta">
+                        {t('playerStats.estimatedIndex')}
+                      </span>
+                      <span className="text-2xl font-bold text-tinta">
+                        {formatoDeIndice(shown.estimatedIndex) ?? '--'}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-tinta-suave">
+                      {shown.hasEstimatedIndex()
+                        ? t('playerStats.estimatedIndexExplained')
+                        : t('playerStats.needsMoreRounds')}
+                    </p>
+                    <p className="mt-2 text-xs text-tinta-suave">
+                      {t('playerStats.notOfficial')}
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <div
+                  data-testid="player-stats-empty"
+                  className="rounded-tarjeta border-2 border-dashed border-linea p-8 text-center"
+                >
+                  <p className="text-sm font-semibold text-tinta">
+                    {selectedCourseId
+                      ? t('playerStats.emptyCourseTitle')
+                      : t('playerStats.emptyTitle')}
+                  </p>
+                  <p className="mt-1 text-xs text-tinta-suave">
+                    {selectedCourseId
+                      ? t('playerStats.emptyCourseDescription')
+                      : t('playerStats.emptyDescription')}
+                  </p>
+                </div>
+              )}
+            </motion.div>
+
+            {/* Dónde se van los golpes.
+                Solo en la vista global: el desglose no se pide por campo, así
+                que enseñarlo con un campo elegido mezclaría dos ámbitos en la
+                misma pantalla. El reparto por campo ya va dentro. */}
+            {!selectedCourseId && (
+              <motion.div variants={slideUp} className="p-4">
+                <h2 className="mb-3 text-lg font-bold text-tinta">
+                  {t('breakdown.title')}
+                </h2>
+                {isLoading ? (
+                  <div aria-busy="true">
+                    <BlockLoader />
+                  </div>
+                ) : (
+                  <ScoringBreakdown
+                    breakdown={breakdown}
+                    failed={breakdownFailed}
+                  />
+                )}
+              </motion.div>
+            )}
+
+            {/* Historial completo: el "ver todas" que la lista del panel no tenía */}
+            <motion.div variants={slideUp} className="p-4">
+              <RecentMatches
+                esperaSilenciosa
+                matches={matches}
+                isLoading={isLoading}
+                titleKey="playerStats.historyTitle"
+              />
+            </motion.div>
+          </motion.div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default PlayerStatsPage;

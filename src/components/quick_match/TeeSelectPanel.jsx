@@ -1,0 +1,150 @@
+import { useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+
+import { teeKey, resolveTeeColor } from './createQuickMatchModalConstants';
+import { useFocoRetenido } from '../../hooks/useFocoRetenido';
+import { nombreDeLaBarra } from '../../utils/nombreDeLaBarra';
+import { Gender } from '../../domain/value_objects/Gender';
+import { alTocarElFondo } from '../ui/alTocarElFondo';
+
+/**
+ * Bottom-sheet tee picker, opened from the + of each friend — same pattern as
+ * `HandicapInputPanel` and `scoring/ScoreInputPanel`.
+ *
+ * Replaces the per-row picker, which put name, tees and add button on one line:
+ * on a phone that left names as "Eri…" and hid 5 of 8 tees behind a horizontal
+ * scrollbar, one per friend.
+ *
+ * Picking a tee adds the participant straight away, with no confirmation step.
+ * The tee travels in the same request that adds them and there is no endpoint
+ * to change it afterwards, so a mis-tap is undone by removing the participant
+ * and adding them again.
+ *
+ * Tambien lo usan el creador y el invitado a traves de `TeeSelectField`, donde
+ * si hay una salida ya elegida: llega en `selectedKey` y se marca, para que
+ * cambiarla sea ver cual esta puesta y tocar otra.
+ */
+
+// Las salidas se agrupan por género porque cada jugador elige entre las suyas.
+// Las mixtas van al final: un campo federado rara vez las tiene, y cuando las
+// tiene son la excepción, no el caso corriente.
+const GENDER_ORDER = [Gender.MALE, Gender.FEMALE, null];
+
+const GENDER_LABEL_KEY = {
+  [Gender.MALE]: 'create.teePanel.male',
+  [Gender.FEMALE]: 'create.teePanel.female',
+  null: 'create.teePanel.mixed',
+};
+
+// `title` sustituye al «Salida de {nombre}» de siempre cuando la hoja no es
+// de otro jugador: la tuya se titulaba «Salida de tus barras» («your tee's
+// tee» en inglés) al meterle «tus barras» como nombre (pasada del Kind, 4 nov
+// 2026)
+const TeeSelectPanel = ({
+  courseTees,
+  onSelect,
+  onClose,
+  playerName,
+  title,
+  selectedKey = null,
+}) => {
+  const { t } = useTranslation('quickMatch');
+  const { t: tCourses } = useTranslation('golfCourses');
+  const titulo = title ?? t('create.teePanel.title', { name: playerName });
+
+  // Modal de verdad: el foco entra, no se sale y vuelve al disparador (#389).
+  // Escape exclusivo: se abre sobre el modal de crear partida, que tiene su
+  // propio Escape y no debe cerrarse con el de la hoja
+  const hojaRef = useRef(null);
+  useFocoRetenido(hojaRef, { alEscape: onClose, escapeExclusivo: true });
+
+  const groups = GENDER_ORDER.map((gender) => ({
+    gender,
+    // El género nulo llega como undefined o null según de dónde venga el tee
+    tees: courseTees.filter((tee) => (tee.gender ?? null) === gender),
+  })).filter((group) => group.tees.length > 0);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40"
+      role="presentation"
+      {...alTocarElFondo(onClose)}
+    >
+      <div
+        ref={hojaRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={titulo}
+        data-testid="quick-match-tee-panel"
+        className="bg-fondo rounded-t-2xl border-t border-contorno w-full max-w-md p-4 pb-[calc(2rem+env(safe-area-inset-bottom))] max-h-[80vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-3">
+          {/* `truncate` no recorta nada sin `min-w-0`: sin él un nombre largo
+              empujaría la cruz de cerrar fuera del panel en vez de acortarse */}
+          <span className="min-w-0 truncate text-sm font-semibold text-tinta-suave">
+            {titulo}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t('create.teePanel.close')}
+            className="text-tinta-suave text-lg leading-none flex-shrink-0"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          {groups.map((group) => (
+            <div key={group.gender ?? 'MIXED'}>
+              <p className="text-xs font-semibold uppercase tracking-wide text-tinta-suave mb-2">
+                {t(GENDER_LABEL_KEY[group.gender])}
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {group.tees.map((tee) => {
+                  const key = teeKey(tee.color, tee.gender);
+                  const color = resolveTeeColor(tee.color);
+                  // Dentro de un grupo el sufijo (M)/(F) sobra: el encabezado ya
+                  // distingue las dos "Rojas", que es justo para lo que se
+                  // añadió el sufijo en las listas donde van mezcladas
+                  const name = nombreDeLaBarra(tCourses, {
+                    color: tee.color,
+                    identifier: tee.identifier,
+                  });
+
+                  const isSelected = key === selectedKey;
+
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => onSelect(key)}
+                      aria-pressed={isSelected}
+                      data-testid={`quick-match-tee-panel-option-${key}`}
+                      className={`inline-flex items-center gap-2 rounded-tarjeta border px-3 py-3 text-sm font-medium transition-colors ${
+                        color?.selected ?? 'border-linea text-tinta'
+                      } ${isSelected ? 'ring-2 ring-tinta ring-offset-1 ring-offset-fondo' : ''} hover:opacity-80`}
+                    >
+                      {color && (
+                        <span
+                          // El color de la barra es el del mundo real: el
+                          // de las blancas es blanco también en oscuro
+                          data-paleta="propia"
+                          className={`w-3 h-3 rounded-full flex-shrink-0 ${color.dot}`}
+                        />
+                      )}
+                      <span className="min-w-0 truncate">{name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default TeeSelectPanel;

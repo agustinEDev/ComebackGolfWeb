@@ -1,0 +1,176 @@
+import { AL_PASAR, AL_PULSAR } from '../ui/clasesDeComportamiento';
+import { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  MAX_HANDICAP,
+  MIN_HANDICAP,
+} from '../../domain/services/handicapRange';
+import { useFocoRetenido } from '../../hooks/useFocoRetenido';
+import { alTocarElFondo } from '../ui/alTocarElFondo';
+
+const KEYPAD_DIGITS = [7, 8, 9, 4, 5, 6, 1, 2, 3];
+
+/**
+ * Bottom-sheet numeric keypad for entering a handicap (-10.0 to 54.0, one
+ * decimal place) — same bottom-sheet pattern as `scoring/ScoreInputPanel`,
+ * adapted for decimals/negatives instead of golf scores 1-15 (a plain
+ * `<input type="number">` renders inconsistent spinners/decimal separators
+ * across browsers and is fiddly on mobile).
+ */
+const HandicapInputPanel = ({ value, onConfirm, onClose, label }) => {
+  const { t } = useTranslation('quickMatch');
+  const [input, setInput] = useState(value != null ? String(value) : '');
+
+  const isEmpty = input === '';
+  const parsed =
+    isEmpty || input === '-' || input.endsWith('.') ? null : Number(input);
+  const isOutOfRange =
+    parsed !== null && (parsed < MIN_HANDICAP || parsed > MAX_HANDICAP);
+  const canConfirm =
+    isEmpty || (parsed !== null && !Number.isNaN(parsed) && !isOutOfRange);
+
+  const appendDigit = (digit) => {
+    setInput((prev) => {
+      const decimals = prev.split('.')[1];
+      if (decimals && decimals.length >= 1) return prev;
+      return prev + digit;
+    });
+  };
+
+  const appendDecimalPoint = () => {
+    setInput((prev) => {
+      if (prev.includes('.')) return prev;
+      return prev === '' || prev === '-' ? `${prev}0.` : `${prev}.`;
+    });
+  };
+
+  const toggleSign = () => {
+    setInput((prev) => (prev.startsWith('-') ? prev.slice(1) : `-${prev}`));
+  };
+
+  const backspace = () => setInput((prev) => prev.slice(0, -1));
+
+  const handleConfirm = () => {
+    if (!canConfirm) return;
+    onConfirm(isEmpty ? null : parsed);
+  };
+
+  // Modal de verdad: el foco entra, no se sale y vuelve al disparador (#389).
+  // Escape exclusivo: se abre sobre el modal de crear partida, que tiene su
+  // propio Escape y no debe cerrarse con el de la hoja
+  const hojaRef = useRef(null);
+  useFocoRetenido(hojaRef, { alEscape: onClose, escapeExclusivo: true });
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40"
+      role="presentation"
+      {...alTocarElFondo(onClose)}
+    >
+      <div
+        ref={hojaRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+        className="bg-fondo rounded-t-2xl border-t border-contorno w-full max-w-md p-4 pb-[calc(2rem+env(safe-area-inset-bottom))]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-3">
+          {/* `truncate` no recorta nada sin `min-w-0`: el ancho minimo del hijo
+              de flex es el de su contenido, asi que un nombre largo empujaria
+              la cruz de cerrar fuera del panel en vez de acortarse */}
+          <span className="min-w-0 truncate text-sm font-semibold text-tinta-suave">
+            {label}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t('create.handicapPanel.close')}
+            className="text-tinta-suave text-lg leading-none flex-shrink-0"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div
+          data-testid="handicap-panel-display"
+          className={`mb-1 h-14 flex items-center justify-center rounded-tarjeta border text-2xl font-bold ${
+            isOutOfRange
+              ? 'border-error bg-error-suave text-error'
+              : 'border-linea text-tinta'
+          }`}
+        >
+          {isEmpty ? (
+            <span className="text-base font-normal text-tinta-suave">
+              {t('create.handicapPanel.placeholder')}
+            </span>
+          ) : (
+            input
+          )}
+        </div>
+        <p className="text-xs text-error text-center mb-3 h-4">
+          {isOutOfRange && t('create.handicapPanel.errorRange')}
+        </p>
+
+        <div className="grid grid-cols-3 gap-2 mb-2">
+          {KEYPAD_DIGITS.map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => appendDigit(String(n))}
+              className={`h-12 rounded-tarjeta border border-contorno bg-tarjeta text-tinta text-xl font-bold ${AL_PASAR} ${AL_PULSAR}`}
+            >
+              {n}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={toggleSign}
+            aria-label={t('create.handicapPanel.toggleSign')}
+            className={`h-12 rounded-tarjeta border border-contorno bg-tarjeta text-tinta text-xl font-bold ${AL_PASAR} ${AL_PULSAR}`}
+          >
+            +/-
+          </button>
+          <button
+            type="button"
+            onClick={() => appendDigit('0')}
+            className={`h-12 rounded-tarjeta border border-contorno bg-tarjeta text-tinta text-xl font-bold ${AL_PASAR} ${AL_PULSAR}`}
+          >
+            0
+          </button>
+          <button
+            type="button"
+            onClick={appendDecimalPoint}
+            className={`h-12 rounded-tarjeta border border-contorno bg-tarjeta text-tinta text-xl font-bold ${AL_PASAR} ${AL_PULSAR}`}
+          >
+            .
+          </button>
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={backspace}
+            disabled={isEmpty}
+            aria-label={t('create.handicapPanel.backspace')}
+            data-testid="handicap-panel-backspace"
+            className={`flex-1 h-12 rounded-tarjeta border border-contorno bg-tarjeta text-tinta-suave disabled:opacity-50 ${AL_PASAR}`}
+          >
+            ⌫
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirm}
+            disabled={!canConfirm}
+            data-testid="handicap-panel-confirm"
+            className="flex-[2] h-12 rounded-tarjeta bg-contraste text-sobre-contraste font-semibold transition-opacity enabled:hover:opacity-90 disabled:opacity-50"
+          >
+            {t('create.handicapPanel.confirm')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default HandicapInputPanel;

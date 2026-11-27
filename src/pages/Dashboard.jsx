@@ -1,0 +1,1009 @@
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate, Navigate, useLocation } from 'react-router';
+import { motion } from 'framer-motion';
+import { ArrowRight, Pencil } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import AliasSheet from '../components/profile/AliasSheet';
+import HeaderAuth from '../components/layout/HeaderAuth';
+import ConmutadorDeTema from '../components/ui/ConmutadorDeTema';
+import TrazoDeRecorrido from '../components/ui/TrazoDeRecorrido';
+import { marcaDeAguaDelMonograma } from '../utils/marcaDeAgua';
+import { useMarcadorDeLaCompeticion } from '../hooks/useMarcadorDeLaCompeticion';
+import { competicionEnJuego } from '../utils/competicionEnJuego';
+import customToast from '../utils/toast';
+import HandicapRequestModal from '../components/profile/HandicapRequestModal';
+import EmailVerificationBanner from '../components/EmailVerificationBanner';
+import GolpesSinEnviar from '../components/dashboard/GolpesSinEnviar';
+import PendingActionsCard from '../components/dashboard/PendingActionsCard';
+import PlayerStatsCards from '../components/dashboard/PlayerStatsCards';
+import NextMatchBanner from '../components/dashboard/NextMatchBanner';
+import MarcadorDeLaCompeticion from '../components/dashboard/MarcadorDeLaCompeticion';
+import RecentMatches from '../components/dashboard/RecentMatches';
+import CreateQuickMatchModal from '../components/quick_match/CreateQuickMatchModal';
+import { useAuth } from '../hooks/useAuth';
+import { estadoParaElLogin } from '../utils/vueltaTrasEntrar';
+import { useEntryMotion } from '../hooks/useEntryMotion';
+import { slideUp, staggerContainer, getEntryProps } from '../utils/animations';
+import FullScreenLoader from '../components/ui/FullScreenLoader';
+import { laPantallaEstaLista } from '../utils/cortinaDeArranque';
+import {
+  lasPartidasGuardadas,
+  leeLasProximasPartidas,
+  leeLosProximosPartidos,
+  losProximosGuardados,
+} from '../services/partidosSinCobertura';
+import {
+  elUltimoPanel,
+  recuerdaElPanel,
+  seSabeQueNoHayProximos,
+} from '../services/loUltimoConocido';
+import { esFalloDeRedDeLaApi } from '../utils/sinCobertura';
+import PlayerStats from '../domain/entities/PlayerStats';
+import RecentMatch from '../domain/entities/RecentMatch';
+import { elMasCercano } from '../utils/elMasCercano';
+import {
+  elPanelYaSePinto,
+  anotaQueElPanelSePinto,
+  ESPERA_MAXIMA_MS,
+} from '../utils/primeraCargaDelPanel';
+import {
+  listUserCompetitionsUseCase,
+  getPlayerStatsUseCase,
+  getRecentMatchesUseCase,
+  getUpcomingMatchesUseCase,
+  getScoringViewUseCase,
+  getUpcomingTeeGroupsUseCase,
+  getTeeGroupScoringViewUseCase,
+  updateUserProfileUseCase,
+} from '../composition';
+import {
+  EVENTO_HANDICAP_AL_DIA,
+  EVENTO_HANDICAP_POR_PEDIR,
+  lanzaElRefrescoDeHandicap,
+  recogeElHandicapPorPedir,
+} from '../services/refrescoDeHandicap';
+import {
+  apuntaRecordatorioDeHandicap,
+  hayRecordatorioDeHandicap,
+  hayRefrescoPendiente,
+  olvidaElApunteAntiguo,
+  quitaRecordatorioDeHandicap,
+} from '../services/refrescoDeHandicapApuntes';
+import { PANTALLA_MENOS_BARRA_INFERIOR } from '../utils/barraInferior';
+import { registraElFallo } from '../utils/registraElFallo';
+
+// El panel enseña un resumen, no el historial entero
+const RECENT_MATCHES_SHOWN = 3;
+
+const Dashboard = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { t, ready: textosListos } = useTranslation('dashboard');
+  const { t: tQuickMatch, ready: textosDeRapidaListos } =
+    useTranslation('quickMatch');
+  const { t: tProfile } = useTranslation('profile');
+  const {
+    user,
+    loading: isLoadingUser,
+    refetch: refetchUser,
+    sinConfirmar,
+  } = useAuth();
+  const [mostrarAlias, setMostrarAlias] = useState(false);
+  const { animateEntry } = useEntryMotion();
+  const [competitions, setCompetitions] = useState([]);
+  const [isLoadingCompetitions, setIsLoadingCompetitions] = useState(true);
+  // Si las competiciones fallaron, «no hay ninguna» no es verdad y los próximos
+  // partidos no pueden calcularse con esa lista vacía (FE #615)
+  const [competitionsError, setCompetitionsError] = useState(null);
+  const [playerStats, setPlayerStats] = useState(null);
+  const [isLoadingStats, setIsLoadingStats] = useState(true);
+  const [recentMatches, setRecentMatches] = useState([]);
+  const [isLoadingRecent, setIsLoadingRecent] = useState(true);
+  const [upcomingMatches, setUpcomingMatches] = useState([]);
+  // Las próximas partidas de stroke play (FE #824, PR 7): el banner enseña la
+  // más cercana entre estas y los partidos de la Ryder
+  const [proximasPartidas, setProximasPartidas] = useState({
+    partidas: [],
+    desdeMemoria: false,
+  });
+  const [upcomingSinRespuesta, setUpcomingSinRespuesta] = useState(false);
+  const [upcomingDesdeMemoria, setUpcomingDesdeMemoria] = useState(false);
+  const [isLoadingUpcoming, setIsLoadingUpcoming] = useState(true);
+
+  // Lo último que se vio en este móvil con esta cuenta, con el hándicap y las
+  // cifras, para pintarlo al entrar y actualizarlo por detrás sin avisos (Agustín,
+  // 14 nov 2026). Se siembra en cuanto `useAuth` da usuario: con red, eso es
+  // cuando `/current-user` ha contestado (mientras pregunta no da ninguno), así
+  // que una sesión que ya no vale no enseña nada; sin red o con un 5xx, es la
+  // copia del usuario en el móvil (`sinConfirmar`), y entonces se pinta con lo
+  // guardado, como el resto de la aplicación sin cobertura. Se siembra al pintar,
+  // no en un efecto, para que el primer pintado ya lo lleve
+  const cuentaDelPanel = user?.id ?? null;
+  const [guardado, setGuardado] = useState({
+    cuenta: null,
+    competiciones: false,
+    recientes: false,
+    cifras: false,
+    proximos: false,
+  });
+  if (cuentaDelPanel && guardado.cuenta !== cuentaDelPanel) {
+    const panel = elUltimoPanel(cuentaDelPanel);
+    // Los próximos ya se guardan para anotar sin cobertura; solo se usan si hay
+    // panel de ESTA cuenta, y solo si hay alguno: esas listas son del móvil y,
+    // vacías, no distinguen «no hay» de «nunca se guardaron»; el banner diría
+    // un momento «no tienes partido» sin saberlo. Que no hay lo dice
+    // la marca del panel de la cuenta, que solo pone una respuesta entera del
+    // servidor (FE #1152)
+    const proximos = panel ? losProximosGuardados() : [];
+    const partidas = panel ? lasPartidasGuardadas() : [];
+    const hayProximos = proximos.length + partidas.length > 0;
+    const noHayProximos =
+      Boolean(panel) && !hayProximos && seSabeQueNoHayProximos(cuentaDelPanel);
+    // Lo guardado son valores sueltos: las tarjetas esperan las entidades (con
+    // sus métodos). Una partida que no se pueda rehacer, fuera
+    const recientes = panel?.ultimasPartidas
+      ?.map((p) => {
+        try {
+          return RecentMatch.fromPersistence(p);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    // Siempre, también vacío: otra cuenta en el panel montado no ve lo de la
+    // anterior mientras llega lo suyo
+    setCompetitions(panel?.competiciones ?? []);
+    setRecentMatches(recientes ?? []);
+    setPlayerStats(
+      panel?.estadisticas
+        ? PlayerStats.fromPersistence(panel.estadisticas)
+        : null,
+    );
+    setUpcomingMatches(hayProximos ? proximos : []);
+    setProximasPartidas({
+      partidas: hayProximos ? partidas : [],
+      desdeMemoria: false,
+    });
+    setGuardado({
+      cuenta: cuentaDelPanel,
+      competiciones: Boolean(panel?.competiciones),
+      // Vacía porque el servidor dijo «ninguna», sí (FE #1152); vacía porque
+      // ninguna se pudo rehacer, no: pintaría «crea una partida» a quien sí tiene
+      recientes:
+        Array.isArray(panel?.ultimasPartidas) &&
+        (panel.ultimasPartidas.length === 0 || recientes.length > 0),
+      cifras: Boolean(panel?.estadisticas),
+      proximos: hayProximos || noHayProximos,
+    });
+  }
+  // Las banderas son de la cuenta sembrada: al cambiar de cuenta se rehacen
+  const hayPanelGuardado =
+    guardado.competiciones || guardado.recientes || guardado.cifras;
+  const [showHandicapModal, setShowHandicapModal] = useState(false);
+  // El hándicap guardado cuando se abre el modal: decide qué dice (FE #677)
+  const [handicapAlAbrir, setHandicapAlAbrir] = useState(null);
+  const [showQuickMatchModal, setShowQuickMatchModal] = useState(false);
+  // Crear una partida rápida (género y hándicap de quien crea) y el modal del hándicap
+  // (el país, para la RFEG) necesitan el usuario completo y la red. Sin red el usuario
+  // sale de la copia del dispositivo, sin esos datos (fase 3): se dice y no se abre
+  const abreSiHayRed = (abrir) => () => {
+    if (sinConfirmar) {
+      // Con red, la sesión aún no ha contestado (tarda o dio un 5xx): «sin conexión»
+      // sería falso
+      const conRed = globalThis.navigator?.onLine !== false;
+      customToast.error(
+        t(conRed ? 'common:cargandoTuCuenta' : 'common:sinConexion.mensaje'),
+      );
+      return;
+    }
+    abrir();
+  };
+  const abrePartidaRapida = abreSiHayRed(() => setShowQuickMatchModal(true));
+  const [handicapPending, setHandicapPending] = useState(
+    hayRecordatorioDeHandicap,
+  );
+
+  // El refresco del hándicap al entrar lo lanza el login, sin esperarlo
+  // (FE #677). Aquí solo se abre el modal cuando su resultado lo pide: si llega
+  // con el panel montado, por el evento; si no, se encuentra guardado. Y si el
+  // apunte sigue puesto (no contestó), se relanza: el módulo no manda dos a la vez
+  useEffect(() => {
+    // Apunte de la versión anterior: su información es de otro día
+    olvidaElApunteAntiguo();
+    if (!user) return undefined;
+
+    const abreSiHayQuePedirlo = () => {
+      // Sin red, sin el país para ofrecer la RFEG (fase 3): se queda guardado y se abre
+      // cuando el servidor confirme la sesión (el efecto vuelve a correr)
+      if (sinConfirmar) return;
+      const handicap = recogeElHandicapPorPedir();
+      if (handicap === undefined) return;
+      setHandicapAlAbrir(handicap);
+      setShowHandicapModal(true);
+    };
+
+    // Y si un refresco dice que ya no hace falta, el recordatorio se retira
+    const retiraElRecordatorio = () => setHandicapPending(false);
+
+    abreSiHayQuePedirlo();
+    window.addEventListener(EVENTO_HANDICAP_POR_PEDIR, abreSiHayQuePedirlo);
+    window.addEventListener(EVENTO_HANDICAP_AL_DIA, retiraElRecordatorio);
+    // Sin red la copia del dispositivo no trae el hándicap (fase 3): el «antes» sería
+    // inventado. Se lanza cuando el servidor confirme la sesión (cambia `user`)
+    if (hayRefrescoPendiente() && !sinConfirmar) {
+      lanzaElRefrescoDeHandicap({ handicapDeAntes: user.handicap ?? null });
+    }
+    return () => {
+      window.removeEventListener(
+        EVENTO_HANDICAP_POR_PEDIR,
+        abreSiHayQuePedirlo,
+      );
+      window.removeEventListener(EVENTO_HANDICAP_AL_DIA, retiraElRecordatorio);
+    };
+  }, [user, sinConfirmar]);
+
+  const handleHandicapSaved = useCallback(async () => {
+    setShowHandicapModal(false);
+    setHandicapPending(false);
+    quitaRecordatorioDeHandicap();
+    await refetchUser();
+  }, [refetchUser]);
+
+  const handleHandicapDismiss = useCallback(() => {
+    setShowHandicapModal(false);
+    setHandicapPending(true);
+    apuntaRecordatorioDeHandicap();
+  }, []);
+
+  const handleQuickMatchStarted = useCallback(
+    (quickMatchId) => {
+      setShowQuickMatchModal(false);
+      navigate(`/quick-matches/${quickMatchId}/scoring`);
+    },
+    [navigate],
+  );
+
+  useEffect(() => {
+    // El mismo guardia que sus tres hermanos, que era el unico que no lo tenia:
+    // dos peticiones solapadas —guardar el handicap con una en vuelo— podian
+    // resolverse al reves, escribir competiciones rancias Y bajar la bandera
+    // con la actual todavia abierta. Desde FE #485 esa bandera decide ademas
+    // cuando se levanta la cortina.
+    let cancelled = false;
+
+    const loadDashboardData = async () => {
+      // Mientras la sesion se resuelve no se pide nada NI se declara nada
+      // terminado. `useAuth` no es un contexto: arranca siempre sin usuario y
+      // con `loading` en alto, y bajar la bandera en esa primera pasada dejaba
+      // las cinco a false justo en el render en que llega el usuario —antes de
+      // que hubiera salido una sola peticion—. La cortina del arranque se
+      // levantaba ahi, que es el defecto entero de vuelta (FE #485).
+      //
+      // Y salir aqui evita ademas pedirlo todo por duplicado: `refetchUser`
+      // —al guardar el handicap— sube `loading` con el usuario VIEJO todavia
+      // puesto, y sin este corte esa pasada lanzaba las cuatro peticiones una
+      // vez, y el usuario nuevo otra.
+      if (isLoadingUser) {
+        return;
+      }
+
+      if (!user) {
+        setIsLoadingCompetitions(false);
+        return;
+      }
+
+      setIsLoadingCompetitions(true);
+      try {
+        // Fetch competitions using the same use case as My Competitions page
+        // This ensures the count matches (user's competitions: created OR enrolled)
+        const competitionsData = await listUserCompetitionsUseCase.execute(
+          user.id,
+        );
+        if (!cancelled) {
+          const lista = Array.isArray(competitionsData) ? competitionsData : [];
+          setCompetitions(lista);
+          setCompetitionsError(null);
+          recuerdaElPanel(user.id, { competiciones: lista });
+        }
+      } catch (error) {
+        registraElFallo(
+          'Dashboard.failed-to-load-dashboard-data',
+          'Failed to load dashboard data:',
+          error,
+        );
+        if (!cancelled) {
+          // Sin red se queda lo que se ve (lo guardado). Una respuesta con error
+          // no se tapa: como siempre. Los próximos lo saben por el error
+          if (!esFalloDeRedDeLaApi(error)) {
+            setCompetitions([]);
+            // Lo guardado tampoco vale: la próxima vez no se enseña
+            recuerdaElPanel(user.id, { competiciones: null });
+          }
+          setCompetitionsError(error);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingCompetitions(false);
+        }
+      }
+    };
+
+    loadDashboardData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, isLoadingUser]);
+
+  useEffect(() => {
+    // Las estadísticas ya no llegan tarde a proposito: desde FE #485 la primera
+    // carga espera a las cuatro peticiones, porque encenderlas una a una era el
+    // parpadeo que se veia. Un fallo deja las cifras en "--", que es lo mismo
+    // que enseña una cuenta sin vueltas, y no detiene al resto.
+    // Son datos personales: si el usuario cambia mientras una petición está en
+    // vuelo, la respuesta vieja no debe escribir nada. Sin este guardia podría
+    // llegar después de la nueva y dejar en pantalla las cifras de otra cuenta
+    let cancelled = false;
+
+    const loadPlayerStats = async () => {
+      // Mientras la sesion se resuelve no se pide nada NI se declara nada
+      // terminado. `useAuth` no es un contexto: arranca siempre sin usuario y
+      // con `loading` en alto, y bajar la bandera en esa primera pasada dejaba
+      // las cinco a false justo en el render en que llega el usuario —antes de
+      // que hubiera salido una sola peticion—. La cortina del arranque se
+      // levantaba ahi, que es el defecto entero de vuelta (FE #485).
+      //
+      // Y salir aqui evita ademas pedirlo todo por duplicado: `refetchUser`
+      // —al guardar el handicap— sube `loading` con el usuario VIEJO todavia
+      // puesto, y sin este corte esa pasada lanzaba las cuatro peticiones una
+      // vez, y el usuario nuevo otra.
+      if (isLoadingUser) {
+        return;
+      }
+
+      if (!user) {
+        setIsLoadingStats(false);
+        return;
+      }
+
+      setIsLoadingStats(true);
+      try {
+        const stats = await getPlayerStatsUseCase.execute();
+        if (!cancelled) {
+          setPlayerStats(stats);
+          recuerdaElPanel(user.id, { estadisticas: stats });
+        }
+      } catch (error) {
+        registraElFallo(
+          'Dashboard.failed-to-load-player-stats',
+          'Failed to load player stats:',
+          error,
+        );
+        // Sin red se quedan las de la última vez; con respuesta, como siempre
+        if (!cancelled && !esFalloDeRedDeLaApi(error)) {
+          setPlayerStats(null);
+          recuerdaElPanel(user.id, { estadisticas: null });
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingStats(false);
+        }
+      }
+    };
+
+    loadPlayerStats();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, isLoadingUser]);
+
+  useEffect(() => {
+    // Mismo guardia de cuenta que las estadísticas: una respuesta en vuelo no
+    // debe escribir sobre la de otra cuenta
+    let cancelled = false;
+
+    const loadRecentMatches = async () => {
+      // Mientras la sesion se resuelve no se pide nada NI se declara nada
+      // terminado. `useAuth` no es un contexto: arranca siempre sin usuario y
+      // con `loading` en alto, y bajar la bandera en esa primera pasada dejaba
+      // las cinco a false justo en el render en que llega el usuario —antes de
+      // que hubiera salido una sola peticion—. La cortina del arranque se
+      // levantaba ahi, que es el defecto entero de vuelta (FE #485).
+      //
+      // Y salir aqui evita ademas pedirlo todo por duplicado: `refetchUser`
+      // —al guardar el handicap— sube `loading` con el usuario VIEJO todavia
+      // puesto, y sin este corte esa pasada lanzaba las cuatro peticiones una
+      // vez, y el usuario nuevo otra.
+      if (isLoadingUser) {
+        return;
+      }
+
+      if (!user) {
+        setIsLoadingRecent(false);
+        return;
+      }
+
+      setIsLoadingRecent(true);
+      try {
+        const matches =
+          await getRecentMatchesUseCase.execute(RECENT_MATCHES_SHOWN);
+        if (!cancelled) {
+          setRecentMatches(matches);
+          recuerdaElPanel(user.id, { ultimasPartidas: matches });
+        }
+      } catch (error) {
+        registraElFallo(
+          'Dashboard.failed-to-load-recent-matches',
+          'Failed to load recent matches:',
+          error,
+        );
+        // Sin red se queda lo que se ve; con respuesta, como siempre
+        if (!cancelled && !esFalloDeRedDeLaApi(error)) {
+          setRecentMatches([]);
+          recuerdaElPanel(user.id, { ultimasPartidas: null });
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingRecent(false);
+        }
+      }
+    };
+
+    loadRecentMatches();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, isLoadingUser]);
+
+  useEffect(() => {
+    // Se cargan aquí, y no dentro de cada componente, porque el banner de
+    // próximo partido y el contador de acciones pendientes miran exactamente
+    // los mismos partidos: pedirlos dos veces serían el doble de llamadas al
+    // calendario de cada competición
+    let cancelled = false;
+
+    const loadUpcomingMatches = async () => {
+      // Mientras la sesion se resuelve no se pide nada NI se declara nada
+      // terminado. `useAuth` no es un contexto: arranca siempre sin usuario y
+      // con `loading` en alto, y bajar la bandera en esa primera pasada dejaba
+      // las cinco a false justo en el render en que llega el usuario —antes de
+      // que hubiera salido una sola peticion—. La cortina del arranque se
+      // levantaba ahi, que es el defecto entero de vuelta (FE #485).
+      //
+      // Y salir aqui evita ademas pedirlo todo por duplicado: `refetchUser`
+      // —al guardar el handicap— sube `loading` con el usuario VIEJO todavia
+      // puesto, y sin este corte esa pasada lanzaba las cuatro peticiones una
+      // vez, y el usuario nuevo otra.
+      if (isLoadingUser) {
+        return;
+      }
+
+      if (!user) {
+        setIsLoadingUpcoming(false);
+        return;
+      }
+
+      if (isLoadingCompetitions) {
+        // Se sale, pero esta peticion NO esta terminada: llega en cuanto las
+        // competiciones aterricen. Dejar la bandera abajo abria un render con
+        // las cinco a false y la peticion sin salir —el mismo «depende del
+        // orden» que ya volvio cuatro veces—
+        setIsLoadingUpcoming(true);
+        return;
+      }
+
+      setIsLoadingUpcoming(true);
+      // Sin cobertura, lo guardado; y si no hay nada, que no se pudo preguntar
+      // (FE #615). Con las competiciones caídas el caso de uso recibiría `[]` y
+      // contestaría «ninguno» sin error, así que ese fallo se le pasa tal cual
+      // A la vez que las partidas de stroke play, que van por otro camino: sin
+      // cobertura no hay de dónde sacarlas y el banner se queda con lo de la
+      // Ryder. La del próximo día se guarda para anotarla sin cobertura, como
+      // los partidos, pero con SU vista
+      // Sin cobertura, las guardadas de hoy en adelante: son la puerta a su
+      // pantalla, que sabe pintarse con la vista precargada (/code-review). La
+      // lista se guarda solo entera, como la de los partidos. La regla vive en
+      // el servicio, que comparte con «Mis próximos partidos» (FE #845)
+      const leeLasPartidas = () =>
+        leeLasProximasPartidas({
+          lee: () =>
+            competitionsError
+              ? Promise.reject(competitionsError)
+              : getUpcomingTeeGroupsUseCase.executeWithCompleteness(
+                  user.id,
+                  competitions,
+                ),
+          userId: user.id,
+          pideLaVista: (id) => getTeeGroupScoringViewUseCase.execute(id),
+        });
+      // Las dos a la vez, y el banner espera a ambas: sin eso, quien solo
+      // juega stroke play veía un momento el banner como si no tuviera
+      // partido (/code-review). Sin cobertura la de las partidas falla deprisa
+      const [leido, partidas] = await Promise.all([
+        leeLosProximosPartidos({
+          lee: () =>
+            competitionsError
+              ? Promise.reject(competitionsError)
+              : getUpcomingMatchesUseCase.executeWithCompleteness(
+                  user.id,
+                  competitions,
+                ),
+          userId: user.id,
+          pideLaVista: (id) => getScoringViewUseCase.execute(id),
+        }),
+        leeLasPartidas(),
+      ]);
+      if (!cancelled) {
+        // Lo que dijo el servidor de los próximos, para pintarlo al volver
+        // (FE #1152): que no hay, solo con las dos vacías y de él; que hay, con
+        // cualquiera que traiga alguno. Sin red o de memoria no se sabe y no
+        // se toca
+        const deLaRespuesta = (r) => !r.desdeMemoria && !r.sinRespuesta;
+        if (
+          (deLaRespuesta(leido) && leido.partidos.length > 0) ||
+          (deLaRespuesta(partidas) && partidas.partidas.length > 0)
+        ) {
+          recuerdaElPanel(user.id, { sinProximos: false });
+        } else if (deLaRespuesta(leido) && deLaRespuesta(partidas)) {
+          // Vacías y de la respuesta: enteras, que media lista vacía se lee
+          // como sin red (`partidosSinCobertura`)
+          recuerdaElPanel(user.id, { sinProximos: true });
+        }
+        setProximasPartidas(partidas);
+        setUpcomingMatches(leido.partidos);
+        setUpcomingSinRespuesta(leido.sinRespuesta);
+        setUpcomingDesdeMemoria(leido.desdeMemoria);
+        setIsLoadingUpcoming(false);
+      }
+    };
+
+    loadUpcomingMatches();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    user,
+    isLoadingUser,
+    competitions,
+    competitionsError,
+    isLoadingCompetitions,
+  ]);
+
+  // El aviso a la cortina del arranque (FE #485): esta pantalla pide CUATRO
+  // cosas y hasta ahora se daba por cargada con dos —las de `isLoading`—. Las
+  // otras dos aterrizaban despues y encendian su bloque cada una por su lado:
+  // esos eran los dos parpadeos del iPhone. Aqui se avisa cuando no queda nada
+  // en vuelo, ni siquiera lo que no bloquea la pagina.
+  //
+  // Las dependencias son los propios estados, no una lista vacia: React no
+  // vuelve a ejecutar los efectos pasivos de un subarbol que `Suspense`
+  // esconde y reaparece, y con `[]` el aviso se perderia.
+  //
+  // Los textos cuentan como carga: los trozos de i18n llegan en diferido, y
+  // levantar la cortina sin ellos enseña las claves en crudo y un cambio de
+  // texto a continuacion, que es el mismo parpadeo con otra cara.
+  // El próximo del banner: el más cercano entre el partido y la partida (PR 7)
+  const proximo = elMasCercano(
+    upcomingMatches[0] ?? null,
+    proximasPartidas.partidas[0] ?? null,
+  );
+
+  // La competición en juego: la del próximo partido, si es por equipos. Su
+  // marcador llega del endpoint de clasificación y no entra en la espera de la
+  // portada: es un dato de apoyo, y si no llega el bloque no se pinta
+  const { marcador, esperando: esperandoElMarcador } =
+    useMarcadorDeLaCompeticion(competicionEnJuego(proximo, competitions));
+
+  const noQuedaNadaCargando =
+    textosListos &&
+    textosDeRapidaListos &&
+    !isLoadingUser &&
+    !isLoadingCompetitions &&
+    !isLoadingStats &&
+    !isLoadingRecent &&
+    !isLoadingUpcoming;
+
+  // La espera de pantalla completa dura hasta que la PRIMERA carga esta entera.
+  // Antes bastaban dos de las cuatro peticiones, asi que el panel aparecia a
+  // medias y sus bloques se encendian uno detras de otro: tapado por la cortina
+  // en el arranque, pero a la vista al entrar desde el formulario o al navegar
+  // aqui dentro de la aplicacion.
+  //
+  // Con techo, por lo mismo que la cortina: una peticion que no vuelve no puede
+  // dejar el panel en una espera eterna. Al agotarse se pinta con lo que haya,
+  // que es como se comportaba siempre.
+  const [seAgotoLaEspera, setSeAgotoLaEspera] = useState(false);
+
+  // Con `[]`: el techo cuenta desde que esta pantalla se monta. Si `Suspense`
+  // llegara a esconderla y devolverla, la cuenta empezaria de cero —lo dice la
+  // nota de arriba: React no reejecuta los efectos pasivos de un subarbol que
+  // reaparece, pero si vuelve a montarlo—. No importa: la cortina del arranque
+  // lleva su propio techo, independiente de este.
+  useEffect(() => {
+    const plazo = setTimeout(() => setSeAgotoLaEspera(true), ESPERA_MAXIMA_MS);
+
+    return () => clearTimeout(plazo);
+  }, []);
+
+  // Con lo último visto de esta cuenta no se espera a las cuatro: se pinta en
+  // cuanto la sesión está confirmada y hay textos, y lo nuevo llega por detrás
+  const puedePintar =
+    noQuedaNadaCargando ||
+    seAgotoLaEspera ||
+    (hayPanelGuardado && textosListos && textosDeRapidaListos);
+
+  // Solo la PRIMERA vez manda: ni una recarga posterior —al guardar el
+  // handicap— debe desmontar lo que ya hay en pantalla, ni volver aqui desde la
+  // barra inferior debe repetir la espera entera. Se ajusta durante el render,
+  // no en un efecto: React descarta este render y rehace el componente antes de
+  // pintar nada, sin pasar por el DOM.
+  const [yaSePinto, setYaSePinto] = useState(elPanelYaSePinto);
+
+  if (puedePintar && !yaSePinto) {
+    setYaSePinto(true);
+  }
+
+  // La marca de modulo se anota en un efecto: reasignarla durante el render es
+  // un efecto secundario, y React puede descartar un render y rehacerlo
+  useEffect(() => {
+    if (yaSePinto) {
+      anotaQueElPanelSePinto();
+    }
+  }, [yaSePinto]);
+
+  // El segundo termino es el gate de siempre y no se puede perder: al agotarse
+  // el techo con la sesion todavia sin resolver, `isLoading` bajaba y tres
+  // lineas mas abajo `if (!user) return null` dejaba la pagina EN BLANCO. Una
+  // instancia fria de Render tardando mas de tres segundos bastaba.
+  const isLoading = (!yaSePinto && !puedePintar) || (isLoadingUser && !user);
+
+  // El aviso a la cortina del arranque: en cuanto esta pantalla deja de
+  // esperar —porque ya lo tiene todo, o porque se agoto el techo y va a
+  // pintarse con lo que haya— no queda nada que tapar.
+  //
+  // Con usuario, ademas de sin esperas: sin esa condicion, un `/current-user`
+  // que falle aqui —el token rotado entre la comprobacion de `ProtectedRoute` y
+  // esta, o quedarse sin red— baja las cuatro banderas por la rama sin usuario,
+  // y el aviso destapaba el `return null` de mas abajo: una pagina EN BLANCO a
+  // pantalla completa. Si el usuario no llega, la cortina se va por su plazo,
+  // que es justo para lo que esta.
+  const noQuedaNadaQueTapar = !isLoading && Boolean(user);
+
+  useEffect(() => {
+    if (noQuedaNadaQueTapar) {
+      laPantallaEstaLista();
+    }
+  }, [noQuedaNadaQueTapar]);
+
+  if (isLoading) {
+    // La MISMA espera que el resto de la aplicacion, no un circulo propio. Al
+    // abrir la aplicacion instalada se encadenan tres esperas antes de llegar
+    // aqui —el paquete de la pantalla de arranque, la consulta de sesion y el
+    // paquete del panel— y todas pintan esta. Cambiar de dibujo justo en la
+    // ultima es lo que se percibia como parpadeo: no son los cortes, es que la
+    // imagen cambiaba.
+    return <FullScreenLoader />;
+  }
+
+  if (!user) {
+    // Al formulario, no un `null` que deja la pagina EN BLANCO. `ProtectedRoute`
+    // dejo pasar porque SU consulta de sesion dijo que si, pero cada uno tiene
+    // la suya —`useAuth` no es un contexto, FE #489— y la de aqui puede resolver
+    // sin usuario: el token rotado entre las dos, o quedarse sin red. Como el
+    // guardia sigue viendo su usuario, nadie redirigia y la pantalla se quedaba
+    // vacia. La misma salida que usa el guardia, con el mismo `from`.
+    return <Navigate to="/login" state={estadoParaElLogin(location)} replace />;
+  }
+
+  // El saludo dice el alias de quien lo tenga (FE #435). Es donde uno lee su
+  // propio nombre, asi que es el primer sitio donde el alias tiene que verse.
+  //
+  // Y NO se usa `nombreVisible` aqui, aunque parezca su sitio: este saludo va
+  // con el nombre de PILA, y ese ayudante devuelve el nombre completo cuando
+  // no hay alias. Quien no tenga alias —hoy, todo el mundo— pasaria de
+  // «Bienvenido, Agustin» a «Bienvenido, Agustin Estevez»
+  const firstName = user.alias || user.first_name || 'User';
+  // Los de la Ryder y las partidas de stroke play: quien solo juega stroke
+  // play también tiene próximos (QA de la release)
+  const totalDeProximos =
+    upcomingMatches.length + proximasPartidas.partidas.length;
+
+  return (
+    <div
+      // El monograma de la marca, fijo detrás, como en la portada pública
+      // (Agustín, 26 nov 2026: «falta algo en el panel»). El recorrido del pie
+      // se queda
+      className={`relative flex h-auto ${PANTALLA_MENOS_BARRA_INFERIOR} w-full flex-col bg-fondo text-tinta ${marcaDeAguaDelMonograma()}`}
+    >
+      {mostrarAlias && (
+        <AliasSheet
+          aliasActual={user.alias || ''}
+          onClose={() => setMostrarAlias(false)}
+          onGuardar={async (alias) => {
+            await updateUserProfileUseCase.execute(user.id, { alias });
+            // El refresco va DESPUÉS y con su propio catch: si fallara —sin
+            // cobertura, que aquí es lo normal— su excepción llegaría al catch
+            // de la hoja y le diría a la persona que no se ha guardado algo
+            // que sí se guardó. Lo peor que pasa tragándoselo es que el saludo
+            // tarde en enterarse
+            try {
+              await refetchUser();
+            } catch (err) {
+              registraElFallo(
+                'Dashboard.refreshing-the-user-after-the-alias',
+                'No se pudo refrescar el usuario tras el alias:',
+                err,
+              );
+            }
+          }}
+        />
+      )}
+
+      <HandicapRequestModal
+        isOpen={showHandicapModal}
+        user={user}
+        handicapActual={handicapAlAbrir}
+        onClose={handleHandicapDismiss}
+        onSaved={handleHandicapSaved}
+      />
+      {showQuickMatchModal && (
+        <CreateQuickMatchModal
+          onClose={() => setShowQuickMatchModal(false)}
+          onStarted={handleQuickMatchStarted}
+          currentUser={user}
+        />
+      )}
+      <div className="layout-container flex h-full grow flex-col">
+        <HeaderAuth user={user} marca acciones={<ConmutadorDeTema />} />
+
+        <div className="px-4 md:px-40 flex flex-1 justify-center py-5">
+          <motion.div
+            {...getEntryProps(animateEntry)}
+            variants={staggerContainer}
+            className="layout-content-container flex flex-col max-w-[960px] flex-1"
+          >
+            {/* El saludo, con el nombre de verdad. La foto y el correo que
+                había aquí viven en Perfil: en la portada sobraban, y el nombre
+                es lo único que el jugador cambia desde este sitio */}
+            <motion.div variants={slideUp} className="px-4 pb-2 pt-4">
+              <div className="flex items-start gap-1">
+                {/* `min-w-0` obligatorio: el ancho mínimo de un hijo de flex
+                    es el de su contenido, y `break-words` no lo reduce. Sin
+                    esto, un alias largo a este tamaño de letra empuja el
+                    lápiz —que es flex-shrink-0— fuera de la pantalla en un
+                    móvil estrecho. El recorte, a tres líneas: un nombre
+                    compuesto largo cabe entero y el bloque no crece sin
+                    límite */}
+                {/* El encabezado de la pantalla: en Inicio la cabecera no pinta
+                    título, así que el `h1` es el saludo */}
+                <h1 className="min-w-0 whitespace-pre-line break-words line-clamp-3 text-2xl font-extrabold leading-tight tracking-tight text-tinta md:text-3xl">
+                  {t('welcome', { name: firstName })}
+                </h1>
+                {/* El lápiz vive AQUÍ y no en el perfil porque este es el
+                    sitio donde uno lee su propio nombre, así que es donde
+                    espera poder cambiarlo (FE #435). Está siempre, tenga
+                    alias o no: también sirve para quitarlo o cambiarlo, no
+                    solo para ponerlo la primera vez.
+
+                    Etiqueta propia porque un icono junto a un saludo no dice
+                    nada por sí solo */}
+                <button
+                  type="button"
+                  onClick={() => setMostrarAlias(true)}
+                  aria-label={tProfile('alias.sheet.edit')}
+                  data-testid="editar-alias"
+                  className="-mt-1.5 flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-tinta-suave hover:text-tinta active:bg-tarjeta"
+                >
+                  <Pencil className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+              <p className="mt-1 text-base text-tinta-suave">
+                {t('welcomeTagline')}
+              </p>
+            </motion.div>
+
+            {/* Email Verification Banner. Sin conexión el usuario sale de la copia del
+                dispositivo, que no guarda el correo (fase 3, FE-06): sin él no hay qué
+                reenviar ni qué decir */}
+            {user && !user.email_verified && user.email && (
+              <div className="px-4">
+                <EmailVerificationBanner userEmail={user.email} />
+              </div>
+            )}
+
+            {/* Pending Actions */}
+            {/* Antes de las acciones pendientes: un golpe que no llegó al
+                servidor es más urgente que una invitación por contestar.
+                `key` con la cuenta: al cambiar de usuario sin recargar, el
+                aviso se rehace en vez de seguir enseñando lo del anterior */}
+            <GolpesSinEnviar
+              key={user?.id ?? 'sin-sesion'}
+              userId={user?.id ?? null}
+            />
+
+            <PendingActionsCard
+              user={user}
+              competitions={competitions}
+              handicapPending={handicapPending}
+              onHandicapAction={abreSiHayRed(() => {
+                // Desde el recordatorio no hay resultado de refresco a mano: el
+                // modal tiene que saber si ya hay un hándicap guardado (FE #677)
+                setHandicapAlAbrir(user?.handicap ?? null);
+                setShowHandicapModal(true);
+              })}
+              // Los de la Ryder y las partidas de stroke play: quien solo
+              // juega stroke play no veía la tarjeta (QA de la release)
+              // Con «Tu próximo partido» en pantalla, la tarjeta no lo repite
+              // (Agustín, 24 nov 2026): decían lo mismo en dos tarjetas
+              // seguidas. Sin él —mientras carga, sin respuesta—, los cuenta
+              upcomingMatches={proximo ? 0 : totalDeProximos}
+            />
+
+            {/* El próximo partido: la pieza central. Sin ninguno, no pinta
+                nada: el botón de partida rápida va justo debajo */}
+            <motion.div variants={slideUp} className="px-4 pb-2">
+              {/* El anuncio para lectores de pantalla lo da el panel, una sola
+                  vez, y no las tarjetas: cada una va `silenciosa` porque montan
+                  a la vez y se oiria «Cargando...» tres veces. Y ponerlo en una
+                  de ellas tampoco vale: acciones pendientes no enseña espera
+                  cuando recuerda lo de antes, asi que en una vuelta al panel
+                  podia no quedar ninguna que anunciara nada */}
+              {(isLoadingStats || isLoadingRecent || isLoadingUpcoming) && (
+                <span role="status" aria-live="polite" className="sr-only">
+                  {t('common:loading', { defaultValue: 'Cargando...' })}
+                </span>
+              )}
+              {/* Mientras llega por primera vez se le guarda el sitio, con una
+                  tarjeta vacía de su altura: sin esto aparecía un momento
+                  después y empujaba «Tu próximo partido» y los botones justo
+                  cuando se iban a tocar. No es un «cargando»: no dice nada */}
+              {!marcador && esperandoElMarcador && (
+                <div
+                  aria-hidden="true"
+                  data-testid="sitio-del-marcador"
+                  className="mb-3 h-[10.375rem] rounded-tarjeta bg-realce"
+                />
+              )}
+              {marcador && (
+                <div className="pb-3">
+                  <MarcadorDeLaCompeticion
+                    marcador={marcador}
+                    alAbrir={(id) =>
+                      navigate(`/competitions/${id}/leaderboard`)
+                    }
+                  />
+                </div>
+              )}
+              <NextMatchBanner
+                match={proximo}
+                sinRespuesta={upcomingSinRespuesta}
+                // De memoria, según de dónde salga el que se enseña
+                desdeMemoria={
+                  proximo?.esPartidaDeFranja
+                    ? proximasPartidas.desdeMemoria
+                    : upcomingDesdeMemoria
+                }
+                isLoading={isLoadingUpcoming && !guardado.proximos}
+              />
+              {/* Con más de uno, el resto queda a un toque: antes lo decía la
+                  tarjeta de pendientes */}
+              {proximo && totalDeProximos > 1 && (
+                <button
+                  type="button"
+                  onClick={() => navigate('/player/matches')}
+                  data-testid="ver-todos-los-proximos"
+                  data-total={totalDeProximos}
+                  className="mt-1 min-h-[44px] text-sm font-semibold text-tinta underline underline-offset-4"
+                >
+                  {t('nextMatch.viewAll', { count: totalDeProximos })}
+                </button>
+              )}
+            </motion.div>
+
+            {/* Las dos acciones de la portada: la principal en lima —una por
+                pantalla— y la secundaria con contorno. Dos, no seis: Mis
+                Torneos, Explorar, Amigos y Perfil ya viven en la navegacion, y
+                repetirlos aqui convertia el panel en un menu con otro aspecto */}
+            <motion.div variants={slideUp} className="px-4 pb-2 pt-3">
+              <h2 className="sr-only">{t('quickActions.title')}</h2>
+              {/* Dos columnas desde lg, no desde md: entre medias el panel deja
+                  160 px a cada lado y cada tarjeta se quedaba en ~210, con el
+                  titulo comiendose el relleno (FE #680) */}
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={abrePartidaRapida}
+                  data-testid="quick-match-card"
+                  className="group flex min-h-[76px] items-center gap-4 rounded-boton bg-lime px-6 py-4 text-left text-forest transition-[filter] hover:brightness-95 active:brightness-90"
+                >
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-lg font-black uppercase leading-tight tracking-wide">
+                      {t('quickActions.quickMatch')}
+                    </h3>
+                    <p className="text-sm font-medium">
+                      {t('quickActions.quickMatchDesc')}
+                    </p>
+                  </div>
+                  <ArrowRight
+                    className="h-6 w-6 flex-shrink-0"
+                    aria-hidden="true"
+                  />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => navigate('/competitions/create')}
+                  data-testid="create-tournament-card"
+                  className="group flex min-h-[76px] items-center gap-4 rounded-boton border-[1.5px] border-tinta bg-fondo px-6 py-4 text-left text-tinta transition-colors hover:bg-tarjeta active:bg-tarjeta"
+                >
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-lg font-black uppercase leading-tight tracking-wide">
+                      {t('quickActions.createTournament')}
+                    </h3>
+                    <p className="text-sm font-medium text-tinta-suave">
+                      {t('quickActions.createTournamentDesc')}
+                    </p>
+                  </div>
+                </button>
+              </div>
+            </motion.div>
+
+            {/* Statistics Cards */}
+            <motion.div variants={slideUp} className="p-4">
+              <PlayerStatsCards
+                stats={playerStats}
+                isLoading={isLoadingStats && !guardado.cifras}
+                fallbackHandicap={user.handicap ?? null}
+                fallbackTournaments={
+                  Array.isArray(competitions) ? competitions.length : 0
+                }
+              />
+            </motion.div>
+
+            {/* Recent matches */}
+            <motion.div variants={slideUp} className="px-4 pt-2">
+              <RecentMatches
+                usuario={user}
+                matches={recentMatches}
+                isLoading={isLoadingRecent && !guardado.recientes}
+                esperaSilenciosa
+                onCreateQuickMatch={abrePartidaRapida}
+              />
+              <button
+                type="button"
+                onClick={() => navigate('/quick-matches')}
+                data-testid="quick-match-history-link"
+                className="mt-2 min-h-[44px] text-sm font-semibold text-tinta underline underline-offset-4"
+              >
+                {tQuickMatch('dashboard.viewHistory')}
+              </button>
+            </motion.div>
+
+            {/* El recorrido de la marca, al pie: decorativo. Va sobre una
+                franja del color del fondo, de borde a borde y hasta el final
+                del panel (los márgenes negativos deshacen el `px-4` y el `py-5`
+                de la página; sin `100vw`, que en un escritorio estrecho con
+                barra de scroll clásica se salía unos píxeles), para
+                que el sello de la marca de agua —que está fijo detrás— nunca
+                se cruce con él: al llegar al final, la franja lo tapa. Empieza
+                con un fundido, para que el sello desaparezca poco a poco y no
+                cortado; el fundido es el arranque de la PROPIA franja, no una
+                capa encima de lo de arriba, que apagaría el enlace que hay
+                justo antes (Agustín, 26 nov 2026) */}
+            <div
+              data-testid="pie-del-panel"
+              className="-mx-4 mt-2 -mb-5 flex-shrink-0 bg-[linear-gradient(to_bottom,transparent,var(--cbg-fondo)_4rem)] pt-16 pb-6 md:hidden"
+            >
+              <TrazoDeRecorrido forma="green" className="h-32 w-full px-4" />
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Dashboard;

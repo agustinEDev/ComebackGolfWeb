@@ -1,0 +1,739 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router';
+import MyInvitationsPage from './MyInvitationsPage';
+import customToast from '../../utils/toast';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key, params) => {
+      if (params?.count !== undefined) return `${key}_${params.count}`;
+      return key;
+    },
+    i18n: { language: 'en' },
+  }),
+}));
+
+// Objeto CONSTANTE, como el de verdad: uno nuevo en cada render cambiaba `user`,
+// relanzaba la carga sin parar y los tests acababan mirando la pantalla a medio
+// cargar (FE #685)
+const sesion = {
+  user: { id: 'user-1', first_name: 'Test', last_name: 'User' },
+  loading: false,
+};
+vi.mock('../../hooks/useAuth', () => ({
+  useAuth: () => sesion,
+}));
+
+vi.mock('../../components/layout/HeaderAuth', () => ({
+  default: () => <div data-testid="header-auth">Header</div>,
+}));
+
+const mockListMyInvitations = vi.fn().mockResolvedValue({
+  invitations: [],
+  totalCount: 0,
+});
+
+const mockRespondToInvitation = vi.fn();
+// El género para apuntarse (#710): por defecto lo tiene, y los casos que no lo
+// tienen lo dicen
+const mockGuardarGenero = vi.fn();
+const mockRefrescarSesion = vi.fn();
+let faltaGenero = false;
+vi.mock('../../hooks/useGeneroParaApuntarse', () => ({
+  useGeneroParaApuntarse: () => ({
+    falta: faltaGenero,
+    // Un hombre: al aceptar sale marcada la amarilla (barras por campo)
+    genero: faltaGenero ? null : 'MALE',
+    guardar: mockGuardarGenero,
+    refrescar: mockRefrescarSesion,
+  }),
+}));
+
+vi.mock('../../composition', () => ({
+  listMyInvitationsUseCase: {
+    execute: (...args) => mockListMyInvitations(...args),
+  },
+  respondToInvitationUseCase: {
+    execute: (...args) => mockRespondToInvitation(...args),
+  },
+}));
+
+vi.mock('../../composition/cargarBarras', () => ({
+  cargarBarras: () =>
+    Promise.resolve({
+      changeEnrollmentTeeUseCase: { execute: vi.fn() },
+      getEnrollmentTeesUseCase: {
+        execute: vi.fn().mockResolvedValue({ courses: [] }),
+      },
+    }),
+}));
+// Aceptar pasa antes por la barra general (barras por campo): si la pregunta
+// está abierta, se confirma con la marcada
+const confirmaLaBarra = async () => {
+  const boton = await screen.findByTestId('aceptar-con-barra');
+  fireEvent.click(boton);
+};
+vi.mock('../../utils/toast', () => ({
+  default: { success: vi.fn(), error: vi.fn() },
+}));
+
+const mockNavigate = vi.fn();
+vi.mock('react-router', async () => {
+  const actual = await vi.importActual('react-router');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
+
+const renderPage = () => {
+  return render(
+    <MemoryRouter initialEntries={['/player/invitations']}>
+      <Routes>
+        <Route path="/player/invitations" element={<MyInvitationsPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+};
+
+describe('MyInvitationsPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should render header and page title', async () => {
+    renderPage();
+    expect(screen.getByTestId('header-auth')).toBeInTheDocument();
+    expect(await screen.findByText('player.title')).toBeInTheDocument();
+  });
+
+  it('should show empty state when no invitations', async () => {
+    renderPage();
+    expect(await screen.findByText('noInvitations')).toBeInTheDocument();
+  });
+
+  it('should render invitations with accept/decline buttons', async () => {
+    mockListMyInvitations.mockResolvedValue({
+      invitations: [
+        {
+          id: 'inv-1',
+          competitionId: 'comp-1',
+          competitionName: 'Summer Cup',
+          inviterName: 'Creator',
+          inviteeEmail: 'player@test.com',
+          status: 'PENDING',
+          isPending: true,
+          isAccepted: false,
+          isDeclined: false,
+          isExpired: false,
+          personalMessage: null,
+          expiresAt: new Date(Date.now() + 86400000).toISOString(),
+          respondedAt: null,
+        },
+      ],
+      totalCount: 1,
+    });
+
+    renderPage();
+    expect(await screen.findByTestId('accept-button')).toBeInTheDocument();
+    expect(screen.getByTestId('decline-button')).toBeInTheDocument();
+  });
+
+  it('dos tarjetas: con una respondiendo, la otra también se responde (revisor de la PR 3)', async () => {
+    faltaGenero = false;
+    const tarjeta = (id) => ({
+      id,
+      competitionId: `c-${id}`,
+      competitionName: id,
+      inviterName: 'Creator',
+      inviteeEmail: 'p@test.com',
+      status: 'PENDING',
+      isPending: true,
+      isAccepted: false,
+      isDeclined: false,
+      isExpired: false,
+      personalMessage: null,
+      expiresAt: new Date(Date.now() + 86400000).toISOString(),
+      respondedAt: null,
+    });
+    mockListMyInvitations.mockResolvedValue({
+      invitations: [tarjeta('inv-a'), tarjeta('inv-b')],
+      totalCount: 2,
+    });
+    mockRespondToInvitation.mockImplementation((id) =>
+      id === 'inv-a' ? new Promise(() => {}) : Promise.resolve({}),
+    );
+    renderPage();
+    const [, rechazarB] = await screen.findAllByTestId('decline-button');
+    const [rechazarA] = screen.getAllByTestId('decline-button');
+
+    fireEvent.click(rechazarA);
+    fireEvent.click(rechazarB);
+
+    await waitFor(() =>
+      expect(mockRespondToInvitation).toHaveBeenCalledWith('inv-b', 'DECLINE'),
+    );
+    expect(mockRespondToInvitation).toHaveBeenCalledTimes(2);
+    // Respondida B, A sigue en curso: su tarjeta, desactivada
+    await waitFor(() => expect(mockListMyInvitations).toHaveBeenCalledTimes(2));
+    expect(screen.getAllByTestId('decline-button')[0]).toBeDisabled();
+  });
+
+  it('A4: se puede filtrar por las que se quedaron sin plaza (#710)', async () => {
+    renderPage();
+    const filtro = await screen.findByTestId('status-filter');
+    expect(
+      within(filtro).getByRole('option', { name: 'status.NO_ROOM' }),
+    ).toBeInTheDocument();
+    // Y las que retiró quien invitaba (FE #724)
+    expect(
+      within(filtro).getByRole('option', { name: 'status.CANCELLED' }),
+    ).toBeInTheDocument();
+    // Y las que esperan a que se reabra la inscripción (15 nov 2026)
+    expect(
+      within(filtro).getByRole('option', { name: 'status.ON_HOLD' }),
+    ).toBeInTheDocument();
+  });
+
+  describe('aceptar sin género (#710)', () => {
+    const PENDIENTE = {
+      id: 'inv-1',
+      competitionId: 'comp-1',
+      competitionName: 'Summer Cup',
+      inviterName: 'Creator',
+      inviteeEmail: 'player@test.com',
+      status: 'PENDING',
+      isPending: true,
+      isAccepted: false,
+      isDeclined: false,
+      isExpired: false,
+      personalMessage: null,
+      expiresAt: new Date(Date.now() + 86400000).toISOString(),
+      respondedAt: null,
+    };
+
+    beforeEach(() => {
+      mockListMyInvitations.mockResolvedValue({
+        invitations: [PENDIENTE],
+        totalCount: 1,
+      });
+      mockRespondToInvitation.mockResolvedValue({ competitionId: 'comp-1' });
+    });
+
+    afterEach(() => {
+      faltaGenero = false;
+    });
+
+    it('I1: sin género, aceptar lo pregunta antes, lo guarda y luego acepta', async () => {
+      faltaGenero = true;
+      const orden = [];
+      mockGuardarGenero.mockImplementation(async () => orden.push('genero'));
+      mockRefrescarSesion.mockImplementation(async () => orden.push('sesion'));
+      mockRespondToInvitation.mockImplementation(async () => {
+        orden.push('acepta');
+        return { competitionId: 'comp-1' };
+      });
+      renderPage();
+
+      fireEvent.click(await screen.findByTestId('accept-button'));
+      await confirmaLaBarra();
+      expect(mockRespondToInvitation).not.toHaveBeenCalled();
+      fireEvent.change(await screen.findByTestId('selector-de-genero'), {
+        target: { value: 'FEMALE' },
+      });
+      fireEvent.click(screen.getByTestId('aceptar-con-barra'));
+
+      await waitFor(() =>
+        expect(mockRespondToInvitation).toHaveBeenCalledWith('inv-1', 'ACCEPT'),
+      );
+      expect(mockGuardarGenero).toHaveBeenCalledWith('FEMALE');
+      await waitFor(() =>
+        expect(orden).toEqual(['genero', 'acepta', 'sesion']),
+      );
+    });
+
+    it('I2: con género, aceptar acepta sin preguntar', async () => {
+      renderPage();
+
+      fireEvent.click(await screen.findByTestId('accept-button'));
+      await confirmaLaBarra();
+
+      await waitFor(() =>
+        expect(mockRespondToInvitation).toHaveBeenCalledWith('inv-1', 'ACCEPT'),
+      );
+      expect(
+        screen.queryByTestId('selector-de-genero'),
+      ).not.toBeInTheDocument();
+    });
+
+    // FE #733 · el motivo de «sin plaza» sale del código, en el idioma de la app
+    //   I4  INVITATION_NO_ROOM   → su texto traducido y la lista se relee (ya es NO_ROOM)
+    //   I5  otro error           → el mensaje del servidor, como siempre
+    it('I4: sin plaza, lo dice en su idioma y relee la lista', async () => {
+      mockRespondToInvitation.mockRejectedValueOnce(
+        Object.assign(
+          new Error(
+            'Esta invitación se quedó sin plaza al cerrarse la inscripción',
+          ),
+          {
+            status: 409,
+            errorCode: 'INVITATION_NO_ROOM',
+          },
+        ),
+      );
+      renderPage();
+      await screen.findByTestId('accept-button');
+      const lecturas = mockListMyInvitations.mock.calls.length;
+
+      fireEvent.click(screen.getByTestId('accept-button'));
+      await confirmaLaBarra();
+
+      await waitFor(() =>
+        expect(customToast.error).toHaveBeenCalledWith('errors.noRoom'),
+      );
+      await waitFor(() =>
+        expect(mockListMyInvitations.mock.calls.length).toBeGreaterThan(
+          lecturas,
+        ),
+      );
+    });
+
+    // FE #737 · rechazar una que se quedó sin plaza NO es un fallo: el jugador no
+    // iba a jugarla y ya no la juega. Ni error ni «rechazada»: se relee y la
+    // tarjeta dice «Sin plaza», que es lo que pasó
+    it('I4b: rechazar una que ya está sin plaza no da error: solo relee la lista', async () => {
+      mockRespondToInvitation.mockRejectedValueOnce(
+        Object.assign(
+          new Error(
+            'Esta invitación se quedó sin plaza al cerrarse la inscripción',
+          ),
+          {
+            status: 409,
+            errorCode: 'INVITATION_NO_ROOM',
+          },
+        ),
+      );
+      renderPage();
+      await screen.findByTestId('decline-button');
+      const lecturas = mockListMyInvitations.mock.calls.length;
+
+      fireEvent.click(screen.getByTestId('decline-button'));
+
+      await waitFor(() =>
+        expect(mockListMyInvitations.mock.calls.length).toBeGreaterThan(
+          lecturas,
+        ),
+      );
+      expect(customToast.error).not.toHaveBeenCalled();
+      expect(customToast.success).not.toHaveBeenCalled();
+    });
+
+    // Un 409 sin código ya no es «otro error»: es que dejó de estar pendiente
+    // (I6). Lo de «otro error» se prueba con uno que sí lo es
+    // El motivo del servidor (4xx) tal cual; un 5xx, el genérico, y no el
+    // fallo en crudo; sin red, el de la app (`mensajeDeError`, CodeRabbit)
+    it.each([
+      [
+        'decline-button',
+        { status: 422, message: 'No se puede' },
+        'No se puede',
+      ],
+      [
+        'decline-button',
+        { status: 500, message: 'Internal error' },
+        'errors.failedToRespond',
+      ],
+      ['accept-button', { status: 422, message: 'No se puede' }, 'No se puede'],
+      [
+        'accept-button',
+        { status: 500, message: 'Internal error' },
+        'errors.failedToRespond',
+      ],
+    ])('I5: %s con otro error (%j) → «%s»', async (boton, fallo, texto) => {
+      mockRespondToInvitation.mockRejectedValueOnce(
+        Object.assign(new Error(fallo.message), { status: fallo.status }),
+      );
+      renderPage();
+
+      fireEvent.click(await screen.findByTestId(boton));
+      if (boton === 'accept-button') await confirmaLaBarra();
+
+      await waitFor(() =>
+        expect(customToast.error).toHaveBeenCalledWith(texto),
+      );
+    });
+
+    it('I5: sin red, el aviso de sin conexión de la app', async () => {
+      mockRespondToInvitation.mockRejectedValueOnce(
+        new TypeError('Failed to fetch'),
+      );
+      renderPage();
+
+      fireEvent.click(await screen.findByTestId('accept-button'));
+      await confirmaLaBarra();
+
+      await waitFor(() =>
+        expect(customToast.error).toHaveBeenCalledWith(
+          'common:sinConexion.mensaje',
+        ),
+      );
+    });
+
+    // Probado en el Kind (5 oct): el organizador la retira con la pantalla del
+    // jugador abierta, y al aceptar salía el texto del servidor en inglés y la
+    // tarjeta seguía «Pendiente». Un 409 sin código al responder es que ya no
+    // estaba pendiente —retirada, caducada o ya contestada—
+    //   I6   aceptar, 409 sin código  → «ya no estaba pendiente» y relee
+    //   I6b  rechazar, 409 sin código → sin aviso, solo relee: no iba a jugarla
+    //        y ya no la juega, igual que con «sin plaza» (I4b; Agustín, 5 oct)
+    //   I7   409 CON otro código      → su camino, el mensaje del servidor (CodeRabbit en la #821)
+    const yaNoPendiente = () =>
+      Object.assign(new Error('Invitation is in status CANCELLED.'), {
+        status: 409,
+        errorCode: null,
+      });
+
+    it('I6: aceptar una que ya no estaba pendiente lo dice en su idioma y relee la lista', async () => {
+      mockRespondToInvitation.mockRejectedValueOnce(yaNoPendiente());
+      renderPage();
+      await screen.findByTestId('accept-button');
+      const lecturas = mockListMyInvitations.mock.calls.length;
+
+      fireEvent.click(screen.getByTestId('accept-button'));
+      await confirmaLaBarra();
+
+      await waitFor(() =>
+        expect(customToast.error).toHaveBeenCalledWith(
+          'errors.notPendingAnymore',
+        ),
+      );
+      expect(customToast.error).not.toHaveBeenCalledWith(
+        'Invitation is in status CANCELLED.',
+      );
+      await waitFor(() =>
+        expect(mockListMyInvitations.mock.calls.length).toBeGreaterThan(
+          lecturas,
+        ),
+      );
+    });
+
+    it('I6b: rechazar una que ya no estaba pendiente no da error: solo relee la lista', async () => {
+      mockRespondToInvitation.mockRejectedValueOnce(yaNoPendiente());
+      renderPage();
+      await screen.findByTestId('decline-button');
+      const lecturas = mockListMyInvitations.mock.calls.length;
+
+      fireEvent.click(screen.getByTestId('decline-button'));
+
+      await waitFor(() =>
+        expect(mockListMyInvitations.mock.calls.length).toBeGreaterThan(
+          lecturas,
+        ),
+      );
+      expect(customToast.error).not.toHaveBeenCalled();
+      expect(customToast.success).not.toHaveBeenCalled();
+    });
+
+    it('I7: un 409 con otro código no se da por «ya no estaba pendiente»', async () => {
+      mockRespondToInvitation.mockRejectedValueOnce(
+        Object.assign(new Error('Some other conflict'), {
+          status: 409,
+          errorCode: 'OTHER_CODE',
+        }),
+      );
+      renderPage();
+
+      fireEvent.click(await screen.findByTestId('accept-button'));
+      await confirmaLaBarra();
+
+      await waitFor(() =>
+        expect(customToast.error).toHaveBeenCalledWith('Some other conflict'),
+      );
+      expect(customToast.error).not.toHaveBeenCalledWith(
+        'errors.notPendingAnymore',
+      );
+    });
+
+    it('I7b: rechazar con un 409 de otro código sí lo dice', async () => {
+      mockRespondToInvitation.mockRejectedValueOnce(
+        Object.assign(new Error('Some other conflict'), {
+          status: 409,
+          errorCode: 'OTHER_CODE',
+        }),
+      );
+      renderPage();
+
+      fireEvent.click(await screen.findByTestId('decline-button'));
+
+      await waitFor(() =>
+        expect(customToast.error).toHaveBeenCalledWith('Some other conflict'),
+      );
+    });
+
+    it('I3: si no se pudo guardar el género, no se acepta', async () => {
+      faltaGenero = true;
+      mockGuardarGenero.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+      renderPage();
+
+      fireEvent.click(await screen.findByTestId('accept-button'));
+      fireEvent.change(await screen.findByTestId('selector-de-genero'), {
+        target: { value: 'MALE' },
+      });
+      fireEvent.click(screen.getByTestId('aceptar-con-barra'));
+
+      await waitFor(() =>
+        expect(customToast.error).toHaveBeenCalledWith(
+          'common:sinConexion.mensaje',
+        ),
+      );
+      expect(mockRespondToInvitation).not.toHaveBeenCalled();
+    });
+  });
+
+  it('should have status filter dropdown', async () => {
+    renderPage();
+    expect(await screen.findByTestId('status-filter')).toBeInTheDocument();
+  });
+
+  it('should navigate to competition detail after accepting invitation', async () => {
+    mockListMyInvitations.mockResolvedValue({
+      invitations: [
+        {
+          id: 'inv-1',
+          competitionId: 'comp-123',
+          competitionName: 'Summer Cup',
+          inviterName: 'Creator',
+          inviteeEmail: 'player@test.com',
+          status: 'PENDING',
+          isPending: true,
+          isAccepted: false,
+          isDeclined: false,
+          isExpired: false,
+          personalMessage: null,
+          expiresAt: new Date(Date.now() + 86400000).toISOString(),
+          respondedAt: null,
+        },
+      ],
+      totalCount: 1,
+    });
+    mockRespondToInvitation.mockResolvedValue({
+      id: 'inv-1',
+      competitionId: 'comp-123',
+      status: 'ACCEPTED',
+      enrollmentId: 'e-1',
+    });
+
+    renderPage();
+    const acceptButton = await screen.findByTestId('accept-button');
+    fireEvent.click(acceptButton);
+    await confirmaLaBarra();
+
+    await waitFor(() => {
+      expect(mockRespondToInvitation).toHaveBeenCalledWith('inv-1', 'ACCEPT');
+    });
+    await waitFor(() => {
+      // Con el origen, para que «Volver» lleve de nuevo aquí (FE #682)
+      // Y que la ficha pida la barra de los campos sin la general (barras por campo)
+      expect(mockNavigate).toHaveBeenCalledWith('/competitions/comp-123', {
+        state: { from: 'invitations', preguntarBarras: true },
+      });
+    });
+  });
+
+  it('should show pending count badge', async () => {
+    mockListMyInvitations.mockResolvedValue({
+      invitations: [
+        {
+          id: 'inv-1',
+          competitionId: 'comp-1',
+          competitionName: 'Cup',
+          status: 'PENDING',
+          isPending: true,
+          isAccepted: false,
+          isDeclined: false,
+          isExpired: false,
+          personalMessage: null,
+          inviteeEmail: 'p@t.com',
+          expiresAt: new Date(Date.now() + 86400000).toISOString(),
+          respondedAt: null,
+        },
+      ],
+      totalCount: 1,
+    });
+
+    renderPage();
+    expect(
+      await screen.findByText('player.pendingCount_1'),
+    ).toBeInTheDocument();
+  });
+
+  it('P1: una aceptada se abre desde su tarjeta, sin la caja suelta de abajo (FE #682)', async () => {
+    mockListMyInvitations.mockResolvedValue({
+      invitations: [
+        {
+          id: 'inv-1',
+          competitionId: 'comp-123',
+          competitionName: 'Summer Cup',
+          inviterName: 'Creator',
+          inviteeEmail: 'player@test.com',
+          status: 'ACCEPTED',
+          isPending: false,
+          isAccepted: true,
+          isDeclined: false,
+          isExpired: false,
+          personalMessage: null,
+          expiresAt: null,
+          respondedAt: '2026-09-21T10:00:00Z',
+        },
+      ],
+      totalCount: 1,
+    });
+
+    renderPage();
+
+    const tarjeta = await screen.findByTestId('invitation-card');
+    const accesos = screen.getAllByText('Summer Cup');
+    expect(accesos).toHaveLength(1);
+    expect(tarjeta).toContainElement(accesos[0]);
+    expect(accesos[0].closest('a')).toHaveAttribute(
+      'href',
+      '/competitions/comp-123',
+    );
+  });
+
+  /**
+   * Si la carga falla, la lista se quedaba vacía y la pantalla decía «No hay
+   * invitaciones todavía»: una afirmación que no se había podido comprobar
+   * (FE #685). Quien tenía una invitación pendiente entendía que no la tenía.
+   */
+  describe('si no se han podido cargar (FE #685)', () => {
+    it('E1: sin red, dice que no hay conexión y deja reintentar, no que no hay ninguna', async () => {
+      mockListMyInvitations.mockRejectedValue(new TypeError('Sin conexión'));
+
+      renderPage();
+
+      const aviso = await screen.findByTestId('invitaciones-sin-cargar');
+      // «mensaje» y no «aviso»: el aviso dice «lo que ves puede no estar al día»,
+      // y aquí no queda nada a la vista
+      expect(aviso).toHaveTextContent('common:sinConexion.mensaje');
+      expect(
+        screen.getByRole('button', { name: 'errors.retry' }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('noInvitations')).not.toBeInTheDocument();
+    });
+
+    it('E2: si falla el servidor, dice que no se han podido cargar', async () => {
+      mockListMyInvitations.mockRejectedValue(
+        Object.assign(new Error('Internal Server Error'), { status: 500 }),
+      );
+
+      renderPage();
+
+      expect(
+        await screen.findByTestId('invitaciones-sin-cargar'),
+      ).toHaveTextContent('errors.failedToLoad');
+      expect(screen.queryByText('noInvitations')).not.toBeInTheDocument();
+    });
+
+    it('E3: reintentar vuelve a pedirlas y, si llegan, las enseña', async () => {
+      // Falla hasta que se pulsa «Reintentar»
+      let hayRed = false;
+      mockListMyInvitations.mockImplementation(() =>
+        hayRed
+          ? Promise.resolve({
+              invitations: [
+                {
+                  id: 'inv-1',
+                  competitionId: 'comp-1',
+                  competitionName: 'Summer Cup',
+                  inviterName: 'Creator',
+                  inviteeEmail: 'player@test.com',
+                  status: 'PENDING',
+                  isPending: true,
+                  isAccepted: false,
+                  isDeclined: false,
+                  isExpired: false,
+                  personalMessage: null,
+                  expiresAt: new Date(Date.now() + 86400000).toISOString(),
+                  respondedAt: null,
+                },
+              ],
+              totalCount: 1,
+            })
+          : Promise.reject(new TypeError('Sin conexión')),
+      );
+
+      renderPage();
+      const reintentar = await screen.findByRole('button', {
+        name: 'errors.retry',
+      });
+      hayRed = true;
+      fireEvent.click(reintentar);
+
+      expect(await screen.findByText('Summer Cup')).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('invitaciones-sin-cargar'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('E5: si falla tras haber cargado, el contador de pendientes no se queda a la vista', async () => {
+      // «3 pendientes» junto a «no se han podido cargar» se contradicen
+      const pendiente = {
+        id: 'inv-1',
+        competitionId: 'comp-1',
+        competitionName: 'Summer Cup',
+        inviterName: 'Creator',
+        inviteeEmail: 'player@test.com',
+        status: 'PENDING',
+        isPending: true,
+        isAccepted: false,
+        isDeclined: false,
+        isExpired: false,
+        personalMessage: null,
+        expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        respondedAt: null,
+      };
+      let hayRed = true;
+      mockListMyInvitations.mockImplementation(() =>
+        hayRed
+          ? Promise.resolve({ invitations: [pendiente], totalCount: 1 })
+          : Promise.reject(new TypeError('Sin conexión')),
+      );
+
+      renderPage();
+      expect(
+        await screen.findByText('player.pendingCount_1'),
+      ).toBeInTheDocument();
+      hayRed = false;
+      fireEvent.change(screen.getByRole('combobox'), {
+        target: { value: 'ACCEPTED' },
+      });
+
+      await screen.findByTestId('invitaciones-sin-cargar');
+      expect(
+        screen.queryByText('player.pendingCount_1'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('E4: si cargan y no hay ninguna, sí lo dice', async () => {
+      mockListMyInvitations.mockResolvedValue({
+        invitations: [],
+        totalCount: 0,
+      });
+
+      renderPage();
+
+      expect(await screen.findByText('noInvitations')).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('invitaciones-sin-cargar'),
+      ).not.toBeInTheDocument();
+    });
+  });
+});

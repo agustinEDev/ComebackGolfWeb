@@ -1,0 +1,515 @@
+import { AL_PASAR } from '../components/ui/clasesDeComportamiento';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router';
+import { motion } from 'framer-motion';
+import {
+  Mail,
+  Shield,
+  Calendar,
+  TrendingUp,
+  Award,
+  CheckCircle,
+  AlertCircle,
+  Edit,
+  LogOut,
+  ArrowLeft,
+  Globe,
+  Clock,
+  Smartphone,
+  FileText,
+  Lock,
+  Cookie,
+  Users,
+  Scale,
+} from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import HeaderAuth from '../components/layout/HeaderAuth';
+import Avatar from '../components/ui/Avatar';
+import LanguageSwitcher from '../components/ui/LanguageSwitcher';
+import {
+  SettingsGroup,
+  SettingsRow,
+  SettingsControlRow,
+} from '../components/profile/SettingsList';
+import ActivitySharingToggle from '../components/profile/ActivitySharingToggle';
+import { useAuth } from '../hooks/useAuth';
+import { useStandalone } from '../hooks/useStandalone';
+import { useLogout } from '../hooks/useLogout';
+import { CountryFlag } from '../components/ui/CountryFlag';
+import { instanteEnTexto } from '../utils/instanteDeLaApi';
+import {
+  fetchCountriesUseCase,
+  listUserCompetitionsUseCase,
+} from '../composition';
+import FullScreenLoader from '../components/ui/FullScreenLoader';
+import { formatCountryName } from '../services/countries';
+import { formatoDeIndice } from '../utils/formatoDeHandicap';
+import { PANTALLA_MENOS_BARRA_INFERIOR } from '../utils/barraInferior';
+import { registraElFallo } from '../utils/registraElFallo';
+
+const Profile = () => {
+  const navigate = useNavigate();
+  const { t, i18n } = useTranslation('profile');
+  const { t: tCommon } = useTranslation('common');
+  const { user, loading: isLoadingUser, sinConfirmar } = useAuth();
+  const { logout } = useLogout();
+  const isStandalone = useStandalone();
+  // Se guarda el país, no su nombre ya traducido: así cambiar de idioma lo
+  // repinta sin tener que volver a pedir la lista de países
+  const [country, setCountry] = useState(null);
+  const [competitionsCount, setCompetitionsCount] = useState(0);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (!user) {
+        setIsLoadingData(false);
+        return;
+      }
+
+      try {
+        // Fetch country name if user has country_code
+        if (user.country_code) {
+          try {
+            const countries = await fetchCountriesUseCase.execute();
+            const suyo = countries.find((c) => c.code === user.country_code);
+            // Y se limpia si no aparece: dejando el anterior, la bandera —que sale
+            // del código nuevo— y el nombre —el viejo— se contradicen
+            setCountry(suyo ?? null);
+          } catch (error) {
+            registraElFallo(
+              'Profile.error-fetching-country-name',
+              'Error fetching country name:',
+              error,
+            );
+          }
+        }
+
+        // Fetch user's competitions count
+        try {
+          const competitionsData = await listUserCompetitionsUseCase.execute(
+            user.id,
+          );
+
+          // Handle different response formats: array or object with results array
+          let list = [];
+          if (Array.isArray(competitionsData)) {
+            list = competitionsData;
+          } else if (
+            competitionsData &&
+            Array.isArray(competitionsData.results)
+          ) {
+            list = competitionsData.results;
+          }
+
+          setCompetitionsCount(list.length);
+        } catch (error) {
+          registraElFallo(
+            'Profile.error-fetching-competitions-count',
+            'Error fetching competitions count:',
+            error,
+          );
+          setCompetitionsCount(0);
+        }
+      } catch (error) {
+        registraElFallo(
+          'Profile.error-fetching-user-data',
+          'Error fetching user data:',
+          error,
+        );
+      } finally {
+        setIsLoadingData(false);
+      }
+    };
+
+    fetchUserData();
+  }, [user]);
+
+  const handleEditProfile = () => {
+    navigate('/profile/edit');
+  };
+
+  // Esta es la UNICA salida que hay en movil —la cabecera no tiene menu alli
+  // (FE #306)—, y no limpiaba nada: el nombre, el correo, el handicap y las
+  // partidas guardadas se quedaban en el dispositivo (FE #531). Ahora sale por
+  // donde salen todas
+  const handleLogout = () => logout({ recargarEn: '/' });
+
+  if (isLoadingUser || isLoadingData) {
+    return <FullScreenLoader texto={t('common:loading')} />;
+  }
+
+  if (!user) {
+    return null;
+  }
+
+  const fullName = `${user.first_name} ${user.last_name}`;
+  // Sin conexión el usuario sale de la copia del dispositivo, que no guarda el correo
+  // ni el género (fase 3, FE-06): «—» hasta que vuelva la red
+  const SIN_DATO = '—';
+  const email = user.email || SIN_DATO;
+  // Las fechas en el idioma de la app y leídas como UTC; y si hay hándicap,
+  // un booleano: era el texto «Not set» el que lo decidía (FE #710)
+  const tieneHandicap = user.handicap !== null && user.handicap !== undefined;
+  const handicap = tieneHandicap
+    ? formatoDeIndice(user.handicap)
+    : t('edit.handicap.notSet');
+  const fechaLarga = { year: 'numeric', month: 'long', day: 'numeric' };
+  const handicapUpdated =
+    instanteEnTexto(user.handicap_updated_at, i18n.language, fechaLarga) ??
+    t('edit.handicap.never');
+  const memberSince =
+    instanteEnTexto(user.created_at, i18n.language, fechaLarga) ?? '';
+
+  return (
+    <div
+      className={`relative flex h-auto ${PANTALLA_MENOS_BARRA_INFERIOR} w-full flex-col bg-fondo`}
+    >
+      <div className="layout-container flex h-full grow flex-col">
+        <HeaderAuth user={user} />
+
+        <div className="px-4 md:px-40 flex flex-1 justify-center py-5">
+          <div className="layout-content-container flex flex-col max-w-[960px] flex-1">
+            {/* Page Title */}
+            <div className="flex flex-wrap justify-between gap-3 p-4">
+              <div>
+                <p className="hidden md:block text-tinta tracking-tight text-3xl md:text-[32px] font-bold leading-tight">
+                  {t('title')}
+                </p>
+                <p className="text-tinta-suave text-sm mt-1">{t('subtitle')}</p>
+              </div>
+            </div>
+
+            {/* Profile Header Card */}
+            <div className="p-4">
+              <div className="relative overflow-hidden bg-tarjeta rounded-tarjeta border border-contorno p-5">
+                {/* Background Pattern */}
+                <div className="absolute top-0 right-0 opacity-10">
+                  <Award className="w-48 h-48 text-tinta" />
+                </div>
+
+                {/* Content */}
+                <div className="relative z-10">
+                  {/* Avatar */}
+                  <div className="mb-4">
+                    <Avatar
+                      userId={user.id}
+                      size="xl"
+                      version={user.updated_at}
+                    />
+                  </div>
+
+                  {/* Name and Badges */}
+                  <div className="mb-4">
+                    <h2 className="text-3xl font-bold text-tinta mb-2">
+                      {fullName}
+                    </h2>
+
+                    {/* Badges Row */}
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {user.email_verified ? (
+                        <span className="inline-flex items-center gap-1 px-3 py-1 border border-current text-exito rounded-full text-xs font-semibold">
+                          <CheckCircle className="w-3 h-3" />
+                          {t('emailVerified')}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-3 py-1 border border-current text-aviso rounded-full text-xs font-semibold">
+                          <AlertCircle className="w-3 h-3" />
+                          {t('emailPending')}
+                        </span>
+                      )}
+
+                      <span className="inline-flex items-center gap-1 px-3 py-1 border border-current text-tinta rounded-full text-xs font-semibold">
+                        <Shield className="w-3 h-3" />
+                        {t('activeAccount')}
+                      </span>
+
+                      {tieneHandicap && (
+                        <span className="inline-flex items-center gap-1 px-3 py-1 border border-linea text-tinta rounded-full text-xs font-semibold">
+                          <Award className="w-3 h-3" />
+                          {t('handicapRegistered')}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Email. Mismo caso que en el perfil de otro jugador: una
+                        direccion larga no puede partirse sola y desborda */}
+                    <div className="flex items-center gap-2 text-tinta-suave mb-2">
+                      <Mail className="w-4 h-4 shrink-0" />
+                      <span
+                        data-testid="profile-email"
+                        className="min-w-0 break-all text-sm"
+                      >
+                        {email}
+                      </span>
+                    </div>
+
+                    {/* Member Since */}
+                    <div className="flex items-center gap-2 text-tinta-suave mb-2">
+                      <Calendar className="w-4 h-4" />
+                      <span className="text-sm">
+                        {t('memberSince', { date: memberSince })}
+                      </span>
+                    </div>
+
+                    {/* Last Updated */}
+                    <div className="flex items-center gap-2 text-tinta-suave mb-2">
+                      <Clock className="w-4 h-4" />
+                      <span className="text-sm">
+                        {t('lastUpdated', {
+                          date:
+                            instanteEnTexto(
+                              user.updated_at,
+                              i18n.language,
+                              fechaLarga,
+                            ) ?? '',
+                        })}
+                      </span>
+                    </div>
+
+                    {/* Nationality */}
+                    <div className="flex items-center gap-2 text-tinta-suave">
+                      <Globe className="w-4 h-4" />
+                      {user.country_code ? (
+                        <span className="text-sm flex items-center gap-2">
+                          <span>{t('nationality')}</span>
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-realce text-tinta rounded-full text-xs font-semibold border border-contorno">
+                            <CountryFlag
+                              countryCode={user.country_code}
+                              className="w-4 h-4"
+                            />
+                            <span>
+                              {formatCountryName(country, i18n.language) ||
+                                user.country_code}
+                            </span>
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-sm text-tinta-suave">
+                          {t('nationalityNotSpecified')}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Gender */}
+                    {(user.gender || sinConfirmar) && (
+                      <div className="flex items-center gap-2 text-tinta-suave">
+                        <Shield className="w-4 h-4" />
+                        <span data-testid="profile-gender" className="text-sm">
+                          {t('edit.personalInfo.gender')}:{' '}
+                          {user.gender
+                            ? t(
+                                `edit.personalInfo.genderOptions.${user.gender}`,
+                              )
+                            : SIN_DATO}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Stats */}
+                  <div className="grid grid-cols-2 gap-4 mt-6">
+                    <div className="bg-fondo rounded-lg p-4 border border-linea">
+                      <div className="flex items-center gap-2 mb-1">
+                        <TrendingUp className="w-5 h-5 text-tinta" />
+                        <span className="text-xs text-tinta-suave font-medium">
+                          {t('handicapLabel')}
+                        </span>
+                      </div>
+                      <p className="text-2xl font-bold text-tinta">
+                        {handicap}
+                      </p>
+                      {tieneHandicap && (
+                        <p className="text-xs text-tinta-suave mt-1">
+                          {t('updatedOn', { date: handicapUpdated })}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="bg-fondo rounded-lg p-4 border border-linea">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Award className="w-5 h-5 text-tinta" />
+                        <span className="text-xs text-tinta-suave font-medium">
+                          {t('tournamentsLabel')}
+                        </span>
+                      </div>
+                      <p className="text-2xl font-bold text-tinta">
+                        {competitionsCount}
+                      </p>
+                      <p className="text-xs text-tinta-suave mt-1">
+                        {competitionsCount === 0
+                          ? t('notEnrolledYet')
+                          : competitionsCount === 1
+                            ? t('competition')
+                            : t('competitions')}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* El perfil enseña dos cifras; el resto vive en su propia
+                      página desde FE #306 fase 2 */}
+                  <button
+                    type="button"
+                    onClick={() => navigate('/stats')}
+                    data-testid="profile-view-stats"
+                    className="mt-3 text-sm font-semibold text-tinta hover:underline"
+                  >
+                    {t('viewStats')}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="p-4">
+              {/* Móvil: lista de ajustes (FE #324). La botonera de cuatro
+                  colores no establecía jerarquía y se escalonaba al envolver;
+                  aquí manda el orden de la lista, no el color. "Volver al
+                  panel" no aparece: la navegación inferior ya tiene Inicio */}
+              <div className="md:hidden">
+                <SettingsGroup title={t('sections.account')}>
+                  <SettingsRow
+                    icon={Edit}
+                    label={t('actions.editProfile')}
+                    to="/profile/edit"
+                  />
+                  <SettingsRow
+                    icon={Smartphone}
+                    label={t('actions.manageDevices')}
+                    to="/profile/devices"
+                  />
+                  {user?.is_admin && (
+                    <SettingsRow
+                      icon={Shield}
+                      label={tCommon('header.adminPanel')}
+                      to="/admin"
+                    />
+                  )}
+                </SettingsGroup>
+
+                {/* El selector de idioma cayó aquí al retirarse el menú
+                    hamburguesa en móvil (FE #306) */}
+                <SettingsGroup title={t('sections.preferences')}>
+                  <SettingsControlRow
+                    icon={Globe}
+                    label={t('sections.language')}
+                  >
+                    <LanguageSwitcher />
+                  </SettingsControlRow>
+                </SettingsGroup>
+              </div>
+
+              {/* Privacidad va fuera del `md:hidden`: la lista de ajustes es
+                  solo de móvil, y en escritorio manda una botonera que no
+                  admite un interruptor. Dejarlo dentro haría inalcanzable desde
+                  escritorio la única forma de dejar de publicar */}
+              <SettingsGroup title={t('sections.privacy')}>
+                <SettingsControlRow
+                  icon={Users}
+                  label={t('privacy.shareActivity')}
+                  description={t('privacy.shareActivityHint')}
+                >
+                  {/* Sin red la copia del dispositivo no trae `share_activity`: saldría
+                      encendido y apagarlo abriría el aviso destructivo. Se enseña al
+                      confirmarse la sesión, ya con su valor (fase 3) */}
+                  {!sinConfirmar && (
+                    <ActivitySharingToggle
+                      initialValue={user?.share_activity}
+                    />
+                  )}
+                </SettingsControlRow>
+              </SettingsGroup>
+
+              {/* Los legales viven aquí porque instalada no se pinta el pie
+                  (FE #309). En escritorio con el pie visible serían un duplicado,
+                  pero una aplicación instalada en escritorio tampoco lo tiene:
+                  ahí este es el único acceso que queda */}
+              <div className={isStandalone ? '' : 'md:hidden'}>
+                <SettingsGroup title={t('sections.legal')}>
+                  <SettingsRow
+                    icon={Scale}
+                    label={t('legal.legalNotice')}
+                    to="/legal"
+                  />
+                  <SettingsRow
+                    icon={FileText}
+                    label={t('legal.terms')}
+                    to="/terms"
+                  />
+                  <SettingsRow
+                    icon={Lock}
+                    label={t('legal.privacy')}
+                    to="/privacy"
+                  />
+                  <SettingsRow
+                    icon={Cookie}
+                    label={t('legal.cookies')}
+                    to="/cookies"
+                  />
+                </SettingsGroup>
+              </div>
+
+              <div className="md:hidden">
+                <div className="overflow-hidden rounded-tarjeta border border-contorno bg-tarjeta">
+                  <SettingsRow
+                    icon={LogOut}
+                    label={t('actions.logOut')}
+                    onClick={handleLogout}
+                    tone="danger"
+                  />
+                </div>
+              </div>
+
+              {/* Escritorio: se mantiene la botonera, con una sola acción
+                  principal y el cierre de sesión como texto, no como bloque
+                  rojo al mismo nivel que editar el perfil (FE #324) */}
+              <div className="hidden md:flex flex-wrap items-center gap-3 justify-end">
+                <motion.button
+                  onClick={() => navigate('/dashboard')}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className={`flex items-center gap-2 px-5 py-2.5 text-tinta-suave rounded-lg font-medium ${AL_PASAR}`}
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>{t('actions.backToDashboard')}</span>
+                </motion.button>
+
+                <motion.button
+                  onClick={() => navigate('/profile/devices')}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className={`flex items-center gap-2 px-5 py-2.5 border border-linea text-tinta rounded-lg font-medium ${AL_PASAR}`}
+                >
+                  <Smartphone className="w-4 h-4" />
+                  <span>{t('actions.manageDevices')}</span>
+                </motion.button>
+
+                <motion.button
+                  onClick={handleEditProfile}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-contraste text-sobre-contraste rounded-boton font-medium transition-opacity hover:opacity-90"
+                >
+                  <Edit className="w-4 h-4" />
+                  <span>{t('actions.editProfile')}</span>
+                </motion.button>
+
+                <motion.button
+                  onClick={handleLogout}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="flex items-center gap-2 px-5 py-2.5 text-error rounded-boton font-medium hover:bg-tarjeta transition-colors"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>{t('actions.logOut')}</span>
+                </motion.button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Profile;

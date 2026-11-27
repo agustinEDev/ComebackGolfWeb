@@ -1,0 +1,186 @@
+import { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+
+import { useFocoRetenido } from '../../hooks/useFocoRetenido';
+import {
+  ALIAS_MAX_LENGTH,
+  loQueHayQueMandar,
+  queLePasaAlAlias,
+} from '../../utils/alias';
+import { alTocarElFondo } from '../ui/alTocarElFondo';
+
+const CONFLICTO = 409;
+
+/**
+ * Poner, cambiar o quitar el alias sin salir del panel (FE #435).
+ *
+ * Misma hoja inferior que el resto de la aplicación, con dos diferencias
+ * deliberadas:
+ *
+ * - **El foco entra en el campo**, no en lo primero: es una hoja para
+ *   escribir. Lo demás del foco es el de todas las hojas (`useFocoRetenido`).
+ * - **Guarda ella misma**, porque no vive dentro de ningún formulario.
+ */
+const AliasSheet = ({ aliasActual, onGuardar, onClose }) => {
+  const { t } = useTranslation('profile');
+  const [valor, setValor] = useState(aliasActual || '');
+  const [error, setError] = useState(null);
+  const [guardando, setGuardando] = useState(false);
+
+  const campoRef = useRef(null);
+  const panelRef = useRef(null);
+
+  // El foco de las hojas modales, el compartido (#389): entra en el campo, no
+  // se sale con el tabulador (sin contar lo desactivado), vuelve a quien la
+  // abrió y Escape cierra, en la pila de diálogos. Escape exclusivo, como las
+  // otras hojas: no llega a lo de debajo. Con una petición en vuelo no cierra,
+  // igual que el fondo y la ✕
+  useFocoRetenido(panelRef, {
+    inicialRef: campoRef,
+    escapeExclusivo: true,
+    alEscape: () => {
+      if (!guardando) onClose();
+    },
+  });
+
+  const alEscribir = (e) => {
+    if (error) setError(null);
+    setValor(e.target.value);
+  };
+
+  const guardar = async () => {
+    const problema = queLePasaAlAlias(valor);
+    if (problema) {
+      setError(problema);
+      return;
+    }
+
+    // `undefined` es «no ha cambiado nada»: cerrar sin llamar a la API
+    const aEnviar = loQueHayQueMandar(valor, aliasActual);
+    if (aEnviar === undefined) {
+      onClose();
+      return;
+    }
+
+    setGuardando(true);
+    try {
+      await onGuardar(aEnviar);
+      onClose();
+    } catch (err) {
+      // El conflicto se queda DENTRO de la hoja, con lo tecleado intacto: si
+      // se cerrara para enseñar un aviso fuera, habría que escribirlo otra vez
+      setError(
+        err?.status === CONFLICTO
+          ? 'alias.errors.taken'
+          : 'alias.errors.saveFailed',
+      );
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const hayAlgoQueQuitar = Boolean(aliasActual);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40"
+      role="presentation"
+      /* Con una peticion en vuelo no se cierra: si se cerrara y esa peticion
+         acabara en 409, el aviso caeria sobre un componente desmontado y el
+         conflicto desapareceria sin decir nada, dejando a quien lo escribio
+         creyendo que su alias quedo puesto */
+      {...alTocarElFondo(!guardando && onClose)}
+    >
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('alias.sheet.title')}
+        className="w-full max-w-md rounded-t-2xl bg-tarjeta p-4 pb-[calc(2rem+env(safe-area-inset-bottom))]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <span className="min-w-0 truncate text-sm font-semibold text-tinta-suave">
+            {t('alias.sheet.title')}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={guardando}
+            aria-label={t('alias.sheet.close')}
+            className="flex-shrink-0 text-lg leading-none text-tinta-suave disabled:opacity-40"
+          >
+            ✕
+          </button>
+        </div>
+
+        <input
+          ref={campoRef}
+          type="text"
+          value={valor}
+          onChange={alEscribir}
+          placeholder={t('edit.personalInfo.aliasPlaceholder')}
+          maxLength={ALIAS_MAX_LENGTH}
+          /* Bloqueado mientras se guarda: si se cambiara el texto con la
+             peticion en vuelo, un 409 del valor ANTERIOR marcaria como
+             ocupado el que se acaba de escribir */
+          readOnly={guardando}
+          aria-label={t('edit.personalInfo.alias')}
+          aria-describedby={error ? 'alias-sheet-error' : 'alias-sheet-help'}
+          aria-invalid={error ? 'true' : undefined}
+          data-testid="alias-sheet-input"
+          className={`bg-fondo w-full rounded-lg border px-3 py-3 text-base focus:outline-none focus:ring-2 ${
+            error
+              ? 'border-error focus:ring-error'
+              : 'border-borde focus:ring-tinta'
+          }`}
+        />
+
+        {error ? (
+          <p
+            id="alias-sheet-error"
+            role="alert"
+            className="mt-2 text-sm text-error"
+          >
+            {t(error)}
+          </p>
+        ) : (
+          <p id="alias-sheet-help" className="mt-2 text-sm text-tinta-suave">
+            {t('edit.personalInfo.aliasHelp')}
+          </p>
+        )}
+
+        <div className="mt-4 flex gap-2">
+          {hayAlgoQueQuitar && (
+            /* Quitar el alias es vaciar el campo, pero nadie lo adivina: el
+               botón lo hace explícito. No guarda solo — deja el campo vacío y
+               se confirma abajo, como en el perfil */
+            <button
+              type="button"
+              onClick={() => {
+                setError(null);
+                setValor('');
+                campoRef.current?.focus();
+              }}
+              disabled={guardando}
+              className="rounded-lg border border-linea px-4 py-3 text-sm font-medium text-tinta active:bg-fondo disabled:opacity-40"
+            >
+              {t('edit.personalInfo.aliasClear')}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={guardar}
+            disabled={guardando}
+            data-testid="alias-sheet-save"
+            className="flex-1 rounded-boton bg-contraste px-4 py-3 text-sm font-semibold text-sobre-contraste transition-opacity hover:opacity-90 disabled:opacity-60"
+          >
+            {guardando ? t('alias.sheet.saving') : t('alias.sheet.save')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default AliasSheet;

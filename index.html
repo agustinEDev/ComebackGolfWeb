@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- El favicon es el stamp en lima sobre Deep Forest, el icono de la
+         aplicacion: se ve igual sobre una barra de pestanas clara u oscura. -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180x180.png" />
+    <!-- viewport-fit=cover lets the page extend under the status bar and the home
+         indicator when installed. Without it every env(safe-area-inset-*) resolves
+         to 0 and the safe-area padding across the app does nothing. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#f8f7f2" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#222d24" media="(prefers-color-scheme: dark)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="ComebackGolf" />
+
+    <!-- Security: Content Security Policy is configured via HTTP headers in production (_headers, nginx.conf, vercel.json) -->
+    <!-- This approach is more secure as meta tags cannot set frame-ancestors and are easier to bypass -->
+
+    <meta name="description" content="Organiza torneos de golf amateur por equipos en formato Ryder, juega partidas rápidas y sigue los resultados hoyo a hoyo. Con hándicap WHS, gratis y sin anuncios." />
+    <meta name="author" content="Comeback Golf" />
+
+    <!-- Al compartir un enlace (WhatsApp, Instagram…) y en los buscadores. El
+         dominio lo pone el build desde src/utils/sitio.js (__SITIO__); la
+         canónica la pone cada página pública (utils/buscadores.js) -->
+    <meta property="og:site_name" content="Comeback Golf" />
+    <meta property="og:title" content="Comeback Golf: torneos de golf en formato Ryder" />
+    <meta property="og:description" content="Organiza torneos de golf amateur por equipos en formato Ryder, juega partidas rápidas y sigue los resultados hoyo a hoyo. Con hándicap WHS, gratis y sin anuncios." />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="es_ES" />
+    <meta property="og:image" content="__SITIO__/images/compartir/comebackgolf-1200x630.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Comeback Golf. Golf entre amigos" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Comeback Golf: torneos de golf en formato Ryder" />
+    <meta name="twitter:description" content="Organiza torneos de golf amateur por equipos en formato Ryder, juega partidas rápidas y sigue los resultados hoyo a hoyo. Con hándicap WHS, gratis y sin anuncios." />
+    <meta name="twitter:image" content="__SITIO__/images/compartir/comebackgolf-1200x630.png" />
+
+    <title>Comeback Golf: torneos de golf en formato Ryder</title>
+    <style>
+      /* El primer instante, antes de que cargue el codigo. Se pinta lo MISMO que
+         pintara React un momento despues —Off White, o Deep Forest si el sistema
+         va en oscuro—, asi que el relevo no se ve.
+
+         Y por eso retirarla es trivial: como debajo aparece la misma pantalla,
+         basta quitarla cuando React monta. No hay que averiguar si ya hay
+         contenido, que es lo que complico un intento anterior. */
+      #arranque {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #f8f7f2;
+        /* Red de seguridad sin JavaScript: si el codigo nunca llega a cargar
+           —un paquete que un despliegue borro, la red caida— esto se aparta solo
+           a los 6 s en vez de dejar una pantalla fija tapandolo todo. Lo normal
+           es que `main.jsx` la retire mucho antes —en una carga corriente, en
+           menos de un segundo—, asi que este plazo solo se alcanza cuando algo
+           ha ido mal de verdad. Corto a proposito: este mecanismo ya se quedo
+           colgado una vez, y el peor caso debe ser una espera fea, no una
+           aplicacion inservible. */
+        animation: arranque-rendirse 0.4s ease-out 6s forwards;
+      }
+      @keyframes arranque-rendirse {
+        to { opacity: 0; visibility: hidden; }
+      }
+      /* La pantalla que toma el relevo —`.pantalla-de-espera`— centra el
+         monograma Y una linea de texto debajo. Esta capa centra solo el
+         monograma, asi que al cambiar la una por la otra el dibujo saltaba unos
+         20 px hacia arriba. Este hueco reserva exactamente lo que ocupa esa
+         linea (1rem de separacion + 1.5rem de altura), de modo que el monograma
+         cae en el mismo sitio en las dos y el relevo no se ve. Sin texto: el
+         idioma no se sabe todavia, y una palabra en el idioma equivocado se
+         nota mas que su ausencia. */
+      /* El MISMO dibujo que la pantalla que toma el relevo (FE #495): la marca
+         dentro de su anillo. Si el anillo lo pusiera solo React, apareceria de
+         la nada a mitad del arranque, que es la clase de salto que esta saga
+         viene arreglando. Va en CSS puro porque aqui todavia no hay JavaScript.
+         Las medidas son las de `LoadingMark` en grande: marco de 128, marca de
+         64. Si una cambia, la otra tambien. */
+      #arranque-marco {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 128px;
+        height: 128px;
+      }
+      #arranque-anillo {
+        position: absolute;
+        inset: 0;
+        border-radius: 9999px;
+        border: 3px solid rgba(34, 45, 36, 0.18);
+        border-top-color: #222d24;
+        /* 1s, el mismo que `animate-spin` de Tailwind en la otra mitad. Con
+           velocidades distintas, el relevo cambia el ritmo del anillo en el
+           unico fotograma del que va todo esto. */
+        animation: arranque-gira 1s linear infinite;
+      }
+      @keyframes arranque-gira {
+        to { transform: rotate(360deg); }
+      }
+      /* Quien pide menos movimiento se queda con la marca, que ya dice que se
+         esta esperando */
+      @media (prefers-reduced-motion: reduce) {
+        #arranque-anillo { animation: none; }
+      }
+
+      #arranque-hueco {
+        margin-top: 1rem;
+        height: 1.5rem;
+      }
+
+      /* El mismo fondo en el documento: la franja de la barra de estado la
+         pinta el fondo del `html`, no esta capa, y sin esto quedaba una banda
+         de otro color cruzando la parte de arriba en la aplicacion instalada.
+         Va en linea porque se aplica antes de que llegue `index.css`, y
+         condicionado a que la capa siga puesta: despues manda el de `index.css`. */
+      html:has(#arranque) { background: #f8f7f2; }
+
+      /* En oscuro, Deep Forest con el anillo en lima. Sigue al SISTEMA, que es
+         lo que hace el tema por defecto: quien haya elegido a mano el contrario
+         ve este instante en el del sistema, porque aqui no hay JavaScript para
+         leer lo guardado. */
+      @media (prefers-color-scheme: dark) {
+        html:has(#arranque) { background: #222d24; }
+        #arranque { background: #222d24; }
+        #arranque-anillo {
+          border-color: rgba(221, 244, 120, 0.28);
+          border-top-color: #ddf478;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="arranque" aria-hidden="true">
+      <div id="arranque-marco">
+        <span id="arranque-anillo"></span>
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="/brand/stamp-acid.svg" />
+          <img src="/brand/stamp-deep.svg" alt="" width="64" height="73" />
+        </picture>
+      </div>
+      <div id="arranque-hueco"></div>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

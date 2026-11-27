@@ -1,0 +1,160 @@
+import { describe, it, expect, vi } from 'vitest';
+import { canUseRFEG, getCountryFlag } from './countryUtils';
+
+describe('countryUtils', () => {
+  describe('canUseRFEG', () => {
+    it('should return true for Spanish user (country_code: ES)', () => {
+      const user = {
+        id: 'user-123',
+        email: 'test@example.com',
+        first_name: 'Test',
+        last_name: 'User',
+        country_code: 'ES',
+      };
+
+      expect(canUseRFEG(user)).toBe(true);
+    });
+
+    it('should return true for Spanish user with lowercase country_code (es)', () => {
+      const user = {
+        id: 'user-123',
+        email: 'test@example.com',
+        first_name: 'Test',
+        last_name: 'User',
+        country_code: 'es',
+      };
+
+      expect(canUseRFEG(user)).toBe(true);
+    });
+
+    it('should return false for non-Spanish user (country_code: FR)', () => {
+      const user = {
+        id: 'user-123',
+        email: 'test@example.com',
+        first_name: 'Test',
+        last_name: 'User',
+        country_code: 'FR',
+      };
+
+      expect(canUseRFEG(user)).toBe(false);
+    });
+
+    it('should return false if user has no country_code', () => {
+      const user = {
+        id: 'user-123',
+        email: 'test@example.com',
+        first_name: 'Test',
+        last_name: 'User',
+        country_code: null,
+      };
+
+      expect(canUseRFEG(user)).toBe(false);
+    });
+
+    it('should return false if country_code is undefined', () => {
+      const user = {
+        id: 'user-123',
+        email: 'test@example.com',
+        first_name: 'Test',
+        last_name: 'User',
+        // country_code is undefined
+      };
+
+      expect(canUseRFEG(user)).toBe(false);
+    });
+
+    it('should return false if country_code is empty string', () => {
+      const user = {
+        id: 'user-123',
+        email: 'test@example.com',
+        first_name: 'Test',
+        last_name: 'User',
+        country_code: '',
+      };
+
+      expect(canUseRFEG(user)).toBe(false);
+    });
+
+    it('should return false if user is null', () => {
+      expect(canUseRFEG(null)).toBe(false);
+    });
+
+    it('should return false if user is undefined', () => {
+      expect(canUseRFEG(undefined)).toBe(false);
+    });
+
+    it('should return false if user is not an object (string)', () => {
+      expect(canUseRFEG('not an object')).toBe(false);
+    });
+
+    it('should return false if user is not an object (number)', () => {
+      expect(canUseRFEG(123)).toBe(false);
+    });
+
+    it('should return false if user is an array', () => {
+      expect(canUseRFEG([])).toBe(false);
+    });
+  });
+
+  describe('getCountryFlag', () => {
+    it('should return flag emoji for valid country code (ES)', () => {
+      const flag = getCountryFlag('ES');
+      expect(flag).toBe('🇪🇸');
+    });
+
+    it('should return flag emoji for valid country code (FR)', () => {
+      const flag = getCountryFlag('FR');
+      expect(flag).toBe('🇫🇷');
+    });
+
+    it('should return flag emoji for valid country code (US)', () => {
+      const flag = getCountryFlag('US');
+      expect(flag).toBe('🇺🇸');
+    });
+
+    it('should handle lowercase country codes', () => {
+      const flag = getCountryFlag('es');
+      expect(flag).toBe('🇪🇸');
+    });
+
+    it('should return empty string for invalid country code (too long)', () => {
+      const flag = getCountryFlag('ESP');
+      expect(flag).toBe('');
+    });
+
+    it('should return empty string for invalid country code (too short)', () => {
+      const flag = getCountryFlag('E');
+      expect(flag).toBe('');
+    });
+
+    it('should return empty string for null', () => {
+      const flag = getCountryFlag(null);
+      expect(flag).toBe('');
+    });
+
+    it('should return empty string for undefined', () => {
+      const flag = getCountryFlag(undefined);
+      expect(flag).toBe('');
+    });
+
+    it('should return empty string for non-string input', () => {
+      const flag = getCountryFlag(123);
+      expect(flag).toBe('');
+    });
+  });
+});
+
+// U6 (25 oct 2026): Sentry recoge la consola como migas, y el país del usuario
+// salía en cada error de la pantalla de perfil
+describe('canUseRFEG · sin consola', () => {
+  it('U6: no escribe el país del usuario en la consola', () => {
+    const espias = ['log', 'info', 'warn', 'error', 'debug'].map((m) =>
+      vi.spyOn(console, m).mockImplementation(() => {}),
+    );
+    canUseRFEG({ country_code: 'FR' });
+    canUseRFEG({ country_code: 'ES' });
+    canUseRFEG(null);
+    for (const espia of espias) expect(espia).not.toHaveBeenCalled();
+    espias.forEach((e) => e.mockRestore());
+  });
+});

@@ -1,0 +1,250 @@
+/**
+ * Los golpes que ya no se pudieron guardar (FE #521).
+ *
+ * Cuando el servidor rechaza una anotación encolada —la partida terminó, se
+ * canceló, o al jugador lo sacaron de ella— esa anotación sale de la cola para
+ * no reintentarse eternamente. Pero sacarla en silencio hace desaparecer un
+ * golpe sin que su dueño lo sepa, que es medio problema de la issue: aquí se
+ * guarda el aviso hasta que alguien lo lea.
+ *
+ * Vive en `localStorage` y no en memoria porque el vaciado puede ocurrir con
+ * la aplicación en cualquier pantalla, y el aviso se lee en el panel, quizá
+ * después de cerrarla y volver a abrirla.
+ *
+ * **Todo lleva dueño**, igual que la cola: en un móvil compartido, quien entre
+ * después no puede leer el nombre de las partidas de la persona anterior. Eso
+ * se resuelve al LEER (`pendientes`), no borrando al cerrar sesión: un aviso
+ * no se puede regenerar —el golpe que describe ya salió de la cola al
+ * escribirlo— y el borrado llegaba a dispararse dentro del propio vaciado,
+ * porque un 403 de CSRF cierra la sesión desde `api.js` en mitad del bucle.
+ */
+
+import { esElMismoGolpe } from './golpesDelHoyo';
+
+const CLAVE = 'comebackgolf-golpes-perdidos';
+
+/**
+ * Cuánto se guarda un aviso (FS-03, re-auditoría del 16 nov 2026): una semana, para
+ * que su dueño abra la app y lo vea. Después ya no se lee, y la siguiente escritura
+ * (o `purgaLosCaducados`) lo saca del móvil. Sin fecha, caducado; con fecha en el
+ * futuro —un reloj cambiado—, no.
+ */
+export const CADUCIDAD_DE_LOS_AVISOS_MS = 7 * 24 * 60 * 60 * 1000;
+
+const vigente = (aviso, ahora) =>
+  typeof aviso?.cuando === 'number' &&
+  Number.isFinite(aviso.cuando) &&
+  ahora - aviso.cuando <= CADUCIDAD_DE_LOS_AVISOS_MS;
+
+const leeCrudo = () => {
+  try {
+    const crudo = localStorage.getItem(CLAVE);
+    const guardado = crudo ? JSON.parse(crudo) : [];
+    return Array.isArray(guardado) ? guardado : [];
+  } catch {
+    return [];
+  }
+};
+
+// Todo lo que se lee y se reescribe pasa por aquí: lo caducado no se enseña y la
+// siguiente escritura ya no lo guarda
+const leeTodo = () => {
+  const ahora = Date.now();
+  return leeCrudo().filter((aviso) => vigente(aviso, ahora));
+};
+
+const guarda = (avisos) => {
+  try {
+    localStorage.setItem(CLAVE, JSON.stringify(avisos));
+    return true;
+  } catch {
+    // Sin sitio donde escribir no se puede avisar más tarde. Se devuelve false
+    // en vez de lanzar: quien vacía tiene que poder decidir qué hacer, y sobre
+    // todo tiene que poder NO borrar el golpe si su aviso no cabe
+    return false;
+  }
+};
+
+/** Los huérfanos son de quien esté mirando: ver `scoringOfflineQueue`. */
+const esVisiblePara = (aviso, userId) =>
+  (aviso.userId ?? null) === null || aviso.userId === userId;
+
+/**
+ * Dos avisos son el mismo si hablan del mismo golpe. Y un golpe lleva
+ * participante: en una partida rápida se anota a varios jugadores desde un
+ * móvil, así que del hoyo 7 hay una entrada POR PARTICIPANTE. Sin mirarlo, el
+ * segundo rechazo del mismo hoyo se daba por ya apuntado, `apunta` devolvía
+ * true sin escribir nada, y quien llamaba borraba el golpe igualmente: cuatro
+ * golpes perdidos y un solo aviso.
+ */
+const esDelMismo = (aviso, matchId, holeNumber, userId, participantId) =>
+  aviso.matchId === matchId &&
+  aviso.holeNumber === holeNumber &&
+  (aviso.participantId ?? null) === (participantId ?? null) &&
+  (aviso.userId ?? null) === (userId ?? null);
+
+/**
+ * Apunta que una anotación no se pudo guardar.
+ *
+ * @param {{matchId: string, matchName: string|null, matchNumber: number|null,
+ *   holeNumber: number, participantId: string|null, userId: string|null}} aviso
+ * @returns {boolean} Si de verdad quedó apuntado. **Hay que mirarlo**: si no
+ *   cupo, el golpe no puede borrarse de la cola, o desaparecería sin dejar ni
+ *   el aviso.
+ */
+export const apunta = (aviso) => {
+  const avisos = leeTodo();
+  // El duplicado se mira TAMBIÉN por dueño: sin eso, el aviso de una persona
+  // se tragaba el de otra sobre el mismo hoyo de la misma partida, y a la
+  // segunda se le decía que había quedado registrado cuando no
+  const elQueHabia = avisos.find((a) =>
+    esDelMismo(
+      a,
+      aviso.matchId,
+      aviso.holeNumber,
+      aviso.userId,
+      aviso.participantId,
+    ),
+  );
+  if (!elQueHabia) return guarda([...avisos, { ...aviso, cuando: Date.now() }]);
+
+  // Del mismo hoyo: se suman los golpes perdidos (FE #813). Si alguno de los
+  // dos no dice cuáles, no se sabe, y el aviso pasa a ser del hoyo entero
+  const golpes =
+    elQueHabia.golpes && aviso.golpes
+      ? [...new Set([...elQueHabia.golpes, ...aviso.golpes])]
+      : undefined;
+  // Caducado solo si lo son los dos: si el servidor rechazó alguno, eso es lo
+  // que hay que contar (FS-03)
+  const caducado = Boolean(elQueHabia.caducado && aviso.caducado);
+  if (
+    JSON.stringify(golpes) === JSON.stringify(elQueHabia.golpes) &&
+    caducado === Boolean(elQueHabia.caducado)
+  )
+    return true;
+  const actualizado = { ...elQueHabia, golpes };
+  if (!golpes) delete actualizado.golpes;
+  if (!caducado) delete actualizado.caducado;
+  return guarda(avisos.map((a) => (a === elQueHabia ? actualizado : a)));
+};
+
+/**
+ * Los avisos de esta persona, pendientes de leer.
+ *
+ * Sin `userId` se devuelven todos: es lo que necesita el cierre de sesión, y
+ * también lo que hace que los avisos guardados antes de que existiera este
+ * campo se sigan viendo.
+ */
+export const pendientes = (userId = null) => {
+  const todos = leeTodo();
+  if (userId == null) return todos;
+  return todos.filter((a) => esVisiblePara(a, userId));
+};
+
+/**
+ * Retira los avisos de una partida cuando ya se le han enseñado a quien los
+ * tenía que ver.
+ *
+ * Con dueño, y por el mismo motivo que todo lo demás: descartar los tuyos no
+ * puede llevarse por delante los de otra persona que todavía no los ha leído.
+ * Los huérfanos se van con quien los descarte, que es lo único que se puede
+ * hacer con ellos.
+ */
+export const olvidaLosDe = (matchId, userId = null) =>
+  guarda(
+    leeTodo().filter((a) => a.matchId !== matchId || !esVisiblePara(a, userId)),
+  );
+
+/**
+ * Retira el aviso de UN hoyo: su dueño acaba de volver a anotarlo, así que ya
+ * no hay nada perdido que contarle.
+ */
+export const olvidaEl = (
+  matchId,
+  holeNumber,
+  userId = null,
+  participantId = undefined,
+  golpes = undefined,
+) => {
+  const delHoyo = (a) => {
+    if (a.matchId !== matchId || a.holeNumber !== holeNumber) return false;
+    if (!esVisiblePara(a, userId)) return false;
+    // Sin participante se van todos los de ese hoyo: es lo que quiere una
+    // competición, donde no hay más que uno. Con participante, solo el suyo,
+    // o reanotar a un jugador borraría el aviso de los otros tres
+    if (participantId === undefined) return true;
+    return (a.participantId ?? null) === (participantId ?? null);
+  };
+  // Con `golpes`, solo esos (FE #813): guardar el del marcado no salva el
+  // propio. Un aviso que no dice sus golpes —de antes de esto— se va entero
+  return guarda(
+    leeTodo().flatMap((a) => {
+      if (!delHoyo(a)) return [a];
+      if (!golpes || !a.golpes) return [];
+      const quedan = a.golpes.filter(
+        (g) => !golpes.some((anotado) => esElMismoGolpe(g, anotado)),
+      );
+      return quedan.length > 0 ? [{ ...a, golpes: quedan }] : [];
+    }),
+  );
+};
+
+/**
+ * Pone nombre a los avisos de una partida que se apuntaron sin él.
+ *
+ * El aviso copia el nombre de la anotación en el momento de apartarla, y en
+ * un arranque en frío sin cobertura la anotación todavía no lo tiene: la
+ * pantalla vacía la cola en cuanto monta, antes de que llegue la vista con el
+ * nombre. La cola se repara con `scoringOfflineQueue.ponleNombre` cuando la
+ * vista carga; sin esto, el aviso ya apartado se quedaba con «una partida
+ * anterior» para siempre, porque ya no estaba en la cola que se repara.
+ * Mismo criterio que allí: solo se rellena lo vacío, y solo se escribe si
+ * hizo falta.
+ *
+ * @returns {boolean} Si hizo falta escribir y se pudo
+ */
+export const ponleNombre = (
+  matchId,
+  { matchName = null, matchNumber = null } = {},
+) => {
+  const leFalta = (valor) => valor == null || valor === '';
+  if (leFalta(matchName) && matchNumber == null) return true;
+  let hayQueEscribir = false;
+  const conNombre = leeTodo().map((aviso) => {
+    if (aviso.matchId !== matchId) return aviso;
+    const faltaNombre = leFalta(aviso.matchName) && !leFalta(matchName);
+    const faltaNumero = aviso.matchNumber == null && matchNumber != null;
+    if (!faltaNombre && !faltaNumero) return aviso;
+    hayQueEscribir = true;
+    return {
+      ...aviso,
+      matchName: faltaNombre ? matchName : aviso.matchName,
+      matchNumber: faltaNumero ? matchNumber : aviso.matchNumber,
+    };
+  });
+  return hayQueEscribir ? guarda(conNombre) : true;
+};
+
+/** Retira todos, sea de quien sea. */
+export const olvidaTodos = () => {
+  try {
+    localStorage.removeItem(CLAVE);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Saca del móvil los avisos caducados (FS-03). Solo escribe si había alguno. Lo
+ * llaman la carga de la aplicación (composition/caducidadAlArrancar) y cada vaciado.
+ *
+ * @returns {boolean} false si había que escribir y no se pudo
+ */
+export const purgaLosCaducados = () => {
+  const todos = leeCrudo();
+  const ahora = Date.now();
+  const vigentes = todos.filter((aviso) => vigente(aviso, ahora));
+  if (vigentes.length === todos.length) return true;
+  return guarda(vigentes);
+};

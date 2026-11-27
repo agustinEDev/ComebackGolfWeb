@@ -1,0 +1,134 @@
+import {
+  MAX_TEES,
+  MIN_TEES,
+  VALID_HOLE_PARS,
+  isHoleParValid,
+  isTeeCountValid,
+  parRangeFor,
+} from '../../../domain/services/courseTypeRanges';
+import TeeColor from '../../../domain/value_objects/TeeColor';
+
+/** @typedef {import('../../../domain/entities/GolfCourse').default} GolfCourse */
+
+/**
+ * Create Golf Course Request Use Case
+ * Allows creators to request a new golf course (status: PENDING_APPROVAL)
+ *
+ * Business Rules:
+ * - Any authenticated user can request a golf course
+ * - Golf course is created with status PENDING_APPROVAL
+ * - Admin must approve before it can be used in competitions
+ * - Validates: name, country, tees (1-14), holes (18), par per hole and total par
+ */
+class CreateGolfCourseRequestUseCase {
+  constructor({ golfCourseRepository }) {
+    this.golfCourseRepository = golfCourseRepository;
+  }
+
+  /**
+   * Execute use case
+   * @param {{name: string, countryCode: string, courseType?: string,
+   *   tees: Array<{color: string, identifier?: string, slopeRating: number, courseRating: number}>,
+   *   holes: Array<{par: number}>}} golfCourseData - Golf course data (more fields go through to the repository)
+   * @returns {Promise<GolfCourse>} Created golf course (PENDING_APPROVAL)
+   */
+  async execute(golfCourseData) {
+    // Validate input
+    if (!golfCourseData) {
+      throw new Error('Golf course data is required');
+    }
+
+    // Validate name
+    if (
+      !golfCourseData.name ||
+      typeof golfCourseData.name !== 'string' ||
+      golfCourseData.name.trim().length === 0
+    ) {
+      throw new Error(
+        'Golf course name is required and must be a non-empty string',
+      );
+    }
+
+    // Validate country code
+    if (
+      !golfCourseData.countryCode ||
+      typeof golfCourseData.countryCode !== 'string' ||
+      golfCourseData.countryCode.length !== 2
+    ) {
+      throw new Error('Golf course country is required');
+    }
+
+    // Validate tees
+    // El techo lo pone el backend (MAX_TEES): sin el, un campo de 20 barras
+    // pasaba por aqui y lo rechazaba la API con un 422 generico.
+    if (
+      !Array.isArray(golfCourseData.tees) ||
+      !isTeeCountValid(golfCourseData.tees.length)
+    ) {
+      throw new Error(
+        `Golf course must have between ${MIN_TEES} and ${MAX_TEES} tees`,
+      );
+    }
+
+    // Validate each tee has required fields
+    golfCourseData.tees.forEach((tee, index) => {
+      if (!tee.color) {
+        throw new Error(`Tee ${index + 1} must have a colour`);
+      }
+      // El color nombra la salida; el identificador solo hace falta cuando no
+      // lo es, porque OTHER puede repetirse en un mismo campo
+      if (tee.color === TeeColor.OTHER && !tee.identifier?.trim()) {
+        throw new Error(
+          `Tee ${index + 1} must have an identifier when its colour is OTHER`,
+        );
+      }
+      if (typeof tee.slopeRating !== 'number') {
+        throw new Error(`Tee ${index + 1} must have a numeric slope rating`);
+      }
+      if (typeof tee.courseRating !== 'number') {
+        throw new Error(`Tee ${index + 1} must have a numeric course rating`);
+      }
+    });
+
+    // Validate holes
+    if (
+      !Array.isArray(golfCourseData.holes) ||
+      golfCourseData.holes.length !== 18
+    ) {
+      throw new Error('Golf course must have exactly 18 holes');
+    }
+
+    // Validate each hole has numeric par within allowed range
+    golfCourseData.holes.forEach((hole, index) => {
+      if (typeof hole.par !== 'number') {
+        throw new Error(`Hole ${index + 1} must have a numeric par value`);
+      }
+      if (!isHoleParValid(hole.par)) {
+        throw new Error(
+          `Hole ${index + 1} par must be one of ${VALID_HOLE_PARS.join(', ')} (current: ${hole.par})`,
+        );
+      }
+    });
+
+    // El par total es el del tipo de campo, no el de un 18 hoyos: un pitch &
+    // putt es par 54-60 y un ejecutivo 61-65. Ver `courseTypeRanges`.
+    const totalPar = golfCourseData.holes.reduce(
+      (sum, hole) => sum + hole.par,
+      0,
+    );
+    const [minPar, maxPar] = parRangeFor(golfCourseData.courseType);
+    if (totalPar < minPar || totalPar > maxPar) {
+      throw new Error(
+        `Total par must be between ${minPar} and ${maxPar} (current: ${totalPar})`,
+      );
+    }
+
+    // Call repository to create golf course request
+    const createdCourse =
+      await this.golfCourseRepository.create(golfCourseData);
+
+    return createdCourse;
+  }
+}
+
+export default CreateGolfCourseRequestUseCase;

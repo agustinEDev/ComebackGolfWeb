@@ -1,0 +1,226 @@
+import { useNavigate } from 'react-router';
+import { TrendingUp, TrendingDown, Trophy, Target, Minus } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { formatoDeIndice } from '../../utils/formatoDeHandicap';
+
+/**
+ * Las tres cifras que responden al "¿cómo voy?" del panel.
+ *
+ * En móvil van a tres columnas y no a una: son datos que se leen de un vistazo
+ * y en columna ocupaban tres pantallas ellos solos. De ahí la variante compacta
+ * (cifras y padding menores, texto secundario oculto por debajo de `md`).
+ *
+ * La pareja hándicap / "juegas a" es el titular: el primero es el oficial de la
+ * federación y el segundo, a qué está jugando de verdad según sus últimas
+ * vueltas. Enseñar uno sin el otro pierde justamente la comparación.
+ */
+
+const StatCard = ({
+  icon: Icon,
+  label,
+  value,
+  hint,
+  tone,
+  testId,
+  onClick,
+  ariaLabel,
+}) => {
+  // Una tarjeta que lleva a algún sitio tiene que ser un botón, no un div con
+  // un manejador: el teclado y los lectores de pantalla lo necesitan
+  const Tag = onClick ? 'button' : 'div';
+  return (
+    <Tag
+      data-testid={testId}
+      onClick={onClick}
+      type={onClick ? 'button' : undefined}
+      aria-label={onClick ? ariaLabel : undefined}
+      // `min-w-0`: una columna de grid tampoco encoge por debajo del ancho de su
+      // contenido, así que sin esto una etiqueta larga desborda la rejilla.
+      //
+      // `flex flex-col`: un <button> centra verticalmente su contenido y un <div>
+      // lo alinea arriba. Como la rejilla estira las tres tarjetas a la misma
+      // altura, la que es botón y tiene menos contenido —el hándicap cuando no
+      // hay tendencia que enseñar— aparecía bajada respecto a las demás. Con la
+      // columna explícita, la alineación deja de depender de si la tarjeta lleva
+      // onClick o no.
+      className={`relative flex min-w-0 flex-col overflow-hidden rounded-tarjeta border p-3 md:p-6 text-left ${tone.container} ${
+        onClick ? 'transition-colors hover:bg-fondo' : ''
+      }`}
+    >
+      {/* `self-start`: en una columna flex los hijos se estiran a lo ancho por
+        defecto, y el recuadro del icono dejaría de ser un cuadrado */}
+      <div
+        className={`inline-flex self-start rounded-lg p-1.5 md:p-2.5 ${tone.iconBackground}`}
+      >
+        <Icon
+          className="h-4 w-4 md:h-5 md:w-5 text-sobre-contraste"
+          aria-hidden="true"
+        />
+      </div>
+      <p
+        className={`mt-2 text-[10px] md:text-sm font-medium leading-tight ${tone.label}`}
+      >
+        {label}
+      </p>
+      <p
+        className={`text-2xl md:text-4xl font-bold leading-tight ${tone.value}`}
+      >
+        {value}
+      </p>
+      {hint}
+      <div className="pointer-events-none absolute -bottom-6 -right-6 hidden opacity-10 md:block">
+        <Icon className={`h-32 w-32 ${tone.value}`} aria-hidden="true" />
+      </div>
+    </Tag>
+  );
+};
+
+const TONES = {
+  handicap: {
+    container: 'bg-realce border-transparent',
+    iconBackground: 'bg-contraste',
+    label: 'text-tinta',
+    value: 'text-tinta',
+  },
+  playing: {
+    container: 'bg-realce border-transparent',
+    iconBackground: 'bg-contraste',
+    label: 'text-tinta',
+    value: 'text-tinta',
+  },
+  tournaments: {
+    container: 'bg-realce border-transparent',
+    iconBackground: 'bg-contraste',
+    label: 'text-tinta',
+    value: 'text-tinta',
+  },
+};
+
+/**
+ * @param {Object} props
+ * @param {number|null} [props.fallbackHandicap] - Hándicap del perfil
+ * @param {number} [props.fallbackTournaments] - Torneos ya cargados por la página
+ *
+ * Los dos fallbacks existen porque el panel **ya sabe** el hándicap y cuántos
+ * torneos tiene el jugador antes de pedir las estadísticas: vienen del perfil y
+ * del listado de competiciones. Si el resumen falla o el backend todavía no
+ * expone el endpoint, no hay razón para tirar dos datos que ya están en la
+ * mano y enseñar "--" al lado de una tarjeta de perfil que dice "Hándicap: 18".
+ */
+const PlayerStatsCards = ({
+  stats,
+  isLoading = false,
+  fallbackHandicap = null,
+  fallbackTournaments = 0,
+}) => {
+  const { t } = useTranslation('dashboard');
+  const navigate = useNavigate();
+  const openStats = () => navigate('/stats');
+
+  const formatNumber = (value) =>
+    value === null || value === undefined ? '--' : value.toFixed(1);
+
+  const handicap = stats?.handicap ?? fallbackHandicap;
+  const trend = stats?.handicapTrend;
+  const isImproving = stats?.isImproving?.() ?? false;
+  // Un cambio de exactamente cero es información, no ausencia de tendencia:
+  // significa que el jugador se mantiene, y merece su propio icono
+  const isSteady = trend === 0;
+  const TrendIcon = isSteady ? Minus : isImproving ? TrendingDown : TrendingUp;
+
+  return (
+    <div
+      className="grid grid-cols-3 gap-2 md:gap-4"
+      data-testid="player-stats-cards"
+    >
+      <StatCard
+        testId="stat-card-handicap"
+        icon={TrendingUp}
+        tone={TONES.handicap}
+        onClick={openStats}
+        ariaLabel={t('statistics.openStats')}
+        label={t('statistics.handicap')}
+        // Sin gatear por isLoading: el hándicap del perfil ya está, y parpadear
+        // de "--" a "18" cuando llegan las estadísticas es peor que enseñarlo
+        // desde el principio
+        value={formatoDeIndice(handicap) ?? '--'}
+        hint={
+          trend !== null && trend !== undefined && !isLoading ? (
+            <p
+              data-testid="handicap-trend"
+              className={`mt-0.5 flex items-center gap-0.5 text-[10px] md:text-xs font-medium ${
+                isSteady
+                  ? 'text-tinta-suave'
+                  : isImproving
+                    ? 'text-tinta'
+                    : 'text-error'
+              }`}
+            >
+              <TrendIcon className="h-3 w-3" aria-hidden="true" />
+              {/* El valor absoluto, porque la flecha ya dice la dirección: un
+                  "-0.4" junto a una flecha hacia abajo se lee dos veces */}
+              <span>{Math.abs(trend).toFixed(1)}</span>
+              <span className="sr-only">
+                {isSteady
+                  ? t('statistics.trendSteady')
+                  : isImproving
+                    ? t('statistics.trendImproving')
+                    : t('statistics.trendWorsening')}
+              </span>
+            </p>
+          ) : null
+        }
+      />
+
+      <StatCard
+        testId="stat-card-playing-to"
+        icon={Target}
+        tone={TONES.playing}
+        onClick={openStats}
+        ariaLabel={t('statistics.openStats')}
+        label={t('statistics.playingTo')}
+        // La media de las vueltas recientes, no el índice estimado. El índice
+        // mira solo las mejores —con tres vueltas, literalmente la mejor— así
+        // que decía "juegas a 14.1" a quien venía jugando a 18.9. Dice de lo
+        // que el jugador es capaz, no a lo que está jugando, que es lo que
+        // esta tarjeta promete. El índice vive en /stats, donde hay sitio para
+        // explicar qué significa
+        value={isLoading ? '--' : formatNumber(stats?.playingAvg)}
+        hint={
+          // Mientras el resumen no ha llegado no se puede decir ni que falten
+          // vueltas: eso ya sería una afirmación sobre datos que no se tienen
+          isLoading ? null : (
+            <p className="mt-0.5 text-[10px] md:text-xs text-tinta">
+              {stats?.hasPlayingAverage?.()
+                ? t('statistics.overRounds', {
+                    count: stats.roundsWithDifferential,
+                  })
+                : t('statistics.needsMoreRounds')}
+            </p>
+          )
+        }
+      />
+
+      <StatCard
+        testId="stat-card-tournaments"
+        icon={Trophy}
+        tone={TONES.tournaments}
+        label={t('statistics.tournaments')}
+        // Mismo motivo que el hándicap: la página ya cargó las competiciones
+        value={stats?.tournamentsTotal ?? fallbackTournaments}
+        hint={
+          // Cuántos están activos solo lo sabe el resumen: el total sí lo
+          // conoce la página, pero este dato no. Sin él se enseñaba "0
+          // activos", que no es un hueco, es una cifra falsa
+          stats && !isLoading ? (
+            <p className="mt-0.5 text-[10px] md:text-xs text-tinta">
+              {t('statistics.activeCount', { count: stats.tournamentsActive })}
+            </p>
+          ) : null
+        }
+      />
+    </div>
+  );
+};
+
+export default PlayerStatsCards;

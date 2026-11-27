@@ -1,0 +1,333 @@
+import {
+  AL_PASAR,
+  ELEGIDO_CON_TEXTO_DENTRO,
+} from '../ui/clasesDeComportamiento';
+import { useMemo, useState } from 'react';
+import { Link } from 'react-router';
+import ModalShell, { CAJA_PROPIA } from '../ui/ModalShell';
+import { motion } from 'framer-motion';
+import { X, UserPlus } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import SelectorDeGenero from '../profile/SelectorDeGenero';
+import {
+  franjaLlena,
+  plazasLibres,
+} from '../../domain/services/PlazasEnFranjas';
+import { colorHabitual } from '../../utils/barraPorDefecto';
+import SelectorDeBarraGeneral from './SelectorDeBarraGeneral';
+
+// Sin franjas: el mismo array siempre, para que el orden no se recalcule
+const SIN_FRANJAS = [];
+
+/**
+ * @param {Object} props
+ * @param {boolean} [props.pideGenero=false] - Si quien se apunta no tiene el
+ *   género en su perfil (#710): se le pregunta aquí y `onConfirm` lo recibe
+ *   como segundo argumento, para guardarlo antes de pedir plaza
+ * @param {string|null} [props.error=null] - Por qué no se pudo pedir (#710):
+ *   el modal sigue abierto y lo dice, en vez de cerrarse como si hubiera ido bien
+ * @param {Array} [props.franjas=[]] - Las franjas de un stroke play (sesiones con
+ *   `teeSheet`). Con ellas se elige en el mismo paso la franja con hueco o la
+ *   espera de una llena (release social 3, 28 oct 2026); `onConfirm` recibe
+ *   `{ roundId, waiting }` como tercer argumento, o null sin franjas
+ * @param {boolean} [props.franjasCargando=false] - Es un stroke play y su agenda
+ *   se está leyendo: se dice y no se deja enviar (code-review)
+ * @param {boolean} [props.franjasSinCargar=false] - Es un stroke play y su agenda
+ *   no se pudo leer: no hay franjas que elegir y no se deja enviar (revisor)
+ * @param {Function} [props.onReintentar] - Volver a leer la agenda
+ * @param {Function} [props.onElegir] - Al cambiar de franja: quien lo abre borra
+ *   el error de la elección anterior (revisor)
+ * @param {string|null} [props.generoDelJugador] - El de su perfil: sale marcada
+ *   la barra habitual de su género (barras por campo). La barra general es
+ *   obligatoria: `onConfirm` la recibe como primer argumento
+ */
+const EnrollmentRequestModal = ({
+  isOpen,
+  onClose,
+  onConfirm,
+  isProcessing,
+  pideGenero = false,
+  faltaHandicap = false,
+  error = null,
+  franjas = SIN_FRANJAS,
+  franjasCargando = false,
+  franjasSinCargar = false,
+  onElegir,
+  onReintentar,
+  generoDelJugador = null,
+}) => {
+  if (!isOpen) return null;
+  return (
+    <EnrollmentRequestModalContent
+      onClose={onClose}
+      onConfirm={onConfirm}
+      isProcessing={isProcessing}
+      pideGenero={pideGenero}
+      faltaHandicap={faltaHandicap}
+      error={error}
+      franjas={franjas}
+      franjasCargando={franjasCargando}
+      franjasSinCargar={franjasSinCargar}
+      onElegir={onElegir}
+      onReintentar={onReintentar}
+      generoDelJugador={generoDelJugador}
+    />
+  );
+};
+
+const llena = (franja) => franjaLlena(franja.teeSheet);
+
+const EnrollmentRequestModalContent = ({
+  onClose,
+  onConfirm,
+  isProcessing,
+  pideGenero,
+  faltaHandicap,
+  error,
+  franjas,
+  franjasCargando,
+  franjasSinCargar,
+  onElegir,
+  onReintentar,
+  generoDelJugador,
+}) => {
+  const { t, i18n } = useTranslation(['competitions', 'golfCourses']);
+  // null mientras no se elige: entonces, la habitual de su género. Al cambiar
+  // el género en el modal vuelve a null, para no quedarse con la del otro
+  const [selectedTee, setSelectedTee] = useState(null);
+  const [genero, setGenero] = useState('');
+  const suGenero = (pideGenero ? genero : generoDelJugador) || null;
+  const barra = selectedTee ?? colorHabitual(suGenero) ?? '';
+  const cambiarGenero = (nuevo) => {
+    setGenero(nuevo);
+    setSelectedTee(null);
+  };
+  const [elegida, setElegida] = useState(null);
+  // Por día y hora: en el orden en que se juegan
+  const ordenadas = useMemo(
+    () =>
+      [...franjas].sort(
+        (a, b) =>
+          String(a.roundDate).localeCompare(String(b.roundDate)) ||
+          String(a.teeSheet.firstTeeTime).localeCompare(
+            String(b.teeSheet.firstTeeTime),
+          ),
+      ),
+    [franjas],
+  );
+  const conFranjas = ordenadas.length > 0;
+  const laElegida = ordenadas.find((f) => f.id === elegida) ?? null;
+  const aLaEspera = laElegida !== null && llena(laElegida);
+  const falta =
+    !barra ||
+    faltaHandicap ||
+    (pideGenero && !genero) ||
+    (conFranjas && !laElegida) ||
+    franjasSinCargar ||
+    franjasCargando;
+
+  const elegir = (id) => {
+    setElegida(id);
+    onElegir?.();
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (falta) return;
+    onConfirm(
+      barra,
+      pideGenero ? genero : null,
+      laElegida ? { roundId: laElegida.id, waiting: aLaEspera } : null,
+    );
+  };
+
+  const dia = (fecha) => {
+    const d = new Date(`${fecha}T12:00:00`);
+    return Number.isNaN(d.getTime())
+      ? fecha
+      : d.toLocaleDateString(i18n?.language, {
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+        });
+  };
+
+  return (
+    <ModalShell
+      isOpen
+      onClose={onClose}
+      labelledBy="pedir-inscripcion-titulo"
+      closeOnEscape={!isProcessing}
+      busy={isProcessing}
+      boxClassName={CAJA_PROPIA}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-fondo rounded-tarjeta border border-contorno max-w-md w-full"
+      >
+        {/* Header */}
+        <div className="flex justify-between items-center p-6 border-b border-linea">
+          <div className="flex items-center gap-2">
+            <UserPlus className="w-5 h-5 text-tinta" />
+            <h2
+              id="pedir-inscripcion-titulo"
+              className="text-xl font-bold text-tinta"
+            >
+              {t('competitions:enrollment.modalTitle')}
+            </h2>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label={t('common:close')}
+            className="p-2 text-tinta-suave rounded-lg transition-colors hover:text-tinta"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {error && (
+            <p
+              data-testid="apuntarse-error"
+              role="alert"
+              className="text-sm text-error"
+            >
+              {error}
+            </p>
+          )}
+          {/* Sin hándicap no se entra en un Stableford o un Medal: se dice y se
+              lleva al perfil, en vez de esperar al rechazo del servidor
+              (FE #824, PR 5) */}
+          {faltaHandicap && (
+            <p
+              data-testid="falta-handicap"
+              className="rounded-lg border border-aviso bg-aviso-suave p-3 text-sm text-aviso"
+            >
+              {t('competitions:enrollment.needsHandicap')}{' '}
+              <Link to="/profile/edit" className="font-semibold underline">
+                {t('competitions:enrollment.addHandicap')}
+              </Link>
+            </p>
+          )}
+          {pideGenero && (
+            <SelectorDeGenero value={genero} onChange={cambiarGenero} />
+          )}
+
+          {/* La franja, o la espera de una llena, en el mismo paso (release
+              social 3): con plaza se entra con ella; llena, a su espera */}
+          {franjasCargando && (
+            <p
+              data-testid="franjas-cargando"
+              role="status"
+              className="text-sm text-tinta-suave"
+            >
+              {t('competitions:enrollment.windowsLoading')}
+            </p>
+          )}
+          {franjasSinCargar && (
+            <div
+              data-testid="franjas-sin-cargar"
+              role="status"
+              className="rounded-lg border border-aviso bg-aviso-suave p-3 text-sm text-aviso"
+            >
+              <p>{t('competitions:enrollment.windowsNotLoaded')}</p>
+              {onReintentar && (
+                <button
+                  type="button"
+                  onClick={onReintentar}
+                  className="mt-2 min-h-11 font-semibold underline"
+                >
+                  {t('competitions:enrollment.retryWindows')}
+                </button>
+              )}
+            </div>
+          )}
+          {conFranjas && (
+            <fieldset data-testid="elegir-franja" className="min-w-0 space-y-2">
+              <legend className="block text-sm font-medium text-tinta mb-1">
+                {t('competitions:enrollment.windowLabel')}
+              </legend>
+              {ordenadas.map((franja) => {
+                const hoja = franja.teeSheet;
+                const sinSitio = llena(franja);
+                const marcada = franja.id === elegida;
+                return (
+                  <label
+                    key={franja.id}
+                    data-testid={`franja-${franja.id}`}
+                    className={`flex items-start gap-3 w-full min-h-11 px-3 py-2 rounded-lg border text-sm cursor-pointer transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-tinta ${
+                      marcada
+                        ? ELEGIDO_CON_TEXTO_DENTRO
+                        : 'border-linea hover:bg-tarjeta'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="franja"
+                      value={franja.id}
+                      checked={marcada}
+                      onChange={() => elegir(franja.id)}
+                      className="mt-1 accent-tinta"
+                    />
+                    <span>
+                      <span className="font-medium text-tinta">
+                        {dia(franja.roundDate)} · {hoja.firstTeeTime}
+                        {hoja.lastTeeTime &&
+                        hoja.lastTeeTime !== hoja.firstTeeTime
+                          ? `–${hoja.lastTeeTime}`
+                          : ''}
+                      </span>
+                      <span
+                        className={`block text-xs ${sinSitio ? 'text-aviso' : 'text-tinta-suave'}`}
+                      >
+                        {sinSitio
+                          ? `${t('competitions:enrollment.full')} · ${t('competitions:enrollment.waitingCount', { count: hoja.waitingCount ?? 0 })}`
+                          : t('competitions:enrollment.freePlaces', {
+                              count: plazasLibres(hoja),
+                            })}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </fieldset>
+          )}
+
+          {/* Su barra general, obligatoria (barras por campo) */}
+          <SelectorDeBarraGeneral
+            id="tee-category"
+            value={barra}
+            onChange={setSelectedTee}
+          />
+
+          {/* Actions */}
+          <div className="flex justify-end gap-3 pt-4 border-t border-linea">
+            <button
+              type="button"
+              onClick={onClose}
+              className={`px-4 py-2 text-tinta border-[1.5px] border-tinta bg-fondo rounded-boton font-medium ${AL_PASAR}`}
+            >
+              {t('competitions:enrollment.cancel')}
+            </button>
+            <button
+              type="submit"
+              disabled={isProcessing || falta}
+              className="px-4 py-2 bg-contraste text-sobre-contraste rounded-boton font-medium disabled:opacity-50 transition-opacity hover:opacity-90"
+            >
+              {isProcessing
+                ? '...'
+                : t(
+                    aLaEspera
+                      ? 'competitions:enrollment.joinWaitingList'
+                      : 'competitions:enrollment.confirm',
+                  )}
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </ModalShell>
+  );
+};
+
+export default EnrollmentRequestModal;

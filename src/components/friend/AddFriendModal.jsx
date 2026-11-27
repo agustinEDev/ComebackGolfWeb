@@ -1,0 +1,363 @@
+import {
+  ELEGIDO_CON_ANILLO,
+  TEXTO_DE_DENTRO_EN_FOREST,
+} from '../ui/clasesDeComportamiento';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { flushSync } from 'react-dom';
+import { nombrePequeno, nombreVisible } from '../../utils/nombreVisible';
+import NombrePequeno from '../ui/NombrePequeno';
+import { useNavigate } from 'react-router';
+import { X, Search, Loader } from 'lucide-react';
+import Avatar from '../ui/Avatar';
+import ModalShell from '../ui/ModalShell';
+
+/**
+ * Buscador de jugadores.
+ *
+ * Elegir a alguien lleva a su perfil, que es donde vive el boton de enviar la
+ * solicitud. Antes se seleccionaba aqui, aparecia un resumen y habia que pulsar
+ * Enviar en el pie del modal: los mismos toques, pero mandandole una solicitud
+ * a un nombre sin haber visto de quien se trataba. Del perfil ademas se sale
+ * aceptando, rechazando o sin hacer nada, segun en que punto este la relacion.
+ */
+const AddFriendModalContent = ({ onClose, onSearchUsers, t }) => {
+  const navigate = useNavigate();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  // Un booleano y no el texto ya traducido: `t` llega por props y cambia de
+  // identidad en cada render, asi que meterlo en las dependencias del efecto
+  // de busqueda relanzaria la peticion. Se traduce al pintar.
+  const [searchFailed, setSearchFailed] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const dropdownRef = useRef(null);
+  const searchInputRef = useRef(null);
+  const searchRequestIdRef = useRef(0);
+  const onSearchUsersRef = useRef(onSearchUsers);
+  const highlightedIndexRef = useRef(highlightedIndex);
+  const showDropdownRef = useRef(showDropdown);
+  const searchResultsRef = useRef(searchResults);
+  const openProfileRef = useRef(null);
+  useEffect(() => {
+    onSearchUsersRef.current = onSearchUsers;
+  });
+
+  // El resaltado se mueve SIEMPRE por aqui, y la ref se escribe en el mismo
+  // momento que el estado. Antes la ref la copiaba un efecto sin dependencias,
+  // es decir despues del render: entre el `ArrowDown` y ese efecto cabia un
+  // `Enter`, que leia el indice todavia en -1 y se tragaba la pulsacion. El
+  // listener de teclado se registra una sola vez, asi que no puede leer el
+  // estado y la ref es su unica fuente: tiene que estar al dia ya.
+  const highlight = useCallback((next) => {
+    highlightedIndexRef.current = next;
+    setHighlightedIndex(next);
+  }, []);
+
+  // Mismo motivo que `highlight`: el listener de teclado lee estas dos por
+  // ref, asi que tienen que estar al dia en el momento de la pulsacion y no
+  // despues del render. Con la copia tardia, dos `Escape` seguidos cerraban
+  // el desplegable dos veces —el segundo lo veia todavia abierto— y hacia
+  // falta un tercero para cerrar el modal.
+  const openDropdown = useCallback((next) => {
+    showDropdownRef.current = next;
+    setShowDropdown(next);
+  }, []);
+
+  const putResults = useCallback((next) => {
+    searchResultsRef.current = next;
+    setSearchResults(next);
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        openDropdown(false);
+      }
+    };
+    // En el `click` y no en el `mousedown`: la lista va en el flujo, y
+    // cerrarla al apretar encogia la caja antes de soltar, con lo que el clic
+    // caia en lo que subia a ocupar su sitio. En captura, para cerrar antes
+    // que el manejador del propio destino, como hacia el `mousedown`
+    document.addEventListener('click', handleClickOutside, true);
+    return () =>
+      document.removeEventListener('click', handleClickOutside, true);
+  }, [openDropdown]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Con la lista abierta, Escape es suyo y la cierra; sin ella, cierra el
+      // modal el armazón (`closeOnEscape`), que escucha antes. En `flushSync`:
+      // el armazón lee `closeOnEscape` del último render, y un segundo Escape
+      // antes de pintar lo vería todavía en falso y no cerraría
+      if (e.key === 'Escape') {
+        if (showDropdownRef.current) {
+          flushSync(() => {
+            openDropdown(false);
+            highlight(-1);
+          });
+        }
+        return;
+      }
+
+      if (!showDropdownRef.current || searchResultsRef.current.length === 0)
+        return;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const len = searchResultsRef.current.length;
+        const prev = highlightedIndexRef.current;
+        highlight(prev < len - 1 ? prev + 1 : 0);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const len = searchResultsRef.current.length;
+        const prev = highlightedIndexRef.current;
+        highlight(prev > 0 ? prev - 1 : len - 1);
+      } else if (e.key === 'Enter') {
+        const idx = highlightedIndexRef.current;
+        if (idx >= 0 && idx < searchResultsRef.current.length) {
+          e.preventDefault();
+          openProfileRef.current?.(searchResultsRef.current[idx]);
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [highlight, openDropdown]);
+
+  // Lo que cambia con el texto se hace al teclear, no en un efecto: lo que
+  // estuviera en vuelo deja de valer y, por debajo de dos letras, la lista se
+  // cierra en ese mismo pintado. El efecto de abajo solo espera los 300 ms
+  const cambiaLaBusqueda = (texto) => {
+    setSearchQuery(texto);
+    // Invalida lo que este en vuelo: sin esto, una respuesta tardia aterrizaba
+    // sobre el campo ya vacio —la buena reabriendo resultados de una busqueda
+    // que ya no se lee, y la mala plantando el aviso rojo bajo un buscador en
+    // blanco—, o la de un texto anterior sobre la del actual.
+    searchRequestIdRef.current += 1;
+    setSearchFailed(false);
+    if (texto.trim().length < 2) {
+      putResults([]);
+      openDropdown(false);
+      setIsSearching(false);
+      // Como en el camino de error: sin esto el `aria-activedescendant` se
+      // queda apuntando a una opcion que ya no esta en el DOM.
+      highlight(-1);
+      return;
+    }
+    setIsSearching(true);
+  };
+
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (trimmed.length < 2) return undefined;
+
+    const currentRequestId = searchRequestIdRef.current;
+    const temporizador = setTimeout(async () => {
+      try {
+        const results = await onSearchUsersRef.current(trimmed);
+        if (currentRequestId !== searchRequestIdRef.current) return;
+        putResults(results);
+        openDropdown(true);
+        highlight(-1);
+      } catch {
+        if (currentRequestId !== searchRequestIdRef.current) return;
+        // Cerrado, no «vacio»: el aviso de «no se ha encontrado a nadie» seria
+        // mentira para lo que en realidad fue un error de red. Y con un mensaje
+        // propio: sin el, la pantalla se queda igual que si nunca hubieras
+        // buscado y lo natural es reescribir y volver a fallar en silencio.
+        setSearchFailed(true);
+        putResults([]);
+        openDropdown(false);
+        // Simetrico con el camino de exito: sin esto el `aria-activedescendant`
+        // se queda apuntando a una opcion que ya no esta en el DOM, y un lector
+        // de pantalla anuncia algo que no existe.
+        highlight(-1);
+      } finally {
+        if (currentRequestId === searchRequestIdRef.current) {
+          setIsSearching(false);
+        }
+      }
+    }, 300);
+
+    return () => clearTimeout(temporizador);
+  }, [searchQuery, highlight, openDropdown, putResults]);
+
+  const handleOpenProfile = (user) => {
+    openDropdown(false);
+    onClose();
+    // De donde se viene, para que el perfil sepa adonde devolver: esta busqueda
+    // se abre desde Amigos, y mandar de vuelta al feed obligaria a rehacer el
+    // camino a mano
+    navigate(`/players/${user.id}`, { state: { from: 'friends' } });
+  };
+
+  // El manejador de teclado se registra una sola vez y no ve los valores del
+  // render actual, asi que la funcion viaja por ref igual que las demas. Se
+  // asigna en un efecto y no en el cuerpo: escribir un ref durante el render
+  // rompe con React Compiler y lo vigila `react-hooks/refs`
+  useEffect(() => {
+    openProfileRef.current = handleOpenProfile;
+  });
+
+  // El armazón común (QA del 21 oct 2026): el foco entra en el buscador, no
+  // sale con el tabulador y vuelve al botón que lo abrió; la página de debajo
+  // no se desplaza. Pulsar fuera cierra, como en todos los diálogos (y aquí, sin
+  // pie, la X es la única salida visible). Al elegir a alguien la
+  // vuelta del foco no ocurre: Amigos ya no está en la página
+  return (
+    <ModalShell
+      isOpen
+      onClose={onClose}
+      testId="add-friend-backdrop"
+      labelledBy="add-friend-modal-title"
+      closeOnEscape={!showDropdown}
+      inicialRef={searchInputRef}
+      // Con su alto máximo y desplazamiento propio: la lista de resultados ya
+      // ocupa sitio dentro y, larga, no debe sacar la caja de la pantalla
+      boxClassName="bg-fondo rounded-tarjeta border border-contorno w-full max-w-md mx-4 max-h-[calc(100dvh-2rem)] overflow-y-auto"
+    >
+      <div className="flex items-center justify-between p-4 border-b border-linea">
+        <h2
+          id="add-friend-modal-title"
+          className="text-lg font-semibold text-tinta"
+        >
+          {t('add.title')}
+        </h2>
+        {/* h-11 w-11 y no el icono a secas: es la zona tactil minima que usa
+            el resto de la aplicacion, y al quitar el pie esta X paso a ser la
+            unica forma de cerrar */}
+        <button
+          onClick={onClose}
+          aria-label={t('cancel', { ns: 'common' })}
+          className="-mr-2 flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg text-tinta-suave transition-colors hover:text-tinta active:bg-tarjeta"
+        >
+          <X className="h-5 w-5" aria-hidden="true" />
+        </button>
+      </div>
+
+      {/* Ya no hay formulario: no queda nada que enviar desde aqui. El pie
+          con Cancelar y Enviar se va con el — cierran la X y el fondo */}
+      <div className="p-4">
+        <div className="relative" ref={dropdownRef}>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-tinta-suave" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => cambiaLaBusqueda(e.target.value)}
+              placeholder={t('add.searchPlaceholder')}
+              className="bg-fondo w-full pl-9 pr-8 py-2 border border-borde rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-tinta focus:border-transparent"
+              data-testid="user-search-input"
+              role="combobox"
+              aria-expanded={showDropdown && searchResults.length > 0}
+              aria-haspopup="listbox"
+              aria-controls="friend-search-listbox"
+              aria-activedescendant={
+                highlightedIndex >= 0
+                  ? `friend-search-option-${highlightedIndex}`
+                  : undefined
+              }
+            />
+            {isSearching && (
+              <Loader className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-tinta-suave animate-spin" />
+            )}
+          </div>
+
+          {searchQuery.trim().length > 0 && searchQuery.trim().length < 2 && (
+            <p className="text-xs text-tinta-suave mt-1">
+              {t('add.searchMinChars')}
+            </p>
+          )}
+
+          {/* En el flujo y no `absolute`: flotando no ocupaba sitio y asomaba
+              por debajo de la caja (QA, 20 oct) */}
+          {showDropdown && searchResults.length > 0 && (
+            <div
+              id="friend-search-listbox"
+              className="w-full mt-1 bg-tarjeta border border-linea rounded-md max-h-48 overflow-y-auto"
+              data-testid="search-results-dropdown"
+              role="listbox"
+            >
+              {searchResults.map((user, index) => (
+                <button
+                  key={user.id}
+                  id={`friend-search-option-${index}`}
+                  type="button"
+                  onClick={() => handleOpenProfile(user)}
+                  onMouseEnter={() => highlight(index)}
+                  className={`w-full px-3 py-2 text-left transition-colors border-b border-linea last:border-b-0 ${
+                    index === highlightedIndex
+                      ? `${ELEGIDO_CON_ANILLO} ${TEXTO_DE_DENTRO_EN_FOREST}`
+                      : 'hover:bg-fondo'
+                  }`}
+                  role="option"
+                  aria-selected={index === highlightedIndex}
+                  data-testid={`search-result-${user.id}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Avatar userId={user.id} size="sm" />
+                    {/* `truncate` no basta en un hijo de flex: sin `min-w-0`
+                        su ancho mínimo es el del contenido, así que un
+                        nombre largo desborda en vez de recortarse */}
+                    {/* Alias arriba y nombre real debajo, y solo cuando son
+                        distintos (FE #435). Desde que se puede buscar por
+                        alias, esta lista puede devolver dos «Chuchi»: sin el
+                        nombre real no hay forma de saber a cuál añadir */}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-tinta truncate">
+                        {nombreVisible(user)}
+                      </p>
+                      <NombrePequeno texto={nombrePequeno(user)} />
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {showDropdown &&
+            searchResults.length === 0 &&
+            searchQuery.trim().length >= 2 &&
+            !isSearching && (
+              <p
+                className="text-xs text-tinta-suave mt-1"
+                data-testid="no-users-found"
+              >
+                {t('add.noUsersFound')}
+              </p>
+            )}
+
+          {searchFailed && (
+            <p
+              role="alert"
+              className="text-sm text-error mt-1"
+              data-testid="search-error"
+            >
+              {t('add.searchFailed')}
+            </p>
+          )}
+        </div>
+
+        <p className="mt-3 text-xs text-tinta-suave">
+          {t('add.opensProfileHint')}
+        </p>
+      </div>
+    </ModalShell>
+  );
+};
+
+const AddFriendModal = ({ isOpen, onClose, onSearchUsers, t }) => {
+  if (!isOpen) return null;
+  return (
+    <AddFriendModalContent
+      onClose={onClose}
+      onSearchUsers={onSearchUsers}
+      t={t}
+    />
+  );
+};
+
+export default AddFriendModal;

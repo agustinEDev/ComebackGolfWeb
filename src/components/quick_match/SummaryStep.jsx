@@ -1,0 +1,230 @@
+import { AL_PASAR } from '../ui/clasesDeComportamiento';
+import TeeColorBadge from '../golf_course/TeeColorBadge';
+import {
+  FORMAT_LABEL_KEY,
+  SCORING_FORMAT_LABEL_KEY,
+} from './createQuickMatchModalConstants';
+import { formatoDeIndice } from '../../utils/formatoDeHandicap';
+import { Team } from '../../domain/value_objects/Team';
+import { PlayModeType } from '../../domain/value_objects/HandicapSettings';
+
+/**
+ * Wizard step 4: pre-start summary — course/format/play-mode recap,
+ * per-participant handicap review/override, and the scorer list.
+ *
+ * The recap repeats the two settings that decide how many strokes each player
+ * gets — the play mode and the tee — because both are invisible once the round
+ * starts and a wrong one costs the whole card. A scratch match draws no
+ * strokes, so its allowance is not a percentage that applies: showing "100%"
+ * there contradicted step 1, which greys the allowance out with the same
+ * reason.
+ */
+const SummaryStep = ({
+  t,
+  selectedCourse,
+  isFreePlay,
+  scoringFormat,
+  matchFormat,
+  allowancePercentage,
+  playMode,
+  courseTees = [],
+  participants,
+  currentUser,
+  isTeamFormat,
+  onEditHandicap,
+  isProcessing,
+  registeredParticipants,
+  scorerIds,
+  onBack,
+  onClose,
+  onStart,
+}) => {
+  const isScratch = playMode === PlayModeType.SCRATCH;
+
+  // Se busca la salida entera, no solo color y género, porque el identificador
+  // es parte del nombre: en un campo federado cuya salida amarilla se llama
+  // "Amarillas Campeonato", el paso 1 dice eso y el resumen diría "Amarillas".
+  // Dos nombres para la misma elección estropean justo lo que se viene a
+  // confirmar aquí.
+  const teeFor = (participant) =>
+    participant.color
+      ? (courseTees.find(
+          (tee) =>
+            tee.color === participant.color &&
+            (tee.gender ?? null) === (participant.teeGender ?? null),
+        ) ?? { color: participant.color, gender: participant.teeGender })
+      : null;
+
+  return (
+    <div className="p-4 space-y-4">
+      <div>
+        <h3 className="text-sm font-medium text-tinta mb-1">
+          {t('create.summary.heading')}
+        </h3>
+        {/* En dos líneas cortas y sin la frase de «revisa antes de confirmar»
+          (el título ya lo dice): con cuatro jugadores el resumen cabe en el
+          móvil sin desplazarse (Agustín, 3 nov 2026) */}
+        <div className="text-sm text-tinta mb-3 space-y-0.5">
+          <p className="truncate">
+            {selectedCourse?.name} ·{' '}
+            {isFreePlay
+              ? t(`create.course.${SCORING_FORMAT_LABEL_KEY[scoringFormat]}`)
+              : t(`create.course.${FORMAT_LABEL_KEY[matchFormat]}`)}
+          </p>
+          <p>
+            <span data-testid="quick-match-summary-play-mode">
+              {isScratch
+                ? t('create.course.playModeScratch')
+                : t('create.course.playModeHandicap')}
+            </span>
+            {' · '}
+            <span
+              className={isScratch ? 'text-tinta-suave' : undefined}
+              data-testid="quick-match-summary-allowance"
+            >
+              {t('create.summary.allowanceLabel')}{' '}
+              {isScratch
+                ? t('create.summary.allowanceNotApplied')
+                : `${allowancePercentage}%`}
+            </span>
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <p className="text-sm font-medium text-tinta mb-2">
+          {t('create.summary.participantsLabel')}
+        </p>
+        <ul className="space-y-2">
+          {participants.map((p) => (
+            <li
+              key={p.participantId}
+              className="px-3 py-2 bg-tarjeta rounded-lg space-y-1.5"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-sm font-medium text-tinta truncate">
+                  {p.name}
+                </span>
+                {p.userId === currentUser.id && (
+                  <span className="text-xs border border-linea text-tinta px-1.5 py-0.5 rounded flex-shrink-0">
+                    {t('create.participants.creatorBadge')}
+                  </span>
+                )}
+                {p.isGuest && (
+                  <span className="text-xs border border-current text-tinta-suave px-1.5 py-0.5 rounded flex-shrink-0">
+                    {t('create.participants.guestBadge')}
+                  </span>
+                )}
+                {isTeamFormat && p.team && (
+                  <span className="text-xs text-tinta-suave flex-shrink-0">
+                    {p.team === Team.A
+                      ? t('create.participants.teamA')
+                      : t('create.participants.teamB')}
+                  </span>
+                )}
+              </div>
+              {/* En su propia línea: todo lo de arriba es `flex-shrink-0`, así que
+                en un móvil estrecho el nombre se recorta hasta desaparecer
+                antes de que las etiquetas cedan un píxel. Mismo criterio que el
+                paso 2. */}
+              {/* La barra y el hándicap, en una sola fila: con cuatro jugadores
+                el resumen cabe en el móvil sin desplazarse (Agustín, 3 nov 2026) */}
+              <div className="mt-1 flex items-center justify-between gap-3">
+                <div
+                  className="min-w-0"
+                  data-testid={`quick-match-summary-tee-${p.participantId}`}
+                >
+                  {p.color
+                    ? (() => {
+                        const tee = teeFor(p);
+                        return (
+                          <TeeColorBadge
+                            color={tee.color}
+                            identifier={tee.identifier}
+                            gender={tee.gender}
+                          />
+                        );
+                      })()
+                    : // El caso peor, y el que se quedaba en blanco: sin salida el
+                      // reparto cae al Handicap Index en vez del hándicap de juego, y
+                      // eso son varios golpes. Callarlo aquí es esconder justo lo que
+                      // este resumen viene a enseñar.
+                      //
+                      // Salvo en scratch, donde no hay reparto ninguno: ahí nadie
+                      // recibe golpes, así que no falta nada y avisar de un hándicap
+                      // que no se va a usar sería sencillamente falso.
+                      !isScratch && (
+                        <span className="text-xs font-medium text-aviso">
+                          {t('create.summary.noTee')}
+                        </span>
+                      )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onEditHandicap(p)}
+                  disabled={isProcessing}
+                  aria-label={t('create.summary.editHandicapNamed', {
+                    name: p.name,
+                  })}
+                  data-testid={`quick-match-handicap-button-${p.participantId}`}
+                  className={`flex-shrink-0 min-w-[3.5rem] text-center px-3 py-1 border border-borde rounded-md text-sm disabled:opacity-50 ${
+                    p.handicap != null ? 'text-tinta' : 'text-tinta-suave'
+                  }`}
+                >
+                  {p.handicap != null
+                    ? formatoDeIndice(p.handicap)
+                    : t('create.summary.handicapPlaceholder')}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <p className="text-xs text-tinta-suave">
+        {t('create.summary.scorersLabel')}:{' '}
+        {registeredParticipants
+          .filter((p) => scorerIds.includes(p.participantId))
+          .map((p) => p.name)
+          .join(', ')}
+      </p>
+
+      {/* Fijos abajo: en un móvil pequeño con cuatro jugadores la lista aún
+        puede desplazarse, y Confirmar tiene que verse siempre */}
+      <div className="sticky bottom-0 -mx-4 -mb-4 px-4 py-3 bg-fondo border-t border-linea flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          disabled={isProcessing}
+          data-testid="quick-match-summary-back"
+          className={`px-4 py-2 text-sm font-medium text-tinta border-[1.5px] border-tinta bg-fondo rounded-boton disabled:opacity-50 ${AL_PASAR}`}
+        >
+          {t('create.summary.back')}
+        </button>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isProcessing}
+            className={`px-4 py-2 text-sm font-medium text-tinta border-[1.5px] border-tinta bg-fondo rounded-boton disabled:opacity-50 ${AL_PASAR}`}
+          >
+            {t('create.cancel')}
+          </button>
+          <button
+            type="button"
+            onClick={onStart}
+            disabled={isProcessing}
+            data-testid="quick-match-start"
+            className="px-4 py-2 text-sm font-medium text-sobre-contraste bg-contraste rounded-boton disabled:opacity-50 transition-opacity hover:opacity-90"
+          >
+            {isProcessing
+              ? t('create.summary.starting')
+              : t('create.summary.start')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default SummaryStep;

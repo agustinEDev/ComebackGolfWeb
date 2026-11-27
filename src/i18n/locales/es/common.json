@@ -1,0 +1,208 @@
+{
+  "installBanner": {
+    "title": "Instala Comeback Golf",
+    "subtitle": "Accede más rápido desde tu pantalla de inicio",
+    "install": "Instalar",
+    "dismiss": "Cerrar banner de instalación",
+    "iosHint": {
+      "iphone": "Añade la app a tu pantalla de inicio",
+      "prefix": "Instala la app: pulsa ",
+      "inBottomBar": " en la barra de abajo",
+      "inTopBar": " en la barra de arriba",
+      "suffix": " y luego \"Añadir a pantalla de inicio\"",
+      "otherBrowser": "Instala la app: abre el menú de tu navegador y elige «Añadir a pantalla de inicio»"
+    },
+    "safariHint": "Instala la app: Archivo → Añadir al Dock…",
+    "alreadyInstalled": "Ya tienes la app instalada.",
+    "genericHint": "Tu navegador no permite instalarla directamente desde aquí."
+  },
+  "installModal": {
+    "title": "Instalar Comeback Golf",
+    "close": "Cerrar instrucciones de instalación",
+    "gotIt": "Entendido",
+    "howTo": "Cómo se instala",
+    "steps": {
+      "moreButton": "Pulsa el botón ··· en la barra de abajo, a la derecha",
+      "shareInMenu": "Pulsa «Compartir», en la parte de arriba del menú",
+      "shareTop": "Pulsa el botón Compartir en la barra de arriba",
+      "findAddToHome": "Baja hasta «Añadir a pantalla de inicio»; si no aparece, pulsa «Ver más»",
+      "confirmAdd": "Pulsa «Añadir», arriba a la derecha",
+      "openMenu": "Abre el menú de tu navegador",
+      "chooseAdd": "Elige «Añadir a pantalla de inicio»",
+      "openFileMenu": "Abre el menú Archivo de Safari",
+      "chooseDock": "Elige «Añadir al Dock…»"
+    }
+  },
+  "loading": "Cargando...",
+  "error": "Ocurrió un error",
+  "success": "Éxito",
+  "cancel": "Cancelar",
+  "confirm": "Confirmar",
+  "save": "Guardar",
+  "back": "Atrás",
+  "next": "Siguiente",
+  "submit": "Enviar",
+  "delete": "Eliminar",
+  "edit": "Editar",
+  "close": "Cerrar",
+  "removeSelected": "Quitar a {{name}}",
+  "modal": {
+    "confirm": "Confirmar",
+    "ok": "Aceptar",
+    "cancel": "Cancelar",
+    "loading": "Cargando..."
+  },
+  "header": {
+    "features": "Características",
+    "pricing": "Precios",
+    "support": "Soporte",
+    "register": "Registrarse",
+    "signIn": "Iniciar Sesión",
+    "signInShort": "Entrar",
+    "dashboard": "Panel",
+    "browseCompetitions": "Explorar Competiciones",
+    "myCompetitions": "Mis Competiciones",
+    "createCompetition": "Crear Competición",
+    "myInvitations": "Mis Invitaciones",
+    "feed": "Actividad",
+    "language": "Idioma",
+    "changeLanguage": "Cambiar idioma",
+    "adminPanel": "Panel de Administración",
+    "viewProfile": "Ver Perfil",
+    "leaderboard": "Clasificación",
+    "administration": "Administración",
+    "adminBadge": "Admin",
+    "logout": "Cerrar Sesión",
+    "toggleMenu": "Abrir o cerrar el menú"
+  },
+  "bottomNav": {
+    "label": "Navegación principal",
+    "home": "Inicio",
+    "tournaments": "Torneos",
+    "friends": "Amigos",
+    "profile": "Perfil",
+    "feed": "Actividad",
+    "unseen_one": "{{count}} novedad sin ver",
+    "unseen_other": "{{count}} novedades sin ver"
+  },
+  "screens": {
+    "dashboard": "Inicio",
+    "myCompetitions": "Torneos",
+    "friends": "Amigos",
+    "profile": "Perfil",
+    "editProfile": "Editar Perfil",
+    "devices": "Dispositivos",
+    "admin": "Administración",
+    "createCompetition": "Crear Torneo",
+    "competition": "Torneo",
+    "editCompetition": "Editar Torneo",
+    "schedule": "Calendario",
+    "invitations": "Invitaciones",
+    "browseCompetitions": "Explorar",
+    "myInvitations": "Mis Invitaciones",
+    "myMatches": "Mis Partidos",
+    "myQuickMatches": "Partidas Rápidas",
+    "myStats": "Mis estadísticas",
+    "playerProfile": "Perfil del jugador",
+    "adminOverview": "Resumen",
+    "adminUsers": "Usuarios",
+    "adminCompetitions": "Competiciones",
+    "adminGolfCourses": "Campos de golf",
+    "adminHoles": "Hoyos",
+    "sharedQuickMatch": "Partida rápida",
+    "leaderboard": "Clasificación",
+    "friendGroup": "Partida de un amigo",
+    "friendMatch": "Partido de un amigo",
+    "confirmEmail": "Confirmar correo",
+    "feed": "Actividad"
+  },
+  "footer": {
+    "description": "La plataforma definitiva para gestionar torneos de golf amateur en formato Ryder. Conecta con amigos y disfruta del espíritu de la competencia amistosa.",
+    "quickLinks": "Enlaces Rápidos",
+    "features": "Características",
+    "pricing": "Precios",
+    "support": "Soporte",
+    "getStarted": "Comenzar",
+    "legal": "Legal",
+    "legalNotice": "Aviso Legal",
+    "terms": "Términos y condiciones",
+    "privacy": "Política de Privacidad",
+    "cookies": "Política de Cookies",
+    "contact": "Contáctanos",
+    "copyright": "© {{year}} Comeback Golf. Todos los derechos reservados.",
+    "copyrightShort": "© {{year}} Comeback Golf",
+    "madeWith": "Hecho con",
+    "forGolfers": "para los entusiastas del golf"
+  },
+  "countrySelect": {
+    "placeholder": "Selecciona un país...",
+    "searchPlaceholder": "Buscar país...",
+    "noMatches": "Ningún país coincide con la búsqueda",
+    "empty": "No hay países disponibles",
+    "clear": "Quitar el país elegido",
+    "moreResults_one": "1 país más — sigue escribiendo para afinar",
+    "moreResults_other": "{{count}} países más — sigue escribiendo para afinar",
+    "earlierResults_one": "1 país antes — escribe para buscarlo",
+    "earlierResults_other": "{{count}} países antes — escribe para buscarlos"
+  },
+  "brandMarkAlt": "Logo de Comeback Golf",
+  "demasiadasPeticiones": "Demasiados intentos seguidos. Espera un minuto y vuelve a intentarlo.",
+  "sinConexion": {
+    "anotando": "Sin conexión. Lo que anotes se guarda en el móvil y se envía al volver la cobertura.",
+    "pendientes_one": "{{count}} pendiente",
+    "pendientes_other": "{{count}} pendientes",
+    "aviso": "Sin conexión. Lo que ves puede no estar al día.",
+    "mensaje": "Sin conexión. Vuelve a intentarlo cuando tengas cobertura."
+  },
+  "errors": {
+    "generic": "No se ha podido completar la operación. Inténtalo de nuevo."
+  },
+  "avisoTerminos": {
+    "texto": "Tienes que aceptar los nuevos Términos de uso.",
+    "aceptar": "Aceptarlos"
+  },
+  "terminosPendientes": "Tienes que aceptar los Términos y condiciones para continuar.",
+  "terminosNoDisponible": "Esto no está disponible ahora mismo. Inténtalo de nuevo más tarde.",
+  "notFound": {
+    "title": "Esta página no existe",
+    "message": "La dirección no lleva a ninguna pantalla. Puede que el enlace esté mal escrito o que la página ya no exista.",
+    "goToDashboard": "Ir al panel",
+    "goHome": "Ir al inicio",
+    "login": "Entrar"
+  },
+  "unauthorized": {
+    "title": "Acceso denegado",
+    "message": "No tienes permiso para ver esta página. Si crees que es un error, contacta con un administrador.",
+    "attempted": "Intentaste acceder a",
+    "goToDashboard": "Ir al panel",
+    "goBack": "Volver"
+  },
+  "handicapField": {
+    "plus": "Hándicap plus",
+    "outOfRange": "Entre +10 y 54"
+  },
+  "cargandoTuCuenta": "Cargando tu cuenta, inténtalo en un momento",
+  "avatarAlt": "Foto de perfil",
+  "theme": {
+    "switchToDark": "Cambiar a tema oscuro",
+    "switchToLight": "Cambiar a tema claro"
+  },
+  "mudanza": {
+    "titulo": "RyderCupFriends ahora se llama Comeback Golf",
+    "texto": "Mismo equipo, app nueva: comebackgolf.com. Instálala así:",
+    "navegador": "Mismo equipo, app nueva: comebackgolf.com. Entra con tu misma cuenta: tus torneos, partidas y amigos te esperan allí.",
+    "pasos": {
+      "abrir": "Toca «Ir a la app nueva»: se abre comebackgolf.com en el navegador.",
+      "instalar": "Añádela a tu pantalla de inicio (en iPhone: Compartir y «Añadir a pantalla de inicio»).",
+      "entrar": "Entra con tu misma cuenta: tus torneos, partidas y amigos te esperan allí.",
+      "borrar": "Borra esta app de tu pantalla de inicio."
+    },
+    "pendientes_one": "Tienes hoyos sin enviar en {{count}} partida. Con cobertura se envían solos; los de una partida rápida, al abrirla. Cuando no quede ninguno, podrás pasarte.",
+    "pendientes_other": "Tienes hoyos sin enviar en {{count}} partidas. Con cobertura se envían solos; los de una partida rápida, al abrirla. Cuando no quede ninguno, podrás pasarte.",
+    "esperando": "Esperando a enviar tus hoyos",
+    "verCuales": "Ver cuáles",
+    "ir": "Ir a la app nueva",
+    "irNavegador": "Ir a comebackgolf.com",
+    "ahoraNo": "Ahora no"
+  }
+}

@@ -1,0 +1,136 @@
+# Cabeceras de seguridad
+
+## Dónde se configuran
+
+| Entorno | Fuente de las cabeceras | Fichero / lugar |
+|---|---|---|
+| **Producción** (`www.comebackgolf.com`) | Dashboard de Render → Static Site `ComebackGolfWeb` → **Headers** | No está en el repo |
+| **Docker / k8s local** | nginx dentro de la imagen | `nginx.conf` |
+| **Vite dev** (`localhost:5173`) | Cabeceras del dev server | `vite.config.js` |
+
+Producción es un **Render Static Site**, y Render sirve las cabeceras desde su propia
+configuración. **No lee `vercel.json`, ni `public/_headers`, ni `nginx.conf`.** Ambos
+ficheros existieron en este repo hasta agosto de 2026 aparentando ser configuración
+activa sin serlo; se eliminaron para que nadie los vuelva a confundir con la realidad
+(ver #295).
+
+`nginx.conf` **sí** es real, pero solo para la imagen Docker (k8s local), no para producción.
+
+## Valor aplicado en producción
+
+La fuente es **`.github/scripts/cabeceras_de_produccion.json`** (fase 4 del plan a 9, 11 nov
+2026). Cada día, el workflow **Production Security Headers** compara producción con ese
+fichero y abre una issue si algo no cuadra; `src/cabecerasDeSeguridad.test.js` exige que
+las copias de Vite y del Kind lleven lo mismo. Para cambiar una cabecera: primero el
+fichero (en una PR), después el panel que la sirve: Render para casi todas, **Cloudflare**
+para las dos de abajo. Cambiar solo Render no cambia lo que llega al navegador en esas dos,
+porque Cloudflare responde después y la sustituye.
+
+**HSTS lo pone Cloudflare** (SSL/TLS → Edge Certificates → HSTS: 12 meses, con
+`includeSubDomains`, sin precarga) para toda la zona, también el dominio sin `www`, y
+sustituye al que mande Render. `includeSubDomains` va desde el 16 nov 2026 (re-auditoría,
+P-04): hasta entonces no se podía porque el subdominio de seguimiento de Mailgun del dominio viejo no tenía
+`https`; con el seguimiento apagado ya no lleva enlaces. Sin precarga a
+propósito: no tiene vuelta atrás en meses. Para cambiarlo: el fichero, **Cloudflare**, y
+la fila de Render por coherencia (es la que valdría si se apagara en Cloudflare).
+
+**La `Cross-Origin-Resource-Policy` de `/images/*` también la pone Cloudflare**: Rules →
+regla de transformación de encabezado de **respuesta** «Logo de los correos: CORP
+cross-origin», con `http.host eq "<el www de esa zona>" and
+starts_with(http.request.uri.path, "/images/")` → establecer `cross-origin`. La regla de
+`/images/*` de Render no ganaba a la de `/*` para esa cabecera, pusiera la fila antes o
+después (FE #1133, 14 nov 2026).
+
+Hay **dos Static Sites** en Render, uno por dominio (`www.comebackgolf.com` y el del dominio viejo), y los dos llevan estas cabeceras. Lo único que cambia es la API de la CSP: **`{api}` es el `https://api.` de cada dominio: `https://api.comebackgolf.com` en el nuevo y el `api.` del dominio viejo en el suyo** (lo calcula `api_de()` en `.github/scripts/cabeceras_de_produccion.py`) (27 nov 2026). Unsplash ya no va en `img-src` desde el rediseño de las páginas de acceso. En Cloudflare, la regla de `/images/` de arriba existe en las dos zonas, cada una con **su** host: `www.comebackgolf.com` en la nueva y el `www` del dominio viejo en la suya («Imagenes de los correos: CORP cross-origin»).
+
+En Render, regla con `Request Path` = `/*`, para que cubra también `/assets/`:
+
+> `{api}` **no se pega tal cual**: en cada Static Site se escribe su API (`https://api.comebackgolf.com`, o la del dominio viejo en el suyo). Con el marcador, el navegador lo ignoraría y bloquearía todas las llamadas a la API.
+
+```
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: strict-origin-when-cross-origin
+Permissions-Policy: geolocation=(self), microphone=(), camera=()
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Resource-Policy: same-origin
+Reporting-Endpoints: csp="https://o4510427294662656.ingest.de.sentry.io/api/4510427296825424/security/?sentry_key=5548cda036a3fedd1f50791b66a93354&sentry_environment=production"
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: {api} https://flagcdn.com; connect-src 'self' https://www.ign.es https://geoserveis.icgc.cat https://www.geo.euskadi.eus https://idena.navarra.es {api} https://o4510427294662656.ingest.de.sentry.io; worker-src 'self' blob:; child-src 'self' blob:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests; report-uri https://o4510427294662656.ingest.de.sentry.io/api/4510427296825424/security/?sentry_key=5548cda036a3fedd1f50791b66a93354&sentry_environment=production; report-to csp
+```
+
+Y una segunda regla, con `Request Path` = `/images/*`, que **debería** sustituir la de arriba
+para esa cabecera (no lo hace: manda la de Cloudflare, ver arriba): el logo de los correos (`/images/rcf-monogram-white.png` y las cabeceras de `/images/correo/`) lo cargan clientes
+de correo desde otro origen, y con `same-origin` no lo verían. También la imagen para compartir
+un enlace (`/images/compartir/`), que piden WhatsApp, Instagram o los buscadores:
+
+```
+Cross-Origin-Resource-Policy: cross-origin
+```
+
+Qué hace cada novedad de la fase 4:
+
+- **Sin Google Fonts ni el comodín `*.ingest.sentry.io`** (FE-04): las fuentes van con la
+  aplicación desde el 20 oct 2026, y Sentry solo necesita su servidor exacto.
+- **`report-uri` / `report-to` + `Reporting-Endpoints`** (FE-04): lo que la CSP bloquee
+  llega a Sentry, el proyecto del front, como evento de seguridad.
+- **Trusted Types, aplazado a la fase 5** (FE-04, decidido el 11 nov 2026): en producción
+  saltaría en cada carga sin que hubiera ataque (el registro del service worker, los workers
+  del mapa y de Sentry, MapLibre), y mandar esos avisos a Sentry gastaría la cuota y taparía
+  los de la CSP. De momento solo va en local (Vite y el Kind), en aviso y a la consola, para
+  ver qué salta antes de escribir las políticas. La re-auditoría del 16 nov 2026 lo marcó
+  como deriva entre copias (FS-04, informativo); Agustín confirmó ese día que siga solo en
+  local hasta que se escriban las políticas.
+- **`Cross-Origin-Opener-Policy: same-origin`** (FE-05): la ventana de la app no comparte
+  contexto con las que la abren o abre. La entrada con Google es una redirección de página
+  completa, sin ventanas emergentes: no le afecta.
+- **`Cross-Origin-Resource-Policy`** (FE-05): `same-origin` en general y `cross-origin` en
+  `/images/*`.
+- **Sin HSTS `preload`**, a propósito: es casi irreversible y obligaría a HTTPS a todos los
+  subdominios para siempre.
+
+## Por qué `connect-src` lleva `https://www.ign.es` y las ortofotos de comunidad
+
+El mapa del hoyo (BE #532) pinta la ortofoto del PNOA, y MapLibre pide sus teselas
+con `fetch`, no con `<img>`: sin el IGN en `connect-src` el mapa sale gris. Al
+desplegarlo hay que **añadirlo también en el dashboard de Render**, que no lee este
+repositorio.
+
+Desde el 19 oct 2026, en Cataluña, País Vasco y Navarra va encima la ortofoto de la
+comunidad, más reciente (2025): `geoserveis.icgc.cat`, `www.geo.euskadi.eus` e
+`idena.navarra.es`. Madrid se quedó con la PNOA: su 2025 se veía peor. Sin ellos en
+`connect-src` (también en Render) no se rompe nada: se sigue viendo la PNOA de debajo.
+`geolocation=(self)` en `Permissions-Policy` es lo que deja usar el GPS.
+
+## Por qué `style-src` lleva `'unsafe-inline'`
+
+Porque sin él la CSP **rompe la apariencia entera de la aplicación**: React aplica estilos
+inline y **framer-motion** anima escribiendo el atributo `style` en tiempo de ejecución.
+Comprobado en producción con el evento `securitypolicyviolation`: se disparaban
+`style-src-attr` y `style-src-elem`.
+
+Entre diciembre de 2025 y agosto de 2026 la política declaraba `style-src 'self'` a secas
+y nadie lo notó, sencillamente porque **la CSP no llegaba a aplicarse en ningún sitio**.
+
+`'unsafe-inline'` en *estilos* tiene un riesgo muy inferior al de scripts. **`script-src`
+se mantiene estricto** y la aplicación no tiene ni un solo script inline, así que un XSS
+inyectado no se ejecuta. Verificado: un `<script>` inline inyectado a mano es bloqueado.
+
+## Cómo verificar
+
+```bash
+# Lo mismo que el workflow diario, directiva a directiva
+python3 .github/scripts/cabeceras_de_produccion.py https://www.comebackgolf.com
+```
+
+⚠️ **El service worker cachea el HTML con sus cabeceras.** Tras cambiar una cabecera, el
+navegador puede seguir aplicando la anterior aunque `curl` ya devuelva la nueva. Para
+comprobarlo de verdad hay que desregistrar el service worker, borrar `caches` y recargar.
+Por lo mismo, un cambio de cabeceras tarda en llegar a los usuarios recurrentes.
+
+## Notas sobre la arquitectura
+
+`www`, `api` y la raíz pasan por el **proxy de Cloudflare** (nube naranja), con SSL
+**Full (strict)** (ADR-012). Por eso funcionan las reglas de Cloudflare que ponen el HSTS y
+la CORP de `/images/*`, y la que añade `X-Origin-Verify` a las peticiones a la API. El resto
+de cabeceras las sirve Render.

@@ -1,0 +1,57 @@
+import { useTranslation } from 'react-i18next';
+import { formatoDeHandicapDeJuego } from '../../utils/formatoDeHandicap';
+
+/**
+ * El nombre con su hándicap de juego al lado (QA del 21 oct 2026): la tabla de
+ * match play y las tarjetas de stroke play lo pintan igual.
+ *
+ * A la vista «Hcp juego 12» (24 oct 2026: «HCP» queda para el índice), más corto
+ * que «Hcp de juego 12», que partía en dos líneas la cabecera de la pareja en el
+ * móvil y ensanchaba la columna del nombre en el ordenador. El lector de
+ * pantalla oye el largo. El valor
+ * no se encoge: si no cabe, se corta el nombre (lo decide `nombreClassName`).
+ *
+ * @param {Object} props
+ * @param {string} props.userId
+ * @param {string} props.nombre
+ * @param {number|null} [props.playingHandicap] Sin valor, solo el nombre
+ * @param {string} [props.className] La caja de los dos
+ * @param {string} [props.nombreClassName] El nombre
+ * @param {string} [props.testId] El de la caja
+ * @param {import('react').ReactNode} [props.children] Detrás del valor, dentro de la caja
+ */
+const NombreConHandicap = ({
+  userId,
+  nombre,
+  playingHandicap,
+  className,
+  nombreClassName,
+  testId,
+  children,
+}) => {
+  const { t } = useTranslation('scoring');
+  const valor = formatoDeHandicapDeJuego(playingHandicap);
+  return (
+    <span data-testid={testId} className={className}>
+      <span className={nombreClassName}>{nombre}</span>
+      {valor !== null && (
+        <span
+          data-testid={`hcp-de-juego-${userId}`}
+          className="ml-1 shrink-0 whitespace-nowrap text-[10px] font-normal text-tinta-suave"
+        >
+          <span aria-hidden="true">
+            {t('scorecard.playingHandicapShort', { value: valor })}
+          </span>
+          <span className="sr-only">
+            {t('scorecard.playingHandicap', { value: valor })}
+          </span>
+        </span>
+      )}
+      {/* Lo que va detrás del valor (la etiqueta de retirado): dentro, para que
+          al no caber se recorte el nombre y no se ensanche la fila */}
+      {children}
+    </span>
+  );
+};
+
+export default NombreConHandicap;

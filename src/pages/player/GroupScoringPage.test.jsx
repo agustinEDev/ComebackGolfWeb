@@ -1,0 +1,1592 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  act,
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from '@testing-library/react';
+
+/**
+ * La pantalla de anotar una partida de stroke play (FE #824, PR 7). La tabla
+ * aprobada el 11 oct 2026 (los casos de la cola y del vaciado están en sus
+ * tests; los de las pestañas, en las suyas):
+ *
+ *   1   abrir                                 | cabecera: partida, hora y tipo
+ *   2   antes de que abra la anotación        | «se abre a las …», sin casilla
+ *   3   Anotar                                | mi golpe y el de quien marco; Medal sin recogida
+ *   6   guardar un hoyo                       | con quien marco; solo, con su propio id
+ *   9   entregar                              | la barra: entregar / faltan / entregada
+ *   10  retirarse                             | con confirmación
+ *   11  Clasificación de la franja            | solo con su pestaña abierta
+ *   12  Tarjetas                              | las de la partida
+ *   13  quien no juega                        | sin Anotar: Tarjetas y Clasificación
+ *   15  el organizador                        | herramientas en Tarjetas
+ *   18  errores                               | traducidos
+ */
+const mockParams = { groupId: 'g-1' };
+let mockBusqueda = new URLSearchParams('competition=c-1');
+const mockLocation = {
+  pathname: '/player/groups/0b5a6c1e-2d3f-4a5b-8c7d-9e0f1a2b3c4d/scoring',
+  search: '',
+  hash: '',
+  state: null,
+  key: 'k',
+};
+vi.mock('react-router', () => ({
+  useParams: () => mockParams,
+  useSearchParams: () => [mockBusqueda],
+  useNavigate: () => vi.fn(),
+  // La anotación en curso (11 nov 2026) mira la ruta para apuntarla
+  useLocation: () => mockLocation,
+  Link: ({ children, to, ...props }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
+}));
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key, opts) => (opts ? `${key} ${JSON.stringify(opts)}` : key),
+    i18n: { language: 'es' },
+  }),
+}));
+
+vi.mock('../../hooks/useAuth', () => ({
+  useAuth: () => ({ user: { id: 'ana', is_admin: false }, loading: false }),
+}));
+
+let mockRoles = { isAdmin: false, isCreator: false, isLoading: false };
+vi.mock('../../hooks/useUserRoles', () => ({
+  useUserRoles: (id) =>
+    id ? mockRoles : { isAdmin: false, isCreator: false, isLoading: false },
+}));
+
+const mockToast = { error: vi.fn(), success: vi.fn() };
+vi.mock('../../utils/toast', () => ({ default: mockToast }));
+
+const mockRetirarse = vi.fn();
+vi.mock('../../composition', () => ({
+  retireFromTeeGroupUseCase: { execute: (...a) => mockRetirarse(...a) },
+}));
+
+const llamadas = vi.hoisted(() => ({
+  useScoring: null,
+  casilla: null,
+  montajesDeLaCasilla: 0,
+  clasificacion: null,
+  tarjetas: null,
+  selector: null,
+}));
+let mockHook;
+vi.mock('../../hooks/useScoring', () => ({
+  useScoring: (...args) => {
+    llamadas.useScoring = args;
+    return mockHook;
+  },
+}));
+vi.mock('../../components/layout/HeaderAuth', () => ({
+  default: () => <div />,
+}));
+const mapaHoyo = vi.hoisted(() => ({
+  args: null,
+  ventana: null,
+  valor: {
+    abierto: false,
+    abrir: () => {},
+    cerrar: () => {},
+    mapaDelCampo: null,
+    disponible: true,
+  },
+}));
+vi.mock('../../hooks/useMapaDelHoyo', () => ({
+  useMapaDelHoyo: (args) => {
+    mapaHoyo.args = args;
+    return mapaHoyo.valor;
+  },
+}));
+vi.mock('../../components/scoring/mapa/VentanaDelMapa', () => ({
+  default: (props) => {
+    mapaHoyo.ventana = props;
+    return null;
+  },
+}));
+
+vi.mock('../../components/scoring/HoleInput', async () => {
+  const { useState } = await import('react');
+  const CasillaFalsa = (props) => {
+    // Cuenta los montajes: la casilla se reinicia cambiando su `key`
+    useState(() => {
+      llamadas.montajesDeLaCasilla += 1;
+    });
+    llamadas.casilla = props;
+    return <div data-testid="hole-input" />;
+  };
+  return { default: CasillaFalsa };
+});
+
+vi.mock('../../components/scoring/HoleSelector', () => ({
+  default: (props) => {
+    llamadas.selector = props;
+    return <div data-testid="hole-selector" />;
+  },
+}));
+vi.mock('../../components/scoring/ClasificacionDeLaFranja', () => ({
+  default: (props) => {
+    llamadas.clasificacion = props;
+    return (
+      <div data-testid="clasificacion" data-activa={String(props.activa)} />
+    );
+  },
+}));
+vi.mock('../../components/scoring/TarjetasDeLaPartida', () => ({
+  default: (props) => {
+    llamadas.tarjetas = props;
+    return <div data-testid="tarjetas" />;
+  },
+}));
+
+const GroupScoringPage = (await import('./GroupScoringPage')).default;
+const { ORIGEN_PARTIDA_DE_FRANJA } =
+  await import('../../hooks/origenesDeAnotacion');
+const { default: TeeGroupScoringMapper } =
+  await import('../../infrastructure/mappers/TeeGroupScoringMapper');
+
+const hoyo = (hole) => ({
+  hole,
+  par: 4,
+  strokes_received: 0,
+  own_score: null,
+  own_submitted: false,
+  marker_score: null,
+  marker_submitted: false,
+  status: 'PENDING',
+});
+const jugador = (userId, marks, extra = {}) => ({
+  user_id: userId,
+  name: userId.toUpperCase(),
+  playing_handicap: 10,
+  tee_color: 'YELLOW',
+  card_status: 'JUGANDO',
+  marks_user_id: marks,
+  marked_by_user_id: marks,
+  holes: Array.from({ length: 18 }, (_, i) => hoyo(i + 1)),
+  totals: {
+    thru: 0,
+    points: 0,
+    gross_points: 0,
+    gross: 0,
+    net: 0,
+    to_par_net: 0,
+    to_par_gross: 0,
+    complete: false,
+  },
+  ...extra,
+});
+const vista = (extra = {}, players) =>
+  TeeGroupScoringMapper.toScoringViewDTO({
+    group_id: 'g-1',
+    round_id: 'r-1',
+    number: 2,
+    tee_time: '08:10',
+    status: 'IN_PROGRESS',
+    scoring_opens_at: '2020-01-01T06:00:00Z',
+    tournament_type: 'STABLEFORD',
+    picked_up_allowed: true,
+    i_mark_user_id: 'bea',
+    players: players ?? [jugador('ana', 'bea'), jugador('bea', 'ana')],
+    ...extra,
+  });
+const hook = (extra = {}) => {
+  const scoringView = extra.scoringView ?? vista();
+  return {
+    scoringView,
+    scoresVisibles: scoringView.scores,
+    currentHole: 1,
+    isLoading: false,
+    error: null,
+    origenDelError: null,
+    isSubmitting: false,
+    matchSummary: null,
+    isOffline: false,
+    isSessionBlocked: false,
+    pendingQueueSize: 0,
+    noGuardados: {},
+    avisoDelVaciado: null,
+    pintadoDeMemoria: false,
+    isMatchPlayer: true,
+    canScore: true,
+    hasSubmitted: false,
+    isOwnScoreLocked: false,
+    isMarkerScoreLocked: false,
+    isFullyLocked: false,
+    validatedHoles: 0,
+    totalHoles: 18,
+    holesToSubmit: 18,
+    canSubmitScorecard: false,
+    partidoAcabado: false,
+    setCurrentHole: vi.fn(),
+    submitScore: vi.fn(),
+    submitScorecard: vi.fn().mockResolvedValue(),
+    takeOverSession: vi.fn(),
+    refetch: vi.fn(),
+    ...extra,
+  };
+};
+
+describe('GroupScoringPage (FE #824, PR 7)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockBusqueda = new URLSearchParams('competition=c-1');
+    mockRoles = { isAdmin: false, isCreator: false, isLoading: false };
+    mockHook = hook();
+    mockRetirarse.mockResolvedValue({});
+  });
+
+  it('1: anota con el origen de las partidas; cabecera con número, hora y tipo', () => {
+    render(<GroupScoringPage />);
+
+    expect(llamadas.useScoring).toEqual([
+      'g-1',
+      'ana',
+      false,
+      ORIGEN_PARTIDA_DE_FRANJA,
+    ]);
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
+      'partida.header {"numero":2,"hora":"08:10"}',
+    );
+    expect(screen.getByText('partida.type.STABLEFORD')).toBeInTheDocument();
+  });
+
+  it('vuelve a la ficha de la competición si se sabe cuál es', () => {
+    render(<GroupScoringPage />);
+
+    expect(
+      screen.getByRole('link', { name: /partida.backToCompetition/ }),
+    ).toHaveAttribute('href', '/competitions/c-1');
+  });
+
+  it('2: antes de que abra, la hora y sin casilla', () => {
+    mockHook = hook({
+      scoringView: vista({
+        status: 'SCHEDULED',
+        scoring_opens_at: '2999-01-01T08:00:00+01:00',
+      }),
+    });
+    render(<GroupScoringPage />);
+
+    expect(screen.getByText(/notOpenYet.opensAt/)).toBeInTheDocument();
+    expect(screen.queryByTestId('hole-input')).toBeNull();
+  });
+
+  it('3: la casilla, con recogida en Stableford y sin ella en Medal', () => {
+    const { unmount } = render(<GroupScoringPage />);
+    expect(llamadas.casilla.allowPickedUp).toBe(true);
+    unmount();
+
+    mockHook = hook({
+      scoringView: vista({
+        tournament_type: 'MEDAL',
+        picked_up_allowed: false,
+      }),
+    });
+    render(<GroupScoringPage />);
+    expect(llamadas.casilla.allowPickedUp).toBe(false);
+  });
+
+  it('3b: sin el dato de si se permite (una vista vieja), no se ofrece la raya (23 oct 2026)', () => {
+    mockHook = hook({ scoringView: vista({ picked_up_allowed: undefined }) });
+    render(<GroupScoringPage />);
+    expect(llamadas.casilla.allowPickedUp).toBe(false);
+  });
+
+  it('6: guardar un hoyo, con quien marco', () => {
+    render(<GroupScoringPage />);
+
+    llamadas.casilla.onScoreChange({ ownScore: 5, markedScore: 4 }, 'ownScore');
+
+    expect(mockHook.submitScore).toHaveBeenCalledWith(
+      1,
+      { ownScore: 5, markedPlayerId: 'bea', markedScore: 4 },
+      { tocado: 'ownScore' },
+    );
+  });
+
+  it('6b: solo en su partida (sin marcado): su golpe, con su propio id y sin el del marcado', () => {
+    mockHook = hook({
+      scoringView: vista({ i_mark_user_id: null }, [jugador('ana', null)]),
+    });
+    render(<GroupScoringPage />);
+
+    llamadas.casilla.onScoreChange(
+      { ownScore: 5, markedScore: undefined },
+      'ownScore',
+    );
+
+    expect(mockHook.submitScore).toHaveBeenCalledWith(
+      1,
+      { ownScore: 5, markedPlayerId: 'ana', markedScore: undefined },
+      { tocado: 'ownScore' },
+    );
+    expect(llamadas.casilla.isMarkerScoreLocked).toBe(true);
+  });
+
+  it.each([
+    [{ canSubmitScorecard: true }, 'entregar'],
+    [{ partidoAcabado: true }, 'faltaValidar'],
+    [{ hasSubmitted: true }, 'entregada'],
+  ])('9: la barra de entrega (%o → %s)', (extra, estado) => {
+    mockHook = hook(extra);
+    render(<GroupScoringPage />);
+
+    expect(screen.getByTestId('estado-de-entrega')).toHaveAttribute(
+      'data-estado',
+      estado,
+    );
+  });
+
+  it('9b: entregar pide confirmar y entrega', async () => {
+    mockHook = hook({ canSubmitScorecard: true, validatedHoles: 18 });
+    render(<GroupScoringPage />);
+
+    fireEvent.click(
+      within(screen.getByTestId('barra-de-entrega')).getByRole('button'),
+    );
+    // En una partida el organizador la puede reabrir (2.ª pasada del QA)
+    expect(
+      await screen.findByText('submit.confirmReopenable'),
+    ).toBeInTheDocument();
+    fireEvent.click(await screen.findByTestId('submit-confirm'));
+
+    await waitFor(() => expect(mockHook.submitScorecard).toHaveBeenCalled());
+  });
+
+  it('10: retirarse, con confirmación; «No» no hace nada', async () => {
+    render(<GroupScoringPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'partida.retire' }));
+    fireEvent.click(screen.getByRole('button', { name: 'partida.no' }));
+    expect(mockRetirarse).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'partida.retire' }));
+    fireEvent.click(screen.getByRole('button', { name: 'partida.retireYes' }));
+    await waitFor(() => expect(mockRetirarse).toHaveBeenCalledWith('g-1'));
+    expect(mockHook.refetch).toHaveBeenCalled();
+  });
+
+  it('10b: con la tarjeta ya cerrada no hay «Retirarme»', () => {
+    mockHook = hook({
+      hasSubmitted: true,
+      scoringView: vista({}, [
+        jugador('ana', 'bea', { card_status: 'ENTREGADA' }),
+        jugador('bea', 'ana'),
+      ]),
+    });
+    render(<GroupScoringPage />);
+
+    expect(screen.queryByRole('button', { name: 'partida.retire' })).toBeNull();
+  });
+
+  it('retirado (o no presentado), ya no anota ni se le pide entregar: el servidor lo tiraría sin avisar (revisor)', () => {
+    mockHook = hook({
+      partidoAcabado: true,
+      scoringView: vista({}, [
+        jugador('ana', 'bea', { card_status: 'RETIRADO' }),
+        jugador('bea', 'ana'),
+      ]),
+    });
+    render(<GroupScoringPage />);
+
+    expect(llamadas.casilla.isOwnScoreLocked).toBe(true);
+    expect(screen.queryByTestId('estado-de-entrega')).toBeNull();
+  });
+
+  it('#854: el no presentado ve por qué no anota y no tiene casilla', () => {
+    llamadas.casilla = null;
+    mockHook = hook({
+      scoringView: vista({}, [
+        jugador('ana', 'bea', {
+          card_status: 'NO_PRESENTADO',
+          tee_gender: 'FEMALE',
+        }),
+        jugador('bea', 'ana'),
+      ]),
+    });
+    render(<GroupScoringPage />);
+
+    expect(screen.getByTestId('no-presentado')).toHaveTextContent(
+      'partida.youAreNoShowHere {"context":"female"}',
+    );
+    expect(llamadas.casilla).toBeNull();
+    // Ni la tira, ni pasar de hoyo, ni «Retirarme» (revisor)
+    expect(screen.queryByTestId('hole-selector')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'input.nextHole' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'partida.retire' })).toBeNull();
+  });
+
+  it('revisor: el no presentado no ve los avisos de anotar sin conexión ni de hoyos sin guardar', async () => {
+    const { default: AvisoSinConexion } =
+      await import('../../components/ui/AvisoSinConexion');
+    mockHook = hook({
+      isOffline: true,
+      noGuardados: { 3: { turno: 1 } },
+      scoringView: vista({}, [
+        jugador('ana', 'bea', { card_status: 'NO_PRESENTADO' }),
+        jugador('bea', 'ana'),
+      ]),
+    });
+    render(
+      <>
+        <AvisoSinConexion />
+        <GroupScoringPage />
+      </>,
+    );
+
+    expect(screen.queryByTestId('no-guardados')).toBeNull();
+    expect(screen.queryByText(/sinConexion.anotando/)).toBeNull();
+  });
+
+  it('/code-review: ni «a salvo» con su cola: el servidor ya no se la va a guardar', () => {
+    mockHook = hook({
+      pendingQueueSize: 2,
+      scoringView: vista({}, [
+        jugador('ana', 'bea', { card_status: 'NO_PRESENTADO' }),
+        jugador('bea', 'ana'),
+      ]),
+    });
+    render(<GroupScoringPage />);
+
+    expect(screen.queryByTestId('pendientes-a-salvo')).toBeNull();
+  });
+
+  it('entregada, la barra lo dice (la tarjeta entregada no cuenta como retirada)', () => {
+    mockHook = hook({
+      hasSubmitted: true,
+      scoringView: vista({}, [
+        jugador('ana', 'bea', { card_status: 'ENTREGADA' }),
+        jugador('bea', 'ana'),
+      ]),
+    });
+    render(<GroupScoringPage />);
+
+    expect(screen.getByTestId('estado-de-entrega')).toHaveAttribute(
+      'data-estado',
+      'entregada',
+    );
+  });
+
+  it('si al que marco se retira, su casilla se bloquea; la mía no (revisor)', () => {
+    mockHook = hook({
+      scoringView: vista({}, [
+        jugador('ana', 'bea'),
+        jugador('bea', 'ana', { card_status: 'NO_PRESENTADO' }),
+      ]),
+    });
+    render(<GroupScoringPage />);
+
+    expect(llamadas.casilla.isMarkerScoreLocked).toBe(true);
+    expect(llamadas.casilla.isOwnScoreLocked).toBe(false);
+  });
+
+  it('el selector de hoyos no cuenta a quien se retiró: si no, ningún hoyo volvía a ponerse en verde (/code-review)', () => {
+    mockHook = hook({
+      scoringView: vista({}, [
+        jugador('ana', 'bea'),
+        jugador('bea', 'ana'),
+        jugador('cris', null, { card_status: 'RETIRADO' }),
+      ]),
+    });
+    render(<GroupScoringPage />);
+
+    expect(
+      llamadas.selector.scores[0].playerScores.map((p) => p.userId),
+    ).toEqual(['ana', 'bea']);
+  });
+
+  // 3.ª pasada del QA (12 oct 2026): la retirada veía en verde los hoyos que
+  // no jugó (los validaban los demás) y sin «Te anotó X»
+  it('QA 3: quien se retiró ve su tarjeta en solo lectura y la tira de hoyos con la suya', () => {
+    const jugado = {
+      ...hoyo(1),
+      own_score: 5,
+      own_submitted: true,
+      status: 'PENDING',
+    };
+    mockHook = hook({
+      scoringView: vista({}, [
+        jugador('ana', 'bea', {
+          card_status: 'RETIRADO',
+          holes: [jugado, ...Array.from({ length: 17 }, (_, i) => hoyo(i + 2))],
+        }),
+        jugador('bea', 'cris'),
+        jugador('cris', 'bea'),
+      ]),
+    });
+    render(<GroupScoringPage />);
+
+    expect(llamadas.casilla.isReadOnly).toBe(true);
+    expect(
+      llamadas.selector.scores[0].playerScores.map((p) => p.userId),
+    ).toEqual(['ana']);
+  });
+
+  it('revisor: la retirada lee «Te anotó» solo en los hoyos que alguien le anotó, y sigue con columna', () => {
+    const anotado = {
+      ...hoyo(1),
+      own_score: 5,
+      own_submitted: true,
+      marker_score: 5,
+      marker_submitted: true,
+      status: 'MATCH',
+      marker_by: 'bea',
+      marker_by_name: 'Bea',
+    };
+    mockHook = hook({
+      scoringView: vista({}, [
+        jugador('ana', 'cris', {
+          card_status: 'RETIRADO',
+          marked_by_user_id: null,
+          holes: [
+            anotado,
+            ...Array.from({ length: 17 }, (_, i) => hoyo(i + 2)),
+          ],
+        }),
+        jugador('bea', 'cris'),
+        jugador('cris', 'bea'),
+      ]),
+    });
+    render(<GroupScoringPage />);
+
+    expect(llamadas.casilla.markerName).toBe('Bea');
+    expect(llamadas.casilla.hasMarker).toBe(true);
+  });
+
+  it('revisor: en la tira de la retirada, los hoyos que no jugó salen vacíos, no «por validar»', () => {
+    const jugado = {
+      ...hoyo(1),
+      own_score: 5,
+      own_submitted: true,
+      marker_score: 5,
+      marker_submitted: true,
+      status: 'MATCH',
+    };
+    mockHook = hook({
+      scoringView: vista({}, [
+        jugador('ana', 'cris', {
+          card_status: 'RETIRADO',
+          holes: [jugado, ...Array.from({ length: 17 }, (_, i) => hoyo(i + 2))],
+        }),
+        jugador('bea', 'cris'),
+        jugador('cris', 'bea'),
+      ]),
+    });
+    render(<GroupScoringPage />);
+
+    // Solo la suya, y solo el 1 con algo: la tira pinta vacío lo demás (#847)
+    expect(
+      llamadas.selector.scores.every((s) =>
+        s.playerScores.every((p) => p.userId === 'ana'),
+      ),
+    ).toBe(true);
+    const conAlgo = llamadas.selector.scores.filter((s) =>
+      s.playerScores.some((p) => p.ownSubmitted || p.markerSubmitted),
+    );
+    expect(conAlgo.map((s) => s.holeNumber)).toEqual([1]);
+  });
+
+  it('revisor: un hoyo que nadie le anotó no lleva nombre de marcador', () => {
+    mockHook = hook({
+      currentHole: 1,
+      scoringView: vista({}, [
+        jugador('ana', 'bea', { card_status: 'NO_PRESENTADO' }),
+        jugador('bea', 'cris'),
+        jugador('cris', 'bea'),
+      ]),
+    });
+    render(<GroupScoringPage />);
+
+    expect(llamadas.casilla.isReadOnly).toBe(true);
+    expect(llamadas.casilla.markerName).toBeNull();
+  });
+
+  it('revisor: si retirarse falla, la confirmación se cierra', async () => {
+    mockRetirarse.mockRejectedValueOnce(
+      Object.assign(new Error('x'), { errorCode: 'GROUP_NOT_SCORING' }),
+    );
+    render(<GroupScoringPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'partida.retire' }));
+    fireEvent.click(screen.getByRole('button', { name: 'partida.retireYes' }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'partida.retireYes' }),
+      ).toBeNull(),
+    );
+  });
+
+  it('la hora de la cabecera, en HH:MM aunque llegue con segundos', () => {
+    mockHook = hook({ scoringView: vista({ tee_time: '08:10:00' }) });
+    render(<GroupScoringPage />);
+
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
+      '"hora":"08:10"',
+    );
+  });
+
+  it('lo pintado sale de la memoria del móvil: se dice (FE #614, revisor)', () => {
+    mockHook = hook({ pintadoDeMemoria: true });
+    render(<GroupScoringPage />);
+
+    expect(screen.getByTestId('pintado-de-memoria')).toHaveTextContent(
+      'offline.noSeActualiza',
+    );
+  });
+
+  // QA del 11 oct 2026
+  describe('lo del QA', () => {
+    it('7: antes de que abra habla de la partida, no del partido', () => {
+      mockHook = hook({
+        scoringView: vista({
+          status: 'SCHEDULED',
+          scoring_opens_at: '2999-01-01T08:00:00+01:00',
+        }),
+      });
+      render(<GroupScoringPage />);
+
+      expect(screen.getByText('partida.notOpenYet')).toBeInTheDocument();
+      expect(screen.queryByText('notOpenYet.title')).toBeNull();
+    });
+
+    it('7: la barra de entregar dice «partida terminada»', () => {
+      mockHook = hook({ canSubmitScorecard: true, partidoAcabado: true });
+      render(<GroupScoringPage />);
+
+      expect(screen.getByTestId('barra-de-entrega')).toHaveTextContent(
+        'submit.groupOver',
+      );
+      expect(screen.getByTestId('barra-de-entrega')).not.toHaveTextContent(
+        'submit.matchOver',
+      );
+    });
+
+    it('10: sin nadie en juego que me marque, sé que valida el organizador', () => {
+      mockHook = hook({
+        scoringView: vista({}, [
+          jugador('ana', 'bea', { marked_by_user_id: null }),
+          jugador('bea', 'ana', { marks_user_id: null }),
+        ]),
+      });
+      render(<GroupScoringPage />);
+
+      expect(screen.getByTestId('sin-marcador')).toHaveTextContent(
+        'partida.organiserValidates',
+      );
+    });
+
+    it('10: también si quien me marcaba ya entregó', () => {
+      mockHook = hook({
+        scoringView: vista({}, [
+          jugador('ana', 'bea'),
+          jugador('bea', 'ana', { card_status: 'ENTREGADA' }),
+        ]),
+      });
+      render(<GroupScoringPage />);
+
+      expect(screen.getByTestId('sin-marcador')).toBeInTheDocument();
+    });
+
+    it('10: con marcador en juego, nada', () => {
+      render(<GroupScoringPage />);
+
+      expect(screen.queryByTestId('sin-marcador')).toBeNull();
+    });
+
+    it('15-16: la casilla sabe a quién anoto y quién me anota', () => {
+      mockHook = hook({
+        scoringView: vista({}, [
+          jugador('ana', 'bea', { marked_by_user_id: 'cris' }),
+          jugador('bea', 'cris'),
+          jugador('cris', 'ana'),
+        ]),
+      });
+      render(<GroupScoringPage />);
+
+      expect(llamadas.casilla.markedName).toBe('BEA');
+      expect(llamadas.casilla.markerName).toBe('CRIS');
+    });
+
+    it('QA 2: sin nadie a quien marcar ni quien me marque, la casilla lo sabe', () => {
+      mockHook = hook({
+        scoringView: vista({ i_mark_user_id: null }, [
+          jugador('ana', null, { marked_by_user_id: null }),
+        ]),
+      });
+      render(<GroupScoringPage />);
+
+      expect(llamadas.casilla.marksSomeone).toBe(false);
+      expect(llamadas.casilla.hasMarker).toBe(false);
+    });
+
+    it('QA 2: con los dos, la casilla tiene las dos', () => {
+      render(<GroupScoringPage />);
+
+      expect(llamadas.casilla.marksSomeone).toBe(true);
+      expect(llamadas.casilla.hasMarker).toBe(true);
+    });
+
+    it('QA 2: el número del marcado lo puso otro (el marcador de antes): su nombre', () => {
+      const conHoyo = (marker_by) => ({
+        holes: [
+          { ...hoyo(1), marker_score: 6, marker_submitted: true, marker_by },
+          ...Array.from({ length: 17 }, (_, i) => hoyo(i + 2)),
+        ],
+      });
+      mockHook = hook({
+        scoringView: vista({}, [
+          jugador('ana', 'bea'),
+          jugador('bea', 'ana', conHoyo('ulises')),
+          jugador('ulises', null, { card_status: 'RETIRADO' }),
+        ]),
+      });
+      render(<GroupScoringPage />);
+
+      expect(llamadas.casilla.markedScoredBy).toBe('ULISES');
+    });
+
+    it('QA 2: si lo puse yo, nada; si fue otro que ya no está, su nombre desde la API', async () => {
+      const conHoyo = (marker_by, marker_by_name) => ({
+        holes: [
+          {
+            ...hoyo(1),
+            marker_score: 6,
+            marker_submitted: true,
+            marker_by,
+            marker_by_name,
+          },
+          ...Array.from({ length: 17 }, (_, i) => hoyo(i + 2)),
+        ],
+      });
+      mockHook = hook({
+        scoringView: vista({}, [
+          jugador('ana', 'bea'),
+          jugador('bea', 'ana', conHoyo('ana', 'Ana')),
+        ]),
+      });
+      const { unmount } = render(<GroupScoringPage />);
+      expect(llamadas.casilla.markedScoredBy).toBeNull();
+      unmount();
+
+      mockHook = hook({
+        scoringView: vista({}, [
+          jugador('ana', 'bea'),
+          jugador('bea', 'ana', conHoyo('org', 'Paco Organizador')),
+        ]),
+      });
+      render(<GroupScoringPage />);
+      expect(llamadas.casilla.markedScoredBy).toBe('Paco Organizador');
+    });
+
+    it('revisor: en solo lectura, «Te anotó» quien puso ese hoyo, no mi marcador de ahora', () => {
+      const miHoyo = {
+        holes: [
+          {
+            ...hoyo(1),
+            own_score: 5,
+            own_submitted: true,
+            marker_score: 5,
+            marker_submitted: true,
+            marker_by: 'ulises',
+            marker_by_name: 'Ulises',
+          },
+          ...Array.from({ length: 17 }, (_, i) => hoyo(i + 2)),
+        ],
+      };
+      mockHook = hook({
+        scoringView: vista({}, [
+          jugador('ana', 'bea', { marked_by_user_id: 'bea', ...miHoyo }),
+          jugador('bea', 'ana'),
+        ]),
+      });
+      render(<GroupScoringPage />);
+
+      expect(llamadas.casilla.markerName).toBe('Ulises');
+    });
+
+    it('revisor: sin marcador ya, pero con números que me anotaron, la columna sigue', () => {
+      const miHoyo = {
+        holes: [
+          {
+            ...hoyo(1),
+            marker_score: 5,
+            marker_submitted: true,
+            marker_by: 'ulises',
+            marker_by_name: 'Ulises',
+          },
+          ...Array.from({ length: 17 }, (_, i) => hoyo(i + 2)),
+        ],
+      };
+      mockHook = hook({
+        scoringView: vista({ i_mark_user_id: null }, [
+          jugador('ana', null, { marked_by_user_id: null, ...miHoyo }),
+        ]),
+      });
+      render(<GroupScoringPage />);
+
+      expect(llamadas.casilla.hasMarker).toBe(true);
+    });
+
+    it('CodeRabbit: si quien me marcaba ya no juega y no me anotó este hoyo, sin columna', () => {
+      mockHook = hook({
+        scoringView: vista({}, [
+          jugador('ana', 'bea', { marked_by_user_id: 'bea' }),
+          jugador('bea', 'ana', { card_status: 'RETIRADO' }),
+        ]),
+      });
+      render(<GroupScoringPage />);
+
+      expect(llamadas.casilla.hasMarker).toBe(false);
+    });
+
+    it('regresión: el organizador que no juega no publica «lo que anotes se guarda»', async () => {
+      const { default: AvisoSinConexion } =
+        await import('../../components/ui/AvisoSinConexion');
+      mockHook = hook({
+        isOffline: true,
+        isMatchPlayer: false,
+        canScore: false,
+      });
+      render(
+        <>
+          <AvisoSinConexion />
+          <GroupScoringPage />
+        </>,
+      );
+
+      expect(screen.queryByText(/sinConexion\.anotando/)).toBeNull();
+    });
+
+    it('revisor: sin vista aún (no se sabe quién juega), el aviso de anotar sale', async () => {
+      const { default: AvisoSinConexion } =
+        await import('../../components/ui/AvisoSinConexion');
+      mockHook = hook({
+        scoringView: null,
+        isOffline: true,
+        isMatchPlayer: false,
+        canScore: false,
+      });
+      render(
+        <>
+          <AvisoSinConexion />
+          <GroupScoringPage />
+        </>,
+      );
+
+      expect(screen.getByTestId('aviso-sin-conexion')).toHaveTextContent(
+        'sinConexion.anotando',
+      );
+    });
+
+    it('revisor: sin red, se lo dice al aviso de arriba', async () => {
+      const { default: AvisoSinConexion } =
+        await import('../../components/ui/AvisoSinConexion');
+      mockHook = hook({ isOffline: true, pendingQueueSize: 2 });
+      render(
+        <>
+          <AvisoSinConexion />
+          <GroupScoringPage />
+        </>,
+      );
+
+      expect(screen.getByTestId('aviso-sin-conexion')).toHaveTextContent(
+        'sinConexion.anotando',
+      );
+    });
+
+    it('26: sin conexión, un solo aviso (no también el de «no se actualiza»)', () => {
+      mockHook = hook({ isOffline: true, pintadoDeMemoria: true });
+      render(<GroupScoringPage />);
+
+      expect(screen.queryByTestId('pintado-de-memoria')).toBeNull();
+    });
+  });
+
+  it('antes de que abra no se ofrece retirarse (revisor)', () => {
+    mockHook = hook({
+      scoringView: vista({
+        status: 'SCHEDULED',
+        scoring_opens_at: '2999-01-01T08:00:00+01:00',
+      }),
+    });
+    render(<GroupScoringPage />);
+
+    expect(screen.queryByRole('button', { name: 'partida.retire' })).toBeNull();
+  });
+
+  it('las pestañas controlan su panel (revisor)', () => {
+    render(<GroupScoringPage />);
+
+    const pestana = screen.getByTestId('tab-input');
+    const panel = document.getElementById(
+      pestana.getAttribute('aria-controls'),
+    );
+    expect(panel).toHaveAttribute('role', 'tabpanel');
+    expect(panel).toHaveAttribute('aria-labelledby', pestana.id);
+  });
+
+  it('FE #658: la barra tiene nombre y se maneja con las flechas, y la clasificación sigue montada', () => {
+    render(<GroupScoringPage />);
+
+    const barra = screen.getByRole('tablist', { name: 'partida.tabsLabel' });
+    const [anotar, clasificacion, tarjetas] = within(barra).getAllByRole('tab');
+    expect(anotar).toHaveAttribute('tabindex', '0');
+    expect(clasificacion).toHaveAttribute('tabindex', '-1');
+    const panelClasificacion = screen
+      .getByTestId('clasificacion')
+      .closest('[role="tabpanel"]');
+    expect(panelClasificacion).toHaveAttribute('hidden');
+    expect(panelClasificacion).toHaveAttribute(
+      'aria-labelledby',
+      clasificacion.id,
+    );
+
+    fireEvent.keyDown(anotar, { key: 'ArrowRight' });
+    expect(clasificacion).toHaveAttribute('aria-selected', 'true');
+    expect(clasificacion).toHaveFocus();
+    expect(panelClasificacion).not.toHaveAttribute('hidden');
+    // Una tabla: el panel es la parada del tabulador
+    expect(panelClasificacion).toHaveAttribute('tabindex', '0');
+    expect(screen.getByTestId('clasificacion')).toHaveAttribute(
+      'data-activa',
+      'true',
+    );
+
+    fireEvent.keyDown(clasificacion, { key: 'End' });
+    expect(tarjetas).toHaveAttribute('aria-selected', 'true');
+    expect(
+      within(
+        screen.getByRole('tabpanel', { name: 'partida.tabs.cards' }),
+      ).getByTestId('tarjetas'),
+    ).toBeInTheDocument();
+    // Las tarjetas llevan sus botones de corregir: el panel no es parada
+    expect(
+      screen.getByRole('tabpanel', { name: 'partida.tabs.cards' }),
+    ).not.toHaveAttribute('tabindex');
+    expect(screen.getByTestId('clasificacion')).toHaveAttribute(
+      'data-activa',
+      'false',
+    );
+    fireEvent.keyDown(tarjetas, { key: 'Home' });
+    expect(anotar).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('11-12: las pestañas; la clasificación solo está activa con la suya abierta', () => {
+    render(<GroupScoringPage />);
+    expect(screen.getByTestId('clasificacion')).toHaveAttribute(
+      'data-activa',
+      'false',
+    );
+
+    fireEvent.click(screen.getByTestId('tab-standings'));
+    expect(screen.getByTestId('clasificacion')).toHaveAttribute(
+      'data-activa',
+      'true',
+    );
+    expect(llamadas.clasificacion).toMatchObject({
+      roundId: 'r-1',
+      userId: 'ana',
+    });
+
+    fireEvent.click(screen.getByTestId('tab-cards'));
+    expect(screen.getByTestId('tarjetas')).toBeInTheDocument();
+    expect(llamadas.tarjetas).toMatchObject({
+      userId: 'ana',
+      organiza: false,
+      onCambio: mockHook.refetch,
+    });
+  });
+
+  it('13: quien no juega no tiene Anotar, y abre en Tarjetas', () => {
+    mockHook = hook({ isMatchPlayer: false, canScore: false });
+    render(<GroupScoringPage />);
+
+    expect(screen.queryByTestId('tab-input')).toBeNull();
+    expect(screen.getByTestId('tarjetas')).toBeInTheDocument();
+    expect(screen.queryByTestId('barra-de-entrega')).toBeNull();
+  });
+
+  it('15: el organizador de la competición tiene sus herramientas en Tarjetas', () => {
+    mockRoles = { isAdmin: false, isCreator: true, isLoading: false };
+    render(<GroupScoringPage />);
+    fireEvent.click(screen.getByTestId('tab-cards'));
+
+    expect(llamadas.tarjetas.organiza).toBe(true);
+  });
+
+  it('15c: un administrador también', () => {
+    mockRoles = { isAdmin: true, isCreator: false, isLoading: false };
+    render(<GroupScoringPage />);
+    fireEvent.click(screen.getByTestId('tab-cards'));
+
+    expect(llamadas.tarjetas.organiza).toBe(true);
+  });
+
+  it('15b: sin saber la competición (desde el aviso del panel), sin herramientas', () => {
+    mockBusqueda = new URLSearchParams('');
+    mockRoles = { isAdmin: false, isCreator: true, isLoading: false };
+    render(<GroupScoringPage />);
+    fireEvent.click(screen.getByTestId('tab-cards'));
+
+    expect(llamadas.tarjetas.organiza).toBe(false);
+    expect(
+      screen.queryByRole('link', { name: /partida.backToCompetition/ }),
+    ).toBeNull();
+  });
+
+  it('18: un fallo al anotar, traducido por su código', () => {
+    mockHook = hook({
+      error: Object.assign(new Error('detail'), {
+        errorCode: 'NOT_YOUR_MARKED_PLAYER',
+      }),
+      origenDelError: 'golpe',
+    });
+    render(<GroupScoringPage />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'partida.errors.NOT_YOUR_MARKED_PLAYER',
+    );
+  });
+
+  it('18b: retirarse falla: el motivo, traducido', async () => {
+    mockRetirarse.mockRejectedValue(
+      Object.assign(new Error('x'), { errorCode: 'GROUP_NOT_SCORING' }),
+    );
+    render(<GroupScoringPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'partida.retire' }));
+    fireEvent.click(screen.getByRole('button', { name: 'partida.retireYes' }));
+
+    await waitFor(() =>
+      expect(mockToast.error).toHaveBeenCalledWith(
+        'partida.errors.GROUP_NOT_SCORING',
+      ),
+    );
+  });
+});
+
+describe('GroupScoringPage — el mapa del hoyo (BE #532)', () => {
+  beforeEach(() => {
+    mockBusqueda = new URLSearchParams('competition=c-1');
+    mockRoles = { isAdmin: false, isCreator: false, isLoading: false };
+    mockHook = hook({ scoringView: vista({ golf_course_id: 'gc-1' }) });
+    mapaHoyo.valor = {
+      abierto: false,
+      abrir: vi.fn(),
+      cerrar: vi.fn(),
+      mapaDelCampo: null,
+      disponible: true,
+    };
+    mapaHoyo.ventana = null;
+  });
+
+  it('pide el mapa del campo de lo que se anota', () => {
+    render(<GroupScoringPage />);
+
+    expect(mapaHoyo.args).toEqual({
+      golfCourseId: 'gc-1',
+      cerrarSi: false,
+      pais: null,
+    });
+  });
+
+  it('16 oct: antes de abrir, dice a quién vas a marcar', () => {
+    mockHook = hook({
+      scoringView: vista({
+        status: 'SCHEDULED',
+        scoring_opens_at: '2999-01-01T08:00:00+01:00',
+      }),
+    });
+
+    render(<GroupScoringPage />);
+
+    expect(screen.getByTestId('anotaras-a')).toHaveTextContent(
+      'notOpenYet.youWillMark',
+    );
+  });
+
+  it('16 oct: antes de abrir y sin a quién marcar, ni la línea', () => {
+    mockHook = hook({
+      scoringView: vista(
+        {
+          status: 'SCHEDULED',
+          scoring_opens_at: '2999-01-01T08:00:00+01:00',
+          i_mark_user_id: null,
+        },
+        [jugador('ana', null)],
+      ),
+    });
+
+    render(<GroupScoringPage />);
+
+    expect(screen.queryByTestId('anotaras-a')).toBeNull();
+  });
+
+  it('16 oct: el campo de la partida, bajo el título; sin nombre, ni la línea', () => {
+    mockHook = hook({
+      scoringView: vista({ golf_course_name: 'Golf de Meis - Par 72' }),
+    });
+    const { unmount } = render(<GroupScoringPage />);
+    expect(screen.getByTestId('campo-de-la-partida')).toHaveTextContent(
+      'Golf de Meis - Par 72',
+    );
+    unmount();
+
+    mockHook = hook();
+    render(<GroupScoringPage />);
+    expect(screen.queryByTestId('campo-de-la-partida')).toBeNull();
+  });
+
+  it('T2 (16 oct): «Mapa» va entre Anterior y Siguiente, y lo abre', () => {
+    render(<GroupScoringPage />);
+
+    const boton = screen.getByRole('button', { name: 'mapa.abrir' });
+    expect(boton.previousElementSibling).toHaveTextContent('input.prevHole');
+    expect(boton.nextElementSibling).toHaveTextContent('input.nextHole');
+    fireEvent.click(boton);
+    expect(mapaHoyo.valor.abrir).toHaveBeenCalled();
+  });
+
+  it('19 oct: el mapa recibe el país del campo; si no hay mapa en él, sin «Mapa»', () => {
+    mockHook = hook({ scoringView: vista({ golf_course_country_code: 'PT' }) });
+    mapaHoyo.valor = { ...mapaHoyo.valor, disponible: false };
+
+    render(<GroupScoringPage />);
+
+    expect(mapaHoyo.args.pais).toBe('PT');
+    expect(screen.queryByRole('button', { name: 'mapa.abrir' })).toBeNull();
+  });
+
+  it('la ventana del mapa recibe el hoyo que se anota', () => {
+    render(<GroupScoringPage />);
+
+    expect(mapaHoyo.ventana).toMatchObject({
+      golfCourseId: 'gc-1',
+      numeroDeHoyo: 1,
+      par: 4,
+    });
+    expect(mapaHoyo.ventana.mapaDelHoyo).toBe(mapaHoyo.valor);
+  });
+
+  it('F12 (16 oct): el mapa recibe los metros del hoyo desde MI barra', () => {
+    const conMetros = (id, marks, base) =>
+      jugador(id, marks, {
+        holes: Array.from({ length: 18 }, (_, i) => ({
+          ...hoyo(i + 1),
+          meters: base + i,
+        })),
+      });
+    mockHook = hook({
+      scoringView: vista({}, [
+        conMetros('ana', 'bea', 300),
+        conMetros('bea', 'ana', 250),
+      ]),
+    });
+
+    render(<GroupScoringPage />);
+
+    expect(mapaHoyo.ventana.metros).toBe(300);
+  });
+
+  it('16 oct: el mapa recibe mi barra (color y sexo), para las muestras', () => {
+    mockHook = hook({
+      scoringView: vista({}, [
+        jugador('ana', 'bea', { tee_color: 'RED', tee_gender: 'FEMALE' }),
+        jugador('bea', 'ana'),
+      ]),
+    });
+
+    render(<GroupScoringPage />);
+
+    expect(mapaHoyo.ventana.barra).toEqual({ color: 'RED', gender: 'FEMALE' });
+  });
+
+  it('16 oct: una barra sin sexo va con null', () => {
+    render(<GroupScoringPage />);
+
+    expect(mapaHoyo.ventana.barra).toEqual({ color: 'YELLOW', gender: null });
+  });
+
+  it('F12: sin metros en la vista, el mapa recibe null', () => {
+    render(<GroupScoringPage />);
+
+    expect(mapaHoyo.ventana.metros).toBeNull();
+  });
+
+  it('T1: en la tarjeta no se pide el GPS', () => {
+    const watchPosition = vi.fn();
+    vi.stubGlobal('navigator', {
+      ...globalThis.navigator,
+      geolocation: { watchPosition, clearWatch: vi.fn() },
+    });
+    try {
+      render(<GroupScoringPage />);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    expect(watchPosition).not.toHaveBeenCalled();
+  });
+});
+
+describe('GroupScoringPage — sesión tomada con el mapa abierto', () => {
+  it('el mapa se cierra para que «Volver» salga de la anotación', () => {
+    mockBusqueda = new URLSearchParams('competition=c-1');
+    mockRoles = { isAdmin: false, isCreator: false, isLoading: false };
+    mockHook = hook({ isSessionBlocked: true });
+
+    render(<GroupScoringPage />);
+
+    expect(mapaHoyo.args.cerrarSi).toBe(true);
+  });
+});
+
+/**
+ * La anotación en curso (11 nov 2026): la pantalla repone la pestaña y el hoyo guardados y
+ * deja de guardar con la tarjeta entregada. El detalle vive en `useAnotacionEnCurso`.
+ */
+describe('GroupScoringPage: la anotación en curso', () => {
+  const CLAVE = 'anotacion_en_curso';
+  const memoria = () => {
+    const datos = new Map();
+    return {
+      getItem: (k) => (datos.has(k) ? datos.get(k) : null),
+      setItem: (k, v) => datos.set(k, String(v)),
+      removeItem: (k) => datos.delete(k),
+      clear: () => datos.clear(),
+    };
+  };
+  const guarda = async (extra = {}) => {
+    const { guardaLaAnotacionEnCurso } =
+      await import('../../utils/anotacionEnCurso');
+    guardaLaAnotacionEnCurso({
+      cuenta: 'ana',
+      pathname: mockLocation.pathname,
+      search: mockLocation.search,
+      pestana: 'standings',
+      hoyo: 12,
+      mapa: false,
+      ...extra,
+    });
+  };
+  const COMPETICION = '1c6b7d2f-3e4a-4b6c-9d8e-0f1a2b3c4d5e';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('localStorage', memoria());
+    // Como llega de verdad: la de grupo con su competición en la búsqueda
+    mockLocation.search = `?competition=${COMPETICION}`;
+    mockBusqueda = new URLSearchParams(`competition=${COMPETICION}`);
+    mockRoles = { isAdmin: false, isCreator: false, isLoading: false };
+    mockHook = hook();
+  });
+  afterEach(() => {
+    mockLocation.search = '';
+    vi.unstubAllGlobals();
+  });
+
+  it('E1: con su anotación guardada (con su ?competition=), abre en ese hoyo y esa pestaña', async () => {
+    await guarda();
+
+    render(<GroupScoringPage />);
+
+    expect(mockHook.setCurrentHole).toHaveBeenCalledWith(12);
+    const [, clasificacion] = within(screen.getByRole('tablist')).getAllByRole(
+      'tab',
+    );
+    expect(clasificacion).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('E2: retirado, olvida la anotación', async () => {
+    await guarda();
+    mockHook = hook({
+      scoringView: vista({}, [
+        jugador('ana', 'bea', { card_status: 'RETIRADO' }),
+        jugador('bea', 'ana'),
+      ]),
+    });
+
+    render(<GroupScoringPage />);
+
+    expect(localStorage.getItem(CLAVE)).toBeNull();
+  });
+
+  it('E2: con mi tarjeta entregada, olvida la anotación', async () => {
+    await guarda();
+    mockHook = hook({
+      hasSubmitted: true,
+      scoringView: vista({}, [
+        jugador('ana', 'bea', { card_status: 'ENTREGADA' }),
+        jugador('bea', 'ana'),
+      ]),
+    });
+
+    render(<GroupScoringPage />);
+
+    expect(localStorage.getItem(CLAVE)).toBeNull();
+    expect(mockHook.setCurrentHole).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Caracterización antes de partir la pantalla en piezas (refactor sin cambio de
+ * comportamiento): lo que no tenía test y tiene que seguir igual.
+ */
+describe('GroupScoringPage: lo que no cambia al partirla', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockBusqueda = new URLSearchParams('competition=c-1');
+    mockRoles = { isAdmin: false, isCreator: false, isLoading: false };
+    mockHook = hook();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('cargando: la espera, sin cabecera de la partida', () => {
+    mockHook = hook({ isLoading: true });
+    render(<GroupScoringPage />);
+
+    expect(screen.getByText('loading')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
+  });
+
+  it.each([
+    [{ status: 403 }, 'errors.forbidden'],
+    [{ response: { status: 404 } }, 'errors.notFound'],
+    [new Error('crudo'), 'offline.noSePudoCargar'],
+    [null, 'offline.nothingCached'],
+  ])('sin vista (%o): %s, y «Reintentar» vuelve a pedirla', (error, texto) => {
+    mockHook = hook({ scoringView: null, error });
+    render(<GroupScoringPage />);
+
+    expect(screen.getByText(texto)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'retry' }));
+    expect(mockHook.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [{ status: 500 }, 'golpe', 'errors.failedToSubmitScore'],
+    [{ status: 500 }, 'tarjeta', 'errors.failedToSubmitScorecard'],
+    [{ i18nKey: 'offline.lleno' }, 'golpe', 'offline.lleno'],
+    [{ status: 404 }, null, 'errors.notFound'],
+    [{ status: 500 }, null, 'offline.noSePudoCargar'],
+  ])('el recuadro del fallo (%o, %s): %s', (error, origenDelError, texto) => {
+    mockHook = hook({ error, origenDelError });
+    render(<GroupScoringPage />);
+
+    const recuadro = screen.getByRole('alert');
+    expect(recuadro).toHaveTextContent(texto);
+    fireEvent.click(within(recuadro).getByRole('button', { name: 'retry' }));
+    expect(mockHook.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('el aviso del vaciado sale y quita el de «a salvo»', () => {
+    mockHook = hook({ avisoDelVaciado: 'lleno', pendingQueueSize: 2 });
+    render(<GroupScoringPage />);
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'scoring:errors.vaciado.lleno',
+    );
+    expect(screen.queryByTestId('pendientes-a-salvo')).toBeNull();
+  });
+
+  it('los hoyos sin guardar, contados y en orden', () => {
+    mockHook = hook({ noGuardados: { 7: { turno: 1 }, 3: { turno: 2 } } });
+    render(<GroupScoringPage />);
+
+    expect(screen.getByTestId('no-guardados')).toHaveTextContent(
+      'offline.noGuardados {"count":2,"holes":"3, 7"}',
+    );
+    expect(llamadas.selector.noGuardados).toEqual([3, 7]);
+  });
+
+  it('dice a quién marco, con su nombre', () => {
+    render(<GroupScoringPage />);
+
+    expect(
+      screen.getByText('partida.youMark {"jugador":"BEA"}'),
+    ).toBeInTheDocument();
+  });
+
+  it('Anterior y Siguiente mueven de hoyo, sin salirse de la tarjeta', () => {
+    mockHook = hook({ currentHole: 5 });
+    const { unmount } = render(<GroupScoringPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'input.prevHole' }));
+    fireEvent.click(screen.getByRole('button', { name: 'input.nextHole' }));
+    expect(mockHook.setCurrentHole.mock.calls).toEqual([[4], [6]]);
+    unmount();
+
+    mockHook = hook({ currentHole: 1 });
+    const { unmount: quita } = render(<GroupScoringPage />);
+    expect(
+      screen.getByRole('button', { name: 'input.prevHole' }),
+    ).toBeDisabled();
+    quita();
+
+    mockHook = hook({ currentHole: 18 });
+    render(<GroupScoringPage />);
+    expect(
+      screen.getByRole('button', { name: 'input.nextHole' }),
+    ).toBeDisabled();
+  });
+
+  it.each([
+    [{}, [false, false, false]],
+    [{ canScore: false }, [true, true, true]],
+    [{ isFullyLocked: true }, [true, false, false]],
+    [{ isSessionBlocked: true }, [true, true, true]],
+    [{ isOwnScoreLocked: true }, [false, true, false]],
+    [{ isMarkerScoreLocked: true }, [false, false, true]],
+  ])('los candados de la casilla (%o)', (extra, [lectura, mio, suyo]) => {
+    mockHook = hook(extra);
+    render(<GroupScoringPage />);
+
+    expect(llamadas.casilla.isReadOnly).toBe(lectura);
+    expect(llamadas.casilla.isOwnScoreLocked).toBe(mio);
+    expect(llamadas.casilla.isMarkerScoreLocked).toBe(suyo);
+  });
+
+  it('con la sesión en otro móvil, el aviso: «Tomar el control» la recupera', () => {
+    mockHook = hook({ isSessionBlocked: true });
+    render(<GroupScoringPage />);
+
+    fireEvent.click(screen.getByTestId('session-take-over'));
+    expect(mockHook.takeOverSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('la casilla se reinicia al cambiar el turno de lo no guardado de SU hoyo, y solo entonces', () => {
+    llamadas.montajesDeLaCasilla = 0;
+    const { rerender } = render(<GroupScoringPage />);
+    const conNoGuardados = (noGuardados, extra = {}) => {
+      mockHook = { ...mockHook, noGuardados, ...extra };
+      rerender(<GroupScoringPage />);
+      return llamadas.montajesDeLaCasilla;
+    };
+    expect(llamadas.montajesDeLaCasilla).toBe(1);
+
+    expect(conNoGuardados({ 1: { turno: 1 } })).toBe(2);
+    // Otro hoyo sin guardar no toca la casilla de este
+    expect(conNoGuardados({ 1: { turno: 1 }, 4: { turno: 7 } })).toBe(2);
+    expect(conNoGuardados({ 1: { turno: 2 } })).toBe(3);
+    expect(conNoGuardados({})).toBe(4);
+    // Y cambiar de hoyo, también
+    expect(conNoGuardados({}, { currentHole: 2 })).toBe(5);
+  });
+
+  it('retirarse bien: lo dice y vuelve a pedir la vista', async () => {
+    mockRetirarse.mockResolvedValue({});
+    render(<GroupScoringPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'partida.retire' }));
+    fireEvent.click(screen.getByRole('button', { name: 'partida.retireYes' }));
+
+    await waitFor(() => expect(mockHook.refetch).toHaveBeenCalledTimes(1));
+    expect(mockRetirarse).toHaveBeenCalledWith('g-1');
+    expect(mockToast.success).toHaveBeenCalledWith('partida.retired');
+    expect(
+      screen.queryByRole('button', { name: 'partida.retireYes' }),
+    ).toBeNull();
+  });
+
+  it('mientras se retira, «Sí» no se puede pulsar otra vez', async () => {
+    let acaba;
+    mockRetirarse.mockReturnValue(
+      new Promise((resolve) => {
+        acaba = resolve;
+      }),
+    );
+    render(<GroupScoringPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'partida.retire' }));
+    const si = screen.getByRole('button', { name: 'partida.retireYes' });
+    expect(si).toBeEnabled();
+    fireEvent.click(si);
+
+    await waitFor(() => expect(si).toBeDisabled());
+    await act(async () => acaba({}));
+  });
+
+  it('antes de que abra, sin «Mapa»: la ventana va con la casilla', () => {
+    mapaHoyo.valor = { ...mapaHoyo.valor, disponible: true };
+    const { unmount } = render(<GroupScoringPage />);
+    expect(
+      screen.getByRole('button', { name: 'mapa.abrir' }),
+    ).toBeInTheDocument();
+    unmount();
+
+    mockHook = hook({
+      scoringView: vista({
+        status: 'SCHEDULED',
+        scoring_opens_at: '2999-01-01T08:00:00+01:00',
+      }),
+    });
+    render(<GroupScoringPage />);
+
+    expect(screen.queryByRole('button', { name: 'mapa.abrir' })).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'input.nextHole' }),
+    ).toBeInTheDocument();
+  });
+
+  it('en juego, aunque la hora de abrir no haya llegado, se anota', () => {
+    mockHook = hook({
+      scoringView: vista({
+        status: 'IN_PROGRESS',
+        scoring_opens_at: '2999-01-01T08:00:00+01:00',
+      }),
+    });
+    render(<GroupScoringPage />);
+
+    expect(screen.getByTestId('hole-input')).toBeInTheDocument();
+    expect(screen.queryByText('partida.notOpenYet')).toBeNull();
+  });
+
+  it('«aún no abre» caduca solo un segundo después de la hora, sin sondeo', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(new Date('2030-05-01T10:00:00Z'));
+    mockHook = hook({
+      scoringView: vista({
+        status: 'SCHEDULED',
+        scoring_opens_at: '2030-05-01T10:00:05Z',
+      }),
+    });
+    render(<GroupScoringPage />);
+    expect(screen.queryByTestId('hole-input')).toBeNull();
+
+    act(() => vi.advanceTimersByTime(5999));
+    expect(screen.queryByTestId('hole-input')).toBeNull();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByTestId('hole-input')).toBeInTheDocument();
+  });
+
+  it('«aún no abre» más allá de lo que aguanta un temporizador: se encadena y abre a su hora (CodeRabbit #1204)', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(new Date('2030-05-01T10:00:00Z'));
+    const MAXIMO = 2 ** 31 - 1;
+    mockHook = hook({
+      scoringView: vista({
+        status: 'SCHEDULED',
+        scoring_opens_at: new Date(Date.now() + MAXIMO + 1).toISOString(),
+      }),
+    });
+    render(<GroupScoringPage />);
+
+    act(() => vi.advanceTimersByTime(MAXIMO - 1));
+    expect(screen.queryByTestId('hole-input')).toBeNull();
+    act(() => vi.advanceTimersByTime(5000));
+    expect(screen.getByTestId('hole-input')).toBeInTheDocument();
+  });
+});

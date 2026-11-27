@@ -1,0 +1,218 @@
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import CarruselDeTarjetas from './CarruselDeTarjetas';
+
+/**
+ * FE #739 · en el móvil, una tarjeta por participante que se pasa deslizando.
+ * Lo que se desliza es la tarjeta entera, que encaja en su sitio: la página no
+ * se desplaza de lado. Arriba, los nombres para saltar a una; abajo, los puntos
+ * que dicen en cuál estás.
+ */
+const TARJETAS = [
+  {
+    clave: 'nacho',
+    nombre: 'Nacho',
+    equipo: 'A',
+    contenido: <p>tarjeta de Nacho</p>,
+  },
+  {
+    clave: 'luna',
+    nombre: 'Luna',
+    equipo: 'B',
+    contenido: <p>tarjeta de Luna</p>,
+  },
+  {
+    clave: 'oscar',
+    nombre: 'Óscar',
+    equipo: 'B',
+    contenido: <p>tarjeta de Óscar</p>,
+  },
+];
+
+// jsdom no maqueta: el ancho de cada tarjeta se fija a mano
+const conAncho = (ancho = 320) => {
+  const carril = screen.getByTestId('carril-de-tarjetas');
+  Object.defineProperty(carril, 'clientWidth', {
+    configurable: true,
+    value: ancho,
+  });
+  carril.scrollTo = vi.fn();
+  return carril;
+};
+
+const marcado = () =>
+  screen
+    .getAllByRole('tab')
+    .findIndex((b) => b.getAttribute('aria-selected') === 'true');
+
+describe('CarruselDeTarjetas', () => {
+  it('K1: un nombre y una tarjeta por participante, la primera marcada', () => {
+    render(<CarruselDeTarjetas tarjetas={TARJETAS} />);
+
+    expect(screen.getAllByRole('tab').map((b) => b.textContent)).toEqual([
+      'Nacho',
+      'Luna',
+      'Óscar',
+    ]);
+    expect(screen.getAllByRole('tabpanel')).toHaveLength(3);
+    expect(screen.getByText('tarjeta de Luna')).toBeInTheDocument();
+    expect(marcado()).toBe(0);
+  });
+
+  it('K2: tocar un nombre lo marca y desliza hasta su tarjeta', () => {
+    render(<CarruselDeTarjetas tarjetas={TARJETAS} />);
+    const carril = conAncho(320);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Óscar' }));
+
+    expect(marcado()).toBe(2);
+    expect(carril.scrollTo).toHaveBeenCalledWith(
+      expect.objectContaining({ left: 640 }),
+    );
+  });
+
+  it('K3: deslizar con el dedo marca la tarjeta a la que se llega, con su punto', () => {
+    render(<CarruselDeTarjetas tarjetas={TARJETAS} />);
+    const carril = conAncho(320);
+
+    carril.scrollLeft = 320;
+    fireEvent.scroll(carril);
+
+    expect(marcado()).toBe(1);
+    const puntos = screen.getAllByTestId(/^punto-/);
+    expect(puntos.map((p) => p.dataset.activo)).toEqual([
+      'false',
+      'true',
+      'false',
+    ]);
+  });
+
+  it('K4: con las flechas del teclado se pasa a la siguiente y a la anterior', () => {
+    render(<CarruselDeTarjetas tarjetas={TARJETAS} />);
+    const carril = conAncho(320);
+
+    fireEvent.keyDown(carril, { key: 'ArrowRight' });
+    expect(marcado()).toBe(1);
+    fireEvent.keyDown(carril, { key: 'ArrowRight' });
+    fireEvent.keyDown(carril, { key: 'ArrowRight' });
+    expect(marcado()).toBe(2);
+    fireEvent.keyDown(carril, { key: 'ArrowLeft' });
+    expect(marcado()).toBe(1);
+  });
+
+  it('K5: con una sola tarjeta no hay nombres ni puntos que elegir', () => {
+    render(<CarruselDeTarjetas tarjetas={[TARJETAS[0]]} />);
+
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    expect(screen.queryAllByTestId(/^punto-/)).toHaveLength(0);
+    expect(screen.getByText('tarjeta de Nacho')).toBeInTheDocument();
+  });
+
+  it('K6: arranca en la tarjeta que se le pida (la de quien mira)', () => {
+    render(<CarruselDeTarjetas tarjetas={TARJETAS} inicial="luna" />);
+
+    expect(marcado()).toBe(1);
+  });
+
+  it('K7: el carril contiene lo posicionado de dentro, para que no se salga de la pantalla', () => {
+    // Visto en el Kind a 360 px: los textos para lectores de pantalla de una
+    // figura (position: absolute) de la segunda tarjeta escapaban al recorte
+    // del carril y el móvil alejaba la vista a 522 px. Un elemento absoluto se
+    // recorta con su antepasado posicionado: el carril tiene que serlo
+    render(<CarruselDeTarjetas tarjetas={TARJETAS} />);
+
+    expect(screen.getByTestId('carril-de-tarjetas')).toHaveClass('relative');
+  });
+
+  it('K8 (FE #658): cada tarjeta se nombra con su nombre de arriba, que la controla', () => {
+    render(<CarruselDeTarjetas tarjetas={TARJETAS} />);
+
+    for (const nombre of ['Nacho', 'Luna', 'Óscar']) {
+      const pestana = screen.getByRole('tab', { name: nombre });
+      const panel = screen.getByRole('tabpanel', { name: nombre });
+      expect(pestana.id).toBeTruthy();
+      expect(panel).toHaveAttribute('aria-labelledby', pestana.id);
+      expect(pestana).toHaveAttribute('aria-controls', panel.id);
+    }
+  });
+
+  it('K9 (FE #658): dos carruseles en la misma pantalla no comparten ids de nombre', () => {
+    render(
+      <>
+        <CarruselDeTarjetas tarjetas={TARJETAS} />
+        <CarruselDeTarjetas tarjetas={TARJETAS} />
+      </>,
+    );
+
+    const ids = screen.getAllByRole('tab').map((b) => b.id);
+    expect(new Set(ids).size).toBe(6);
+  });
+
+  it('K10 (FE #658): con una sola tarjeta, sin nombres arriba, sigue nombrada', () => {
+    render(<CarruselDeTarjetas tarjetas={[TARJETAS[0]]} />);
+
+    expect(screen.getByRole('tabpanel', { name: 'Nacho' })).not.toHaveAttribute(
+      'aria-labelledby',
+    );
+  });
+
+  describe('dónde arranca, y que el sondeo no lo mueva (T6)', () => {
+    // El ancho, ANTES de montar: el arranque se coloca en el montaje
+    const anchoAntesDeMontar = (ancho = 320) =>
+      vi
+        .spyOn(globalThis.Element.prototype, 'clientWidth', 'get')
+        .mockReturnValue(ancho);
+    const carril = () => screen.getByTestId('carril-de-tarjetas');
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('T6-10: con inicial=luna arranca con el carril en la suya (320) y Luna marcada', () => {
+      anchoAntesDeMontar(320);
+
+      render(<CarruselDeTarjetas tarjetas={TARJETAS} inicial="luna" />);
+
+      expect(carril().scrollLeft).toBe(320);
+      expect(marcado()).toBe(1);
+    });
+
+    it('T6-11: deslizado a otra tarjeta, el sondeo (tarjetas nuevas u otra inicial) no lo recoloca', () => {
+      anchoAntesDeMontar(320);
+      const { rerender } = render(
+        <CarruselDeTarjetas tarjetas={TARJETAS} inicial="luna" />,
+      );
+      carril().scrollTo = vi.fn();
+
+      // A Nacho, con el dedo
+      carril().scrollLeft = 0;
+      fireEvent.scroll(carril());
+      expect(marcado()).toBe(0);
+
+      const deNuevo = TARJETAS.map((t) => ({ ...t }));
+      rerender(<CarruselDeTarjetas tarjetas={deNuevo} inicial="luna" />);
+      rerender(
+        <CarruselDeTarjetas
+          tarjetas={deNuevo.map((t) => ({ ...t }))}
+          inicial="oscar"
+        />,
+      );
+
+      expect(carril().scrollLeft).toBe(0);
+      expect(carril().scrollTo).not.toHaveBeenCalled();
+      expect(marcado()).toBe(0);
+    });
+
+    it.each([
+      ['una inicial que no está', 'nadie'],
+      ['la primera', 'nacho'],
+    ])('T6-12: con %s no se toca el carril (0)', (_caso, inicial) => {
+      anchoAntesDeMontar(320);
+
+      render(<CarruselDeTarjetas tarjetas={TARJETAS} inicial={inicial} />);
+
+      expect(carril().scrollLeft).toBe(0);
+      expect(marcado()).toBe(0);
+    });
+  });
+});

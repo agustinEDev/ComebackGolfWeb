@@ -1,0 +1,169 @@
+import toast from 'react-hot-toast';
+import {
+  X,
+  CheckCircle2,
+  AlertCircle,
+  AlertTriangle,
+  Info,
+} from 'lucide-react';
+import { createElement } from 'react';
+import { esUnAvisoSilenciado } from './terminosPendientes';
+import { seEstaCerrandoLaSesion } from './cierreDeEstaCarga';
+
+/**
+ * Custom Toast Content Component
+ */
+const ToastContent = ({ message, type, toastId, icon, visible }) => {
+  const config = {
+    success: {
+      Icon: CheckCircle2,
+      bgClass: 'bg-green-50',
+      borderClass: 'border-primary/20',
+      textClass: 'text-primary',
+    },
+    error: {
+      Icon: AlertCircle,
+      bgClass: 'bg-red-50',
+      borderClass: 'border-red-200',
+      textClass: 'text-red-600',
+    },
+    warning: {
+      Icon: AlertTriangle,
+      bgClass: 'bg-amber-50',
+      borderClass: 'border-amber-200',
+      textClass: 'text-amber-600',
+    },
+    info: {
+      Icon: Info,
+      bgClass: 'bg-blue-50',
+      borderClass: 'border-blue-200',
+      textClass: 'text-blue-600',
+    },
+  };
+
+  const typeConfig = config[type] || config.info;
+  const { Icon, bgClass, borderClass, textClass } = typeConfig;
+
+  return createElement(
+    'div',
+    {
+      // Cerrado, se va en el acto: la librería lo retira 1 s después y hasta
+      // entonces seguía a la vista (pasada del Kind, 1 nov 2026)
+      'data-testid': 'toast',
+      // `inert`: fuera del árbol de accesibilidad y del foco, también la X si
+      // se pulsó con el teclado (revisor)
+      inert: !visible,
+      className: `flex items-start gap-3 p-4 pr-2 ${bgClass} border ${borderClass} rounded-lg shadow-lg min-w-[300px] max-w-md transition-opacity duration-150 motion-reduce:transition-none ${visible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`,
+    },
+    // Icon (custom emoji or default Icon component)
+    createElement(
+      'div',
+      { className: 'flex-shrink-0' },
+      icon
+        ? createElement('span', { className: 'text-xl' }, icon)
+        : createElement(Icon, { className: `w-5 h-5 ${textClass}` }),
+    ),
+    // Message
+    createElement(
+      'div',
+      {
+        className:
+          'flex-1 min-w-0 wrap-anywhere text-sm text-gray-900 leading-relaxed',
+      },
+      message,
+    ),
+    // Close Button
+    createElement(
+      'button',
+      {
+        onClick: () => toast.dismiss(toastId),
+        className:
+          'flex-shrink-0 p-1 rounded-lg hover:bg-white/50 transition-colors cursor-pointer',
+        'aria-label': 'Close notification',
+      },
+      createElement(X, {
+        className: 'w-4 h-4 text-gray-600 hover:text-gray-900',
+      }),
+    ),
+  );
+};
+
+/**
+ * Custom toast wrapper with close button
+ */
+export const customToast = {
+  success: (message, options = {}) => {
+    const { icon, ...toastOptions } = options;
+    return toast.custom(
+      (t) =>
+        createElement(ToastContent, {
+          message,
+          type: 'success',
+          toastId: t.id,
+          icon,
+          visible: t.visible,
+        }),
+      { duration: 4000, ...toastOptions },
+    );
+  },
+
+  error: (message, options = {}) => {
+    // El de una llamada cortada por irse a aceptar los Términos: la página se
+    // va y no dice nada útil. Solo ESE; cualquier otro error se sigue viendo
+    if (esUnAvisoSilenciado(message)) return undefined;
+    const { icon, delCierre, ...toastOptions } = options;
+    // Con un cierre forzado en marcha, la página se va al login en un momento: el error
+    // de una pantalla que falla por eso no dice nada útil y tapaba el aviso del cierre,
+    // que es el único que sale (`delCierre`; A1, 8 nov 2026)
+    if (seEstaCerrandoLaSesion() && !delCierre) return undefined;
+    return toast.custom(
+      (t) =>
+        createElement(ToastContent, {
+          message,
+          type: 'error',
+          toastId: t.id,
+          icon,
+          visible: t.visible,
+        }),
+      { duration: 5000, ...toastOptions },
+    );
+  },
+
+  warning: (message, options = {}) => {
+    const { icon, ...toastOptions } = options;
+    return toast.custom(
+      (t) =>
+        createElement(ToastContent, {
+          message,
+          type: 'warning',
+          toastId: t.id,
+          icon,
+          visible: t.visible,
+        }),
+      { duration: 5000, ...toastOptions },
+    );
+  },
+
+  info: (message, options = {}) => {
+    const { icon, ...toastOptions } = options;
+    return toast.custom(
+      (t) =>
+        createElement(ToastContent, {
+          message,
+          type: 'info',
+          toastId: t.id,
+          icon,
+          visible: t.visible,
+        }),
+      { duration: 4000, ...toastOptions },
+    );
+  },
+
+  // Wrapper for toast.dismiss to allow dismissing toasts
+  dismiss: (toastId) => {
+    return toast.dismiss(toastId);
+  },
+};
+
+// Export default as customToast for easy import
+export default customToast;

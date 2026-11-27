@@ -1,0 +1,416 @@
+import { useMemo, useState } from 'react';
+import ModalShell, { CAJA_PROPIA } from '../../components/ui/ModalShell';
+import { motion } from 'framer-motion';
+import { Plus } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import customToast from '../../utils/toast';
+import HeaderAuth from '../../components/layout/HeaderAuth';
+import { useAuth } from '../../hooks/useAuth';
+import { useCargaCancelableEffect } from '../../hooks/useCargaCancelableEffect';
+import GolfCourseTable from '../../components/golf_course/GolfCourseTable';
+import GolfCourseForm from '../../components/golf_course/GolfCourseForm';
+import GolfCourseDetailModal from '../../components/golf_course/GolfCourseDetailModal';
+import {
+  listGolfCoursesUseCase,
+  getGolfCourseUseCase,
+  createGolfCourseAdminUseCase,
+  updateGolfCourseUseCase,
+} from '../../composition';
+import FullScreenLoader from '../../components/ui/FullScreenLoader';
+import BlockLoader from '../../components/ui/BlockLoader';
+import { mensajeDelError } from '../../utils/mensajeDelError';
+import { registraElFallo } from '../../utils/registraElFallo';
+import { GolfCourseApprovalStatus } from '../../domain/value_objects/GolfCourseApprovalStatus';
+import { Role } from '../../domain/value_objects/Role';
+import {
+  AL_PULSAR_BOTON,
+  PRINCIPAL,
+  SECUNDARIO,
+} from '../../components/ui/clasesDeBoton';
+
+// Cuántos campos se pintan de cada vez
+const POR_TANDA = 25;
+const sinTildes = (texto) =>
+  (texto ?? '')
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase();
+
+/**
+ * GolfCourses Page (Admin)
+ * Lists all APPROVED golf courses
+ * Admin can create new courses (directly APPROVED), edit them, and open a
+ * read-only detail with the location and each tee's own scorecard
+ *
+ * @param {boolean} [embedded=false] - When true, renders just the content
+ *   (no HeaderAuth/page shell) so it can be used as a tab inside AdminPanel.
+ */
+const GolfCourses = ({ embedded = false }) => {
+  const { t } = useTranslation('golfCourses');
+  const { user, loading: isLoadingUser } = useAuth();
+
+  const [courses, setCourses] = useState([]);
+  // De 25 en 25 y con buscador: eran los 805 de golpe (26 nov 2026)
+  const [busqueda, setBusqueda] = useState('');
+  const [visibles, setVisibles] = useState(POR_TANDA);
+  const encontrados = useMemo(() => {
+    // La búsqueda se normaliza una vez, no una por campo
+    const buscado = sinTildes(busqueda.trim());
+    return buscado
+      ? courses.filter((c) => sinTildes(c.name).includes(buscado))
+      : courses;
+  }, [courses, busqueda]);
+  const [isLoadingCourse, setIsLoadingCourse] = useState(false);
+  // Un alta o una edición en vuelo: mientras dura, Escape no cierra su modal.
+  // Si fallara, el error lo enseña el formulario, y cerrado no lo vería nadie
+  const [isSavingCourse, setIsSavingCourse] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedCourse, setSelectedCourse] = useState(null);
+
+  // Derive isAdmin from authenticated user's roles or is_admin flag
+  // Backend returns is_admin: true for admin users (see RoleGuard.jsx for reference)
+  const isAdmin =
+    user?.is_admin === true ||
+    user?.roles?.some((role) =>
+      typeof role === 'string' ? role === Role.ADMIN : role.name === Role.ADMIN,
+    ) ||
+    false;
+
+  // Load approved courses, con useCargaCancelableEffect: al salir o al pedirla
+  // otra vez, la respuesta anterior no toca nada. El aviso no es dependencia:
+  // la lista no se vuelve a pedir por cambiar de idioma
+  const { cargando: isLoading, recargar: recargarCourses } =
+    useCargaCancelableEffect(
+      () =>
+        listGolfCoursesUseCase.execute({
+          approvalStatus: GolfCourseApprovalStatus.APPROVED,
+        }),
+      [user],
+      {
+        activa: Boolean(user),
+        alCargar: (page) => setCourses(page.courses),
+        alFallar: (error) => {
+          registraElFallo(
+            'GolfCourses.error-loading-golf-courses',
+            'Error loading golf courses:',
+            error,
+          );
+          customToast.error(
+            mensajeDelError(error, t('pages.admin.errorLoading')),
+          );
+        },
+      },
+    );
+
+  // Handle create
+  const handleCreate = async (formData) => {
+    setIsSavingCourse(true);
+    try {
+      await createGolfCourseAdminUseCase.execute(formData);
+      customToast.success(t('pages.admin.createSuccess'));
+      setShowCreateModal(false);
+      // Que el campo nuevo se vea: entre 805 caería más allá de los 25 primeros
+      setBusqueda(formData?.name ?? '');
+      setVisibles(POR_TANDA);
+      recargarCourses();
+    } catch (error) {
+      registraElFallo(
+        'GolfCourses.error-creating-golf-course',
+        'Error creating golf course:',
+        error,
+      );
+      throw error; // Let form handle the error
+    } finally {
+      setIsSavingCourse(false);
+    }
+  };
+
+  // Handle edit
+  const handleEdit = async (formData) => {
+    if (!selectedCourse) return;
+
+    setIsSavingCourse(true);
+    try {
+      await updateGolfCourseUseCase.execute(selectedCourse.id, formData);
+
+      // Admin updates in-place, no clone created
+      customToast.success(t('pages.admin.updateSuccess'));
+      setShowEditModal(false);
+      setSelectedCourse(null);
+      recargarCourses();
+    } catch (error) {
+      registraElFallo(
+        'GolfCourses.error-updating-golf-course',
+        'Error updating golf course:',
+        error,
+      );
+      throw error; // Let form handle the error
+    } finally {
+      setIsSavingCourse(false);
+    }
+  };
+
+  // El campo se pide entero por su id en vez de usar el del listado: el
+  // listado no trae la tarjeta, y el formulario, al no encontrarla, arrancaría
+  // con sus 18 hoyos por defecto de par 4. Guardar desde ahí sobrescribiría la
+  // tarjeta real del campo. Es el mismo patrón que ya usa la partida rápida.
+  //
+  // El detalle lo necesita por lo mismo, aunque no escriba: sin las tarjetas de
+  // cada salida no tiene nada que enseñar, y son justo lo que el listado omite.
+  const cargarCampoCompleto = async (course) => {
+    setIsLoadingCourse(true);
+    try {
+      return await getGolfCourseUseCase.execute(course.id);
+    } catch (error) {
+      registraElFallo(
+        'GolfCourses.error-loading-golf-course',
+        'Error loading golf course:',
+        error,
+      );
+      customToast.error(mensajeDelError(error, t('pages.admin.errorLoading')));
+      return null;
+    } finally {
+      setIsLoadingCourse(false);
+    }
+  };
+
+  // Handle view
+  const handleView = async (course) => {
+    const fullCourse = await cargarCampoCompleto(course);
+    if (!fullCourse) return;
+
+    setSelectedCourse(fullCourse);
+    setShowDetailModal(true);
+  };
+
+  // Open edit modal
+  const handleOpenEdit = async (course) => {
+    const fullCourse = await cargarCampoCompleto(course);
+    if (!fullCourse) return;
+
+    setSelectedCourse(fullCourse);
+    setShowEditModal(true);
+  };
+
+  if (isLoadingUser || isLoading) {
+    // `embedded` sigue mandando: dentro de la pestaña del panel de admin, una
+    // espera de pantalla completa empuja las pestañas un viewport hacia abajo
+    return embedded ? (
+      <BlockLoader />
+    ) : (
+      <FullScreenLoader texto={t('common:loading')} />
+    );
+  }
+
+  if (!user) {
+    return null;
+  }
+
+  const content = (
+    <div
+      className={
+        embedded
+          ? undefined
+          : 'layout-content-container flex flex-col max-w-[1200px] flex-1'
+      }
+    >
+      {/* Header */}
+      <div className="flex flex-wrap justify-between items-center gap-3 p-4">
+        <div>
+          {!embedded && (
+            <>
+              <h1 className="text-gray-900 tracking-tight text-3xl md:text-[32px] font-bold leading-tight">
+                {t('pages.admin.title')}
+              </h1>
+              <p className="text-gray-500 text-sm mt-1">
+                {t('pages.admin.subtitle')}
+              </p>
+            </>
+          )}
+        </div>
+        <motion.button
+          onClick={() => setShowCreateModal(true)}
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          className={`flex items-center gap-2 px-5 py-2.5 ${PRINCIPAL} ${AL_PULSAR_BOTON}`}
+        >
+          <Plus className="w-4 h-4" />
+          <span>{t('pages.admin.createCourse')}</span>
+        </motion.button>
+      </div>
+
+      {/* Stats */}
+      <div className="p-4">
+        <div className="bg-realce rounded-lg p-4">
+          <p className="text-sm text-gray-600">
+            {t('pages.admin.totalCourses')}:{' '}
+            <span className="font-bold text-gray-900">{courses.length}</span>
+          </p>
+        </div>
+      </div>
+
+      {/* El buscador, por nombre y sin mirar tildes ni mayúsculas */}
+      <div className="px-4">
+        <input
+          type="search"
+          value={busqueda}
+          onChange={(e) => {
+            setBusqueda(e.target.value);
+            setVisibles(POR_TANDA);
+          }}
+          aria-label={t('pages.admin.searchByName')}
+          placeholder={t('pages.admin.searchByName')}
+          className="w-full rounded-lg border border-borde bg-fondo px-4 py-2.5 text-sm text-tinta placeholder:text-tinta-suave"
+        />
+      </div>
+
+      {/* Table */}
+      <div className="p-4">
+        <div className="relative bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          {busqueda.trim() && encontrados.length === 0 ? (
+            <p className="p-6 text-center text-sm text-tinta-suave">
+              {t('pages.admin.noSearchResults')}
+            </p>
+          ) : (
+            <GolfCourseTable
+              courses={encontrados.slice(0, visibles)}
+              onView={handleView}
+              onEdit={handleOpenEdit}
+              isAdmin={isAdmin}
+              showActions={true}
+            />
+          )}
+          {/* Abrir la edición ahora pide el campo entero, así que hay una
+              espera corta donde antes no había ninguna */}
+          {/* El velo NO es decorativo: mientras se pide el campo entero, tapa la
+              tabla y evita que se pulse «Editar» en otra fila, cuya respuesta
+              podia llegar despues y abrir el modal con el campo equivocado */}
+          {isLoadingCourse && (
+            <div className="absolute inset-0 bg-white/70 flex items-center justify-center">
+              <BlockLoader sinRelleno />
+            </div>
+          )}
+        </div>
+        {encontrados.length > visibles && (
+          <button
+            type="button"
+            onClick={() => setVisibles((n) => n + POR_TANDA)}
+            className={`mt-4 w-full py-3 ${SECUNDARIO} ${AL_PULSAR_BOTON}`}
+          >
+            {t('pages.admin.showMore', {
+              count: Math.min(POR_TANDA, encontrados.length - visibles),
+            })}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      {embedded ? (
+        content
+      ) : (
+        <div className="relative flex h-auto min-h-screen w-full flex-col bg-white">
+          <div className="layout-container flex h-full grow flex-col">
+            <HeaderAuth user={user} />
+            <div className="px-4 md:px-40 flex flex-1 justify-center py-5">
+              {content}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Modal */}
+      {showCreateModal && (
+        <ModalShell
+          isOpen
+          onClose={() => setShowCreateModal(false)}
+          labelledBy="crear-campo-titulo"
+          closeOnEscape={!isSavingCourse}
+          busy={isSavingCourse}
+          boxClassName={CAJA_PROPIA}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+          >
+            <div className="p-6 border-b border-gray-200">
+              <h2
+                id="crear-campo-titulo"
+                className="text-2xl font-bold text-gray-900"
+              >
+                {t('pages.admin.createCourseTitle')}
+              </h2>
+            </div>
+            <div className="p-6">
+              <GolfCourseForm
+                onSubmit={handleCreate}
+                onCancel={() => setShowCreateModal(false)}
+                isAdmin={isAdmin}
+              />
+            </div>
+          </motion.div>
+        </ModalShell>
+      )}
+
+      {/* Detail Modal */}
+      {showDetailModal && selectedCourse && (
+        <GolfCourseDetailModal
+          course={selectedCourse}
+          onClose={() => {
+            setShowDetailModal(false);
+            setSelectedCourse(null);
+          }}
+        />
+      )}
+
+      {/* Edit Modal */}
+      {showEditModal && selectedCourse && (
+        <ModalShell
+          isOpen
+          onClose={() => {
+            setShowEditModal(false);
+            setSelectedCourse(null);
+          }}
+          labelledBy="editar-campo-titulo"
+          closeOnEscape={!isSavingCourse}
+          busy={isSavingCourse}
+          boxClassName={CAJA_PROPIA}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+          >
+            <div className="p-6 border-b border-gray-200">
+              <h2
+                id="editar-campo-titulo"
+                className="text-2xl font-bold text-gray-900"
+              >
+                {t('pages.admin.editCourseTitle')}
+              </h2>
+            </div>
+            <div className="p-6">
+              <GolfCourseForm
+                key={selectedCourse.id}
+                initialData={selectedCourse}
+                onSubmit={handleEdit}
+                onCancel={() => {
+                  setShowEditModal(false);
+                  setSelectedCourse(null);
+                }}
+                isAdmin={isAdmin}
+              />
+            </div>
+          </motion.div>
+        </ModalShell>
+      )}
+    </>
+  );
+};
+
+export default GolfCourses;

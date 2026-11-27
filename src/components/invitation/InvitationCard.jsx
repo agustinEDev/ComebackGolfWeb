@@ -1,0 +1,256 @@
+import { AL_PASAR } from '../ui/clasesDeComportamiento';
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router';
+import { useTranslation } from 'react-i18next';
+import { Mail, Clock, User, MessageSquare, ChevronRight } from 'lucide-react';
+import InvitationBadge from './InvitationBadge';
+import { quienEsElInvitado } from '../../utils/quienEsElInvitado';
+import { diaEnTexto } from '../../utils/instanteDeLaApi';
+import InvitationStatus from '../../domain/value_objects/InvitationStatus';
+
+// Una sola regla para «Caducada» y para dejar de ofrecer la ficha (/code-review)
+const haCaducado = (expiresAt) =>
+  Boolean(expiresAt) && new Date(expiresAt) - new Date() <= 0;
+
+// Lo más que espera setTimeout: con más, salta enseguida
+const ESPERA_MAXIMA_MS = 2 ** 31 - 1;
+
+// Con la página abierta, la tarjeta se vuelve a pintar cuando caduca: el enlace
+// a la ficha no puede quedarse (CodeRabbit)
+const useHaCaducado = (expiresAt) => {
+  const [, setRepintar] = useState(0);
+  useEffect(() => {
+    if (!expiresAt) return undefined;
+    const falta = new Date(expiresAt) - new Date();
+    if (falta <= 0 || falta > ESPERA_MAXIMA_MS) return undefined;
+    const reloj = setTimeout(() => setRepintar((n) => n + 1), falta);
+    return () => clearTimeout(reloj);
+  }, [expiresAt]);
+  return haCaducado(expiresAt);
+};
+
+const getExpirationText = (expiresAt, t) => {
+  if (!expiresAt) return null;
+
+  const diffMs = new Date(expiresAt) - new Date();
+
+  if (haCaducado(expiresAt)) return t('card.expired');
+
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffDays > 0) return t('card.expiresIn', { days: diffDays });
+  return t('card.expiresInHours', { hours: diffHours });
+};
+
+// La fecha dice qué pasó (FE #724): retirarla y quedarse sin plaza también la
+// apuntan en el servidor, y «Respondida» decía que el invitado contestó
+const CLAVE_DE_LA_FECHA = {
+  [InvitationStatus.CANCELLED]: 'card.withdrawnAt',
+  [InvitationStatus.NO_ROOM]: 'card.noRoomSince',
+};
+
+const InvitationCard = ({
+  invitation,
+  mode,
+  onAccept,
+  onDecline,
+  onWithdraw,
+  onReinvite,
+  isProcessing,
+  t,
+}) => {
+  const showActions = mode === 'player' && invitation.isPending;
+  // En lista de espera (15 nov 2026): no se acepta hasta que se reabra; se
+  // puede rechazar
+  const enEspera = mode === 'player' && invitation.isOnHold === true;
+  const caducada = useHaCaducado(invitation.expiresAt);
+  // En el idioma de la app y no en el del navegador (FE #1238)
+  const { i18n } = useTranslation();
+  const respondida = diaEnTexto(invitation.respondedAt, i18n?.language);
+  // Quien invita puede retirar una pendiente (FE #724). El jugador no: él la
+  // rechaza, y las ya respondidas no estorban en su lista
+  // También la que está en lista de espera (15 nov 2026)
+  const sePuedeRetirar =
+    mode === 'creator' &&
+    (invitation.isPending || invitation.isOnHold === true) &&
+    Boolean(onWithdraw);
+  const expirationText = invitation.isPending
+    ? getExpirationText(invitation.expiresAt, t)
+    : null;
+  // Aceptada, la tarjeta lleva a su competicion (FE #682). Y el organizador ya
+  // mira esta lista desde dentro de la competicion
+  const enlazaACompeticion =
+    mode === 'player' && invitation.isAccepted && invitation.competitionId;
+  // Pendiente, el invitado ya puede mirarla antes de contestar (release social
+  // 2): con un enlace propio, porque la tarjeta lleva dentro aceptar y rechazar
+  // Caducada ya no deja verla: el servidor tampoco la cuenta (revisor)
+  // En lista de espera también, aunque haya pasado su fecha: esperando no
+  // caduca (15 nov 2026)
+  const puedeMirarla =
+    Boolean(invitation.competitionId) &&
+    ((showActions && !caducada) || enEspera);
+  const nombre = invitation.competitionName || t('card.for');
+
+  // Aceptada, la tarjeta entera es el enlace: el titulo solo era un blanco
+  // demasiado pequeño, y sin raton no se notaba que se podia pulsar
+  const Contenedor = enlazaACompeticion ? Link : 'div';
+  const propsDelContenedor = enlazaACompeticion
+    ? {
+        to: `/competitions/${invitation.competitionId}`,
+        // Para que «Volver» de la ficha lleve de nuevo aqui
+        state: { from: 'invitations' },
+        className:
+          'block bg-tarjeta rounded-tarjeta border border-contorno p-4 hover:border-tinta transition-all',
+      }
+    : { className: 'bg-tarjeta rounded-tarjeta border border-contorno p-4' };
+
+  return (
+    <Contenedor data-testid="invitation-card" {...propsDelContenedor}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className="text-sm font-semibold text-tinta truncate">
+              {nombre}
+            </h3>
+            <InvitationBadge status={invitation.status} />
+          </div>
+
+          {mode === 'player' && invitation.inviterName && (
+            <div className="flex items-center gap-1.5 text-xs text-tinta-suave mt-1">
+              <User className="h-3.5 w-3.5" />
+              <span>
+                {t('card.from')}: {invitation.inviterName}
+              </span>
+            </div>
+          )}
+
+          {mode === 'creator' && (
+            <div className="flex items-center gap-1.5 text-xs text-tinta-suave mt-1">
+              {/* El correo no tiene dónde partirse: sin min-w-0 ni wrap-anywhere
+                  desbordaba la tarjeta a 360 (FE #826) */}
+              <Mail className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="min-w-0 wrap-anywhere">
+                {quienEsElInvitado(invitation, t)}
+              </span>
+            </div>
+          )}
+
+          {invitation.personalMessage && (
+            <div className="flex items-start gap-1.5 text-xs text-tinta-suave mt-1.5">
+              <MessageSquare className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+              <span className="line-clamp-2">{invitation.personalMessage}</span>
+            </div>
+          )}
+
+          {expirationText && (
+            <div className="flex items-center gap-1.5 text-xs text-tinta-suave mt-1.5">
+              <Clock className="h-3.5 w-3.5" />
+              <span>{expirationText}</span>
+            </div>
+          )}
+
+          {puedeMirarla && (
+            <Link
+              to={`/competitions/${invitation.competitionId}`}
+              state={{ from: 'invitations' }}
+              // Con varias pendientes, el lector de pantalla las distingue (revisor)
+              aria-label={`${t('card.viewCompetition')}: ${nombre}`}
+              className="mt-1 inline-flex min-h-11 items-center gap-1 text-xs font-medium text-tinta hover:underline"
+            >
+              {t('card.viewCompetition')}
+              <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
+            </Link>
+          )}
+
+          {enEspera && (
+            <p
+              data-testid="invitacion-en-espera"
+              className="mt-1.5 text-xs text-aviso"
+            >
+              {t('card.onHold')}
+            </p>
+          )}
+
+          {/* En lista de espera nadie ha respondido: sin fecha (15 nov 2026) */}
+          {/* Sin fecha legible, sin fila: ni «Invalid Date» ni «null» */}
+          {respondida &&
+            !invitation.isPending &&
+            invitation.isOnHold !== true && (
+              <div className="flex items-center gap-1.5 text-xs text-tinta-suave mt-1.5">
+                <Clock className="h-3.5 w-3.5" />
+                <span data-testid="fecha-de-la-invitacion">
+                  {CLAVE_DE_LA_FECHA[invitation.status]
+                    ? t(CLAVE_DE_LA_FECHA[invitation.status], {
+                        date: respondida,
+                      })
+                    : `${t('card.respondedAt')}: ${respondida}`}
+                </span>
+              </div>
+            )}
+        </div>
+
+        {(showActions || enEspera) && (
+          <div className="flex flex-col gap-2 flex-shrink-0">
+            {showActions && (
+              <button
+                data-testid="accept-button"
+                onClick={() => onAccept?.(invitation.id)}
+                disabled={isProcessing}
+                className="px-3 py-1.5 text-xs font-medium text-sobre-contraste bg-exito rounded-boton disabled:opacity-50 disabled:cursor-not-allowed transition-opacity hover:opacity-90"
+              >
+                {isProcessing ? t('actions.accepting') : t('actions.accept')}
+              </button>
+            )}
+            <button
+              data-testid="decline-button"
+              onClick={() => onDecline?.(invitation.id)}
+              disabled={isProcessing}
+              className="px-3 py-1.5 text-xs font-medium text-error border border-error bg-fondo rounded-boton transition-[filter] hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isProcessing ? t('actions.declining') : t('actions.decline')}
+            </button>
+          </div>
+        )}
+
+        {sePuedeRetirar && (
+          <button
+            type="button"
+            data-testid="withdraw-button"
+            onClick={() => onWithdraw(invitation)}
+            disabled={isProcessing}
+            className="flex-shrink-0 px-3 py-1.5 text-xs font-medium text-error border border-error bg-fondo rounded-boton transition-[filter] hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {t('actions.withdraw')}
+          </button>
+        )}
+
+        {/* Volver a invitar (release social 2): la página decide a cuáles */}
+        {mode === 'creator' && onReinvite && (
+          <button
+            type="button"
+            data-testid="reinvite-button"
+            onClick={() => onReinvite(invitation)}
+            disabled={isProcessing}
+            aria-label={t('actions.reinviteAria', {
+              name: quienEsElInvitado(invitation, t),
+            })}
+            className={`flex-shrink-0 min-h-11 px-3 py-1.5 text-xs font-medium text-tinta border border-borde bg-fondo rounded-boton disabled:opacity-50 disabled:cursor-not-allowed ${AL_PASAR}`}
+          >
+            {t('actions.reinvite')}
+          </button>
+        )}
+
+        {enlazaACompeticion && (
+          <ChevronRight
+            data-testid="abre-competicion"
+            aria-hidden="true"
+            className="h-5 w-5 flex-shrink-0 self-center text-tinta-suave"
+          />
+        )}
+      </div>
+    </Contenedor>
+  );
+};
+
+export default InvitationCard;

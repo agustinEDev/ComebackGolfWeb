@@ -1,0 +1,120 @@
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import InvitationBadge from './InvitationBadge';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key) => key,
+    i18n: { language: 'en' },
+  }),
+}));
+
+describe('InvitationBadge', () => {
+  it('should render with PENDING status', () => {
+    render(<InvitationBadge status="PENDING" />);
+    const badge = screen.getByTestId('invitation-badge');
+    expect(badge).toHaveTextContent('status.PENDING');
+    expect(badge.className).toContain('text-aviso');
+  });
+
+  it('should render with ACCEPTED status', () => {
+    render(<InvitationBadge status="ACCEPTED" />);
+    const badge = screen.getByTestId('invitation-badge');
+    expect(badge.className).toContain('text-exito');
+  });
+
+  it('should render with DECLINED status', () => {
+    render(<InvitationBadge status="DECLINED" />);
+    const badge = screen.getByTestId('invitation-badge');
+    expect(badge.className).toContain('text-error');
+  });
+
+  it('should render with EXPIRED status', () => {
+    render(<InvitationBadge status="EXPIRED" />);
+    const badge = screen.getByTestId('invitation-badge');
+    expect(badge.className.split(' ')).toContain('text-tinta-suave');
+  });
+
+  it('A3: sin plaza tiene su texto y su color, no el gris de un estado desconocido (#710)', () => {
+    render(<InvitationBadge status="NO_ROOM" />);
+    const etiqueta = screen.getByTestId('invitation-badge');
+    expect(etiqueta).toHaveTextContent('status.NO_ROOM');
+    expect(etiqueta.className).toContain('text-aviso');
+  });
+
+  it('A3b: las dos traducciones existen', async () => {
+    for (const idioma of ['es', 'en']) {
+      const textos = (
+        await import(`../../i18n/locales/${idioma}/invitations.json`)
+      ).default;
+      expect(textos.status.NO_ROOM, idioma).toBeTruthy();
+      expect(textos.creator.enrollmentClosed, idioma).toBeTruthy();
+    }
+  });
+});
+
+describe('InvitationBadge · en lista de espera (15 nov 2026)', () => {
+  it('tiene su texto y su color, en los dos idiomas', async () => {
+    render(<InvitationBadge status="ON_HOLD" />);
+    const etiqueta = screen.getByTestId('invitation-badge');
+    expect(etiqueta).toHaveTextContent('status.ON_HOLD');
+    expect(etiqueta.className).not.toContain('text-tinta-suave');
+    for (const idioma of ['es', 'en']) {
+      const textos = (
+        await import(`../../i18n/locales/${idioma}/invitations.json`)
+      ).default;
+      expect(textos.status.ON_HOLD, idioma).toBeTruthy();
+      expect(textos.card.onHold, idioma).toBeTruthy();
+      expect(textos.errors.onHold, idioma).toBeTruthy();
+      expect(textos.errors.draftInProgress, idioma).toBeTruthy();
+    }
+  });
+});
+
+describe('InvitationBadge · retirada (FE #724)', () => {
+  it('tiene su texto y su color', () => {
+    render(<InvitationBadge status="CANCELLED" />);
+    const etiqueta = screen.getByTestId('invitation-badge');
+    expect(etiqueta).toHaveTextContent('status.CANCELLED');
+    expect(etiqueta.className.split(' ')).toContain('text-tinta');
+  });
+
+  it('las dos traducciones existen', async () => {
+    for (const idioma of ['es', 'en']) {
+      const textos = (
+        await import(`../../i18n/locales/${idioma}/invitations.json`)
+      ).default;
+      expect(textos.status.CANCELLED, idioma).toBeTruthy();
+      expect(textos.actions.withdraw, idioma).toBeTruthy();
+      expect(textos.creator.withdrawDialog.title, idioma).toBeTruthy();
+      expect(textos.creator.withdrawDialog.body, idioma).toBeTruthy();
+      expect(textos.creator.withdrawDialog.confirm, idioma).toBeTruthy();
+      expect(textos.creator.withdrawDialog.keep, idioma).toBeTruthy();
+      expect(textos.creator.competitionFull_other, idioma).toBeTruthy();
+      expect(textos.success.withdrawn, idioma).toBeTruthy();
+      expect(textos.errors.notPendingAnymore, idioma).toBeTruthy();
+      expect(textos.errors.competitionFull, idioma).toBeTruthy();
+    }
+  });
+
+  // Probado en el Kind (5 oct): «sin plaza» decía «al cerrarse la inscripción»
+  // también cuando lo que pasó es que se llenó. Vale para los dos casos
+  it('«sin plaza» no da por hecho que se cerrara la inscripción', async () => {
+    for (const idioma of ['es', 'en']) {
+      const textos = (
+        await import(`../../i18n/locales/${idioma}/invitations.json`)
+      ).default;
+      expect(textos.errors.noRoom, idioma).not.toMatch(/cerr|clos/i);
+    }
+  });
+
+  it('el freno por hora tiene sus textos con el número, en los dos idiomas', async () => {
+    for (const idioma of ['es', 'en']) {
+      const textos = (
+        await import(`../../i18n/locales/${idioma}/invitations.json`)
+      ).default;
+      expect(textos.errors.rateLimited_one, idioma).toContain('{{count}}');
+      expect(textos.errors.rateLimited_other, idioma).toContain('{{count}}');
+    }
+  });
+});

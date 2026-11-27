@@ -1,0 +1,227 @@
+// src/domain/repositories/IScheduleRepository.js
+
+/**
+ * Interfaz del repositorio de Schedule (Rondas, Partidos y Equipos).
+ *
+ * Responsabilidad: Define las operaciones de persistencia para la gestion
+ * de rondas, partidos y equipos de una competicion.
+ *
+ * Principio de Inversion de Dependencia: El dominio define el contrato,
+ * la infraestructura lo implementa (ApiScheduleRepository).
+ *
+ * Implementaciones esperadas:
+ * - ApiScheduleRepository: REST API real
+ * - MockScheduleRepository: Para tests
+ */
+
+class IScheduleRepository {
+  /**
+   * Obtiene el schedule completo de una competicion.
+   * @param {string} competitionId
+   * @returns {Promise<Object>} Schedule DTO con rondas y partidos
+   * @throws {Error} Si falla la operacion
+   */
+  async getSchedule(competitionId) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * Configura el schedule de una competicion.
+   * @param {string} competitionId
+   * @param {Object} config - Configuracion del schedule
+   * @returns {Promise<Object>} Resultado de la configuracion
+   * @throws {Error} Si falla la operacion
+   */
+  async configureSchedule(competitionId, config) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * Asigna equipos a una competicion.
+   * @param {string} competitionId
+   * @param {Object} teamData - Datos de asignacion de equipos
+   * @returns {Promise<Object>} TeamAssignment DTO
+   * @throws {Error} Si falla la operacion
+   */
+  async assignTeams(competitionId, teamData) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * Deshace los equipos formados (30 oct 2026).
+   * @param {string} competitionId
+   * @returns {Promise<void>}
+   * @throws {Error} Con `errorCode` NO_TEAMS o TEAMS_LOCKED si no se puede
+   */
+  async undoTeams(competitionId) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * Crea una ronda para una competicion.
+   * @param {string} competitionId
+   * @param {Object} roundData - Datos de la ronda
+   * @param {string} roundData.golf_course_id
+   * @param {string} roundData.date
+   * @param {string} roundData.session_type - MORNING | AFTERNOON | EVENING
+   * @param {string} roundData.match_format - SINGLES | FOURBALL | FOURSOMES
+   * @param {string} [roundData.handicap_mode] - MATCH_PLAY
+   * @param {number} [roundData.allowance_percentage]
+   * @returns {Promise<Object>} Round DTO
+   * @throws {Error} Si falla la operacion
+   */
+  async createRound(competitionId, roundData) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * Actualiza una ronda existente.
+   * @param {string} roundId
+   * @param {Object} roundData - Datos actualizados
+   * @returns {Promise<Object>} Round DTO actualizado
+   * @throws {Error} Si falla la operacion
+   */
+  async updateRound(roundId, roundData) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * Elimina una ronda.
+   * @param {string} roundId
+   * @returns {Promise<void>}
+   * @throws {Error} Si falla la operacion
+   */
+  async deleteRound(roundId) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * Genera partidos para una ronda.
+   * @param {string} roundId
+   * @param {Object} pairings - Emparejamientos opcionales
+   * @returns {Promise<Object>} Resultado de generacion de partidos
+   * @throws {Error & {errorCode?: ?string, bloqueo?: ?{reason: string, players: Array}}}
+   *   Si falla la operacion. Con `errorCode` `MATCH_GENERATION_BLOCKED`, lleva
+   *   en `bloqueo` el motivo de la respuesta, o null si no lo trajo
+   */
+  async generateMatches(roundId, pairings) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * Obtiene detalle de un partido.
+   * @param {string} matchId
+   * @returns {Promise<Object>} Match DTO
+   * @throws {Error} Si falla la operacion
+   */
+  async getMatchDetail(matchId) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * Actualiza el estado de un partido.
+   * @param {string} matchId
+   * @param {string} action - Accion a realizar (start, complete, etc.)
+   * @param {Object} [result] - Resultado del partido (para complete)
+   * @returns {Promise<Object>} Resultado de la actualizacion
+   * @throws {Error} Si falla la operacion
+   */
+  async updateMatchStatus(matchId, action, result) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * Declara walkover para un partido.
+   * @param {string} matchId
+   * @param {string} winningTeam - 'A' o 'B'
+   * @param {string} reason - Motivo del walkover
+   * @returns {Promise<Object>} Resultado del walkover
+   * @throws {Error} Si falla la operacion
+   */
+  async declareWalkover(matchId, winningTeam, reason) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * Reasigna jugadores de un partido.
+   * @param {string} matchId
+   * @param {string[]} teamAIds - IDs de jugadores equipo A
+   * @param {string[]} teamBIds - IDs de jugadores equipo B
+   * @returns {Promise<Object>} Resultado de la reasignacion
+   * @throws {Error} Si falla la operacion
+   */
+  async reassignPlayers(matchId, teamAIds, teamBIds) {
+    throw new Error('Method not implemented');
+  }
+
+  // Plazas y esperas en las franjas de stroke play (FE #824)
+  async takePlace(roundId, opciones) {
+    throw new Error('IScheduleRepository.takePlace must be implemented');
+  }
+
+  async releasePlace(roundId, userId) {
+    throw new Error('IScheduleRepository.releasePlace must be implemented');
+  }
+
+  async joinWaitingList(roundId) {
+    throw new Error('IScheduleRepository.joinWaitingList must be implemented');
+  }
+
+  async leaveWaitingList(roundId, userId) {
+    throw new Error('IScheduleRepository.leaveWaitingList must be implemented');
+  }
+
+  async getMyAssignedPlaces() {
+    throw new Error(
+      'IScheduleRepository.getMyAssignedPlaces must be implemented',
+    );
+  }
+
+  async acknowledgeAssignedPlace(roundId) {
+    throw new Error(
+      'IScheduleRepository.acknowledgeAssignedPlace must be implemented',
+    );
+  }
+
+  // Partidas de las franjas de stroke play (FE #824, PR 6)
+  /** @returns {Promise<Object>} Las partidas de la franja, como quedan */
+  async getTeeGroups(roundId) {
+    throw new Error('IScheduleRepository.getTeeGroups must be implemented');
+  }
+
+  async getMyTeeGroups(competitionId) {
+    throw new Error('IScheduleRepository.getMyTeeGroups must be implemented');
+  }
+
+  /** @returns {Promise<Object>} Las partidas de la franja, como quedan */
+  async generateTeeGroups(roundId, order) {
+    throw new Error(
+      'IScheduleRepository.generateTeeGroups must be implemented',
+    );
+  }
+
+  /** @returns {Promise<Object>} Las partidas de la franja, como quedan */
+  async moveTeeGroupPlayer(roundId, movimiento) {
+    throw new Error(
+      'IScheduleRepository.moveTeeGroupPlayer must be implemented',
+    );
+  }
+
+  /** @returns {Promise<Object>} Las partidas de la franja, como quedan */
+  async reorderTeeGroups(roundId, groupIds) {
+    throw new Error('IScheduleRepository.reorderTeeGroups must be implemented');
+  }
+
+  /** @returns {Promise<Object>} Las partidas de la franja, como quedan */
+  async setTeeGroupMarkers(groupId, markers) {
+    throw new Error(
+      'IScheduleRepository.setTeeGroupMarkers must be implemented',
+    );
+  }
+
+  async deleteTeeGroups(roundId) {
+    throw new Error('IScheduleRepository.deleteTeeGroups must be implemented');
+  }
+}
+
+export default IScheduleRepository;

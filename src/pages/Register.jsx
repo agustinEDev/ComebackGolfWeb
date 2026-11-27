@@ -1,0 +1,689 @@
+import { Handshake, Scale, Smartphone, Zap } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Link, useNavigate } from 'react-router';
+import { motion } from 'framer-motion';
+import customToast from '../utils/toast';
+import { useTranslation } from 'react-i18next';
+import {
+  passwordErrorMessage,
+  validateEmail,
+  validateName,
+  validatePassword,
+} from '../utils/validation';
+import PasswordInput from '../components/ui/PasswordInput';
+import PasswordRequirements from '../components/ui/PasswordRequirements';
+import PasswordStrengthMeter from '../components/ui/PasswordStrengthMeter';
+import { registerUseCase, fetchCountriesUseCase } from '../composition';
+import GoogleSignInButton from '../components/ui/GoogleSignInButton';
+import CountryAutocomplete from '../components/ui/CountryAutocomplete';
+import FullScreenLoader from '../components/ui/FullScreenLoader';
+import { useRedirectIfAuthenticated } from '../hooks/useRedirectIfAuthenticated';
+import MarcoDeAcceso from '../components/auth/MarcoDeAcceso';
+import AceptacionDeTerminos from '../components/auth/AceptacionDeTerminos';
+import { mensajeDelError } from '../utils/mensajeDelError';
+import { registraElFallo } from '../utils/registraElFallo';
+import { Gender } from '../domain/value_objects/Gender';
+import {
+  BOTON_PRINCIPAL,
+  TARJETA_DE_ACCESO,
+} from '../components/auth/clasesDeAcceso';
+
+const Register = () => {
+  const { t } = useTranslation(['auth', 'common']);
+  const navigate = useNavigate();
+  const isCheckingSession = useRedirectIfAuthenticated();
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    countryCode: '', // Campo opcional para nacionalidad
+    gender: '', // Campo opcional para género
+  });
+  const [errors, setErrors] = useState({});
+  // Los Términos se aceptan con un gesto expreso, y con ellos la edad mínima
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [countries, setCountries] = useState([]);
+  const [isLoadingCountries, setIsLoadingCountries] = useState(false);
+
+  // Ref para cleanup del timer de navegación (prevenir memory leak)
+  const navigationTimerRef = useRef(null);
+
+  /**
+   * Cleanup: limpiar timer de navegación al desmontar
+   * Previene memory leak si el componente se desmonta antes de que se ejecute setTimeout
+   */
+  useEffect(() => {
+    return () => {
+      if (navigationTimerRef.current) {
+        clearTimeout(navigationTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Cargar lista de países al montar el componente
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadCountries = async () => {
+      setIsLoadingCountries(true);
+      try {
+        const data = await fetchCountriesUseCase.execute();
+        if (controller.signal.aborted) return;
+        const validCountries = Array.isArray(data)
+          ? data
+              .filter((c) => c?.code && (c?.name_en || c?.name_es))
+              .map((c) => ({
+                code: c.code,
+                name: c.name_en || c.name_es,
+                name_en: c.name_en,
+                name_es: c.name_es,
+              }))
+          : [];
+        setCountries(validCountries);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        registraElFallo(
+          'Register.error-loading-countries',
+          'Error loading countries:',
+          error,
+        );
+        setCountries([]);
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoadingCountries(false);
+        }
+      }
+    };
+
+    loadCountries();
+    return () => controller.abort();
+  }, []);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+    if (errors[name]) {
+      setErrors((prev) => ({ ...prev, [name]: '' }));
+    }
+  };
+
+  const validateForm = () => {
+    const newErrors = {};
+
+    const firstNameValidation = validateName(formData.firstName, 'First name');
+    if (!firstNameValidation.isValid) {
+      newErrors.firstName = t(
+        firstNameValidation.messageKey,
+        firstNameValidation.messageOptions,
+      );
+    }
+
+    const lastNameValidation = validateName(formData.lastName, 'Last name');
+    if (!lastNameValidation.isValid) {
+      newErrors.lastName = t(
+        lastNameValidation.messageKey,
+        lastNameValidation.messageOptions,
+      );
+    }
+
+    const emailValidation = validateEmail(formData.email);
+    if (!emailValidation.isValid) {
+      newErrors.email = t(
+        emailValidation.messageKey,
+        emailValidation.messageOptions,
+      );
+    }
+
+    const passwordValidation = validatePassword(formData.password);
+    if (!passwordValidation.isValid) {
+      newErrors.password = t(
+        passwordValidation.messageKey,
+        passwordValidation.messageOptions,
+      );
+    }
+
+    if (!formData.confirmPassword) {
+      newErrors.confirmPassword = t('validation.confirmPasswordRequired');
+    } else if (formData.password !== formData.confirmPassword) {
+      newErrors.confirmPassword = t('validation.passwordsDoNotMatch');
+    }
+
+    if (!acceptedTerms) {
+      newErrors.acceptTerms = t('register.acceptTermsRequired');
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleAcceptTermsChange = (marcada) => {
+    setAcceptedTerms(marcada);
+    if (marcada && errors.acceptTerms) {
+      setErrors((prev) => ({ ...prev, acceptTerms: '' }));
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!validateForm()) {
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      await registerUseCase.execute({
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        password: formData.password,
+        countryCode: formData.countryCode || null, // Enviar countryCode si existe, sino null
+        gender: formData.gender || null, // Enviar gender si existe, sino null
+        // La casilla ya es obligatoria en `validateForm`: aquí solo viaja
+        acceptTerms: acceptedTerms,
+      });
+
+      customToast.success(t('register.success'));
+
+      // Guardar timer ID para cleanup (prevenir memory leak)
+      navigationTimerRef.current = setTimeout(() => {
+        navigate('/login', {
+          state: {
+            message: t('register.successMessage'),
+          },
+        });
+      }, 1000);
+    } catch (error) {
+      // El backend dice por qué rechaza la contraseña con un código (BE #519):
+      // su texto va en español, así que se dice con la clave del idioma de la app
+      customToast.error(
+        passwordErrorMessage(error, t) ||
+          mensajeDelError(error, t('register.error')),
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Ver Login.jsx: con sesión por confirmar no se pinta el formulario (FE #305)
+  if (isCheckingSession) {
+    return <FullScreenLoader />;
+  }
+
+  return (
+    <MarcoDeAcceso
+      titulo={t('register.heroTitle')}
+      subtitulo={t('register.heroSubtitle')}
+      ventajas={[
+        { Icono: Zap, text: t('register.benefits.quickSetup') },
+        { Icono: Scale, text: t('register.benefits.fairHandicap') },
+        { Icono: Smartphone, text: t('register.benefits.mobileFriendly') },
+        { Icono: Handshake, text: t('register.benefits.friendships') },
+      ]}
+      extraDelHeroe={
+        /* Stats */
+        <div className="grid grid-cols-3 gap-6 pt-8 mt-8 border-t border-sand/20">
+          <div>
+            <div className="text-2xl font-bold font-poppins">
+              {t('register.stats.free')}
+            </div>
+            <div className="text-sm text-sand/60 mt-1">
+              {t('register.stats.freeDetail')}
+            </div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold font-poppins">
+              {t('register.stats.handicap')}
+            </div>
+            <div className="text-sm text-sand/60 mt-1">
+              {t('register.stats.handicapDetail')}
+            </div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold font-poppins">
+              {t('register.stats.noAds')}
+            </div>
+            <div className="text-sm text-sand/60 mt-1">
+              {t('register.stats.noAdsDetail')}
+            </div>
+          </div>
+        </div>
+      }
+      textoDeVolver={t('register.backToHome')}
+    >
+      {/* Form Card */}
+      <div className={TARJETA_DE_ACCESO}>
+        {/* Header */}
+        <div className="mb-8">
+          <h2 className="text-3xl font-black text-gray-900 font-poppins mb-2">
+            {t('register.title')}
+          </h2>
+          <p className="text-gray-600">{t('register.subtitle')}</p>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* 1. Name Fields - Side by Side */}
+          <div className="grid grid-cols-2 gap-4">
+            {/* First Name */}
+            <div>
+              <label
+                htmlFor="firstName"
+                className="block text-sm font-semibold text-gray-700 mb-2"
+              >
+                {t('register.firstNameLabel')}
+              </label>
+              <input
+                id="firstName"
+                type="text"
+                name="firstName"
+                placeholder={t('register.firstNamePlaceholder')}
+                value={formData.firstName}
+                onChange={handleChange}
+                maxLength={100}
+                className={`w-full px-4 py-3 rounded-lg border-2 transition-all duration-200 ${
+                  errors.firstName
+                    ? 'border-red-300 focus:border-red-500 focus:ring-2 focus:ring-red-200'
+                    : 'border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20'
+                } outline-none text-gray-900 placeholder:text-tinta-suave`}
+                disabled={isLoading}
+              />
+              {errors.firstName && (
+                <motion.p
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-red-500 text-xs mt-2 flex items-center gap-1"
+                >
+                  <svg
+                    className="w-3 h-3 flex-shrink-0"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  {errors.firstName}
+                </motion.p>
+              )}
+            </div>
+
+            {/* Last Name */}
+            <div>
+              <label
+                htmlFor="lastName"
+                className="block text-sm font-semibold text-gray-700 mb-2"
+              >
+                {t('register.lastNameLabel')}
+              </label>
+              <input
+                id="lastName"
+                type="text"
+                name="lastName"
+                placeholder={t('register.lastNamePlaceholder')}
+                value={formData.lastName}
+                onChange={handleChange}
+                maxLength={100}
+                className={`w-full px-4 py-3 rounded-lg border-2 transition-all duration-200 ${
+                  errors.lastName
+                    ? 'border-red-300 focus:border-red-500 focus:ring-2 focus:ring-red-200'
+                    : 'border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20'
+                } outline-none text-gray-900 placeholder:text-tinta-suave`}
+                disabled={isLoading}
+              />
+              {errors.lastName && (
+                <motion.p
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-red-500 text-xs mt-2 flex items-center gap-1"
+                >
+                  <svg
+                    className="w-3 h-3 flex-shrink-0"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  {errors.lastName}
+                </motion.p>
+              )}
+            </div>
+          </div>
+
+          {/* 2. Gender (Optional) */}
+          <div>
+            <label
+              htmlFor="gender"
+              className="block text-sm font-semibold text-gray-700 mb-2"
+            >
+              {t('register.genderLabel')}{' '}
+              <span className="text-tinta-suave font-normal">
+                {t('register.genderOptional')}
+              </span>
+            </label>
+            <div className="relative">
+              <select
+                id="gender"
+                name="gender"
+                value={formData.gender}
+                onChange={handleChange}
+                className="w-full px-4 py-3 rounded-lg border-2 border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none text-gray-900 bg-white disabled:bg-gray-50 disabled:cursor-not-allowed appearance-none pr-10"
+                disabled={isLoading}
+              >
+                <option value="">{t('register.genderPlaceholder')}</option>
+                <option value={Gender.MALE}>
+                  {t('register.genderOptions.MALE')}
+                </option>
+                <option value={Gender.FEMALE}>
+                  {t('register.genderOptions.FEMALE')}
+                </option>
+              </select>
+              <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                <svg
+                  className="w-5 h-5 text-tinta-suave"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fillRule="evenodd"
+                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {t('register.genderHint')}
+            </p>
+          </div>
+
+          {/* 3. Email */}
+          <div>
+            <label
+              htmlFor="email"
+              className="block text-sm font-semibold text-gray-700 mb-2"
+            >
+              {t('register.emailLabel')}
+            </label>
+            <input
+              id="email"
+              type="email"
+              name="email"
+              placeholder={t('register.emailPlaceholder')}
+              value={formData.email}
+              onChange={handleChange}
+              maxLength={254}
+              className={`w-full px-4 py-3 rounded-lg border-2 transition-all duration-200 ${
+                errors.email
+                  ? 'border-red-300 focus:border-red-500 focus:ring-2 focus:ring-red-200'
+                  : 'border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20'
+              } outline-none text-gray-900 placeholder:text-tinta-suave`}
+              disabled={isLoading}
+            />
+            {errors.email && (
+              <motion.p
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-red-500 text-xs mt-2 flex items-center gap-1"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                {errors.email}
+              </motion.p>
+            )}
+          </div>
+
+          {/* 4. Nationality (Optional) */}
+          <div>
+            {/* Se le pasa un evento sintético en vez de tocar el estado
+                directamente: handleChange es el que además limpia el
+                error del campo, y saltárselo dejaría el aviso colgado */}
+            <CountryAutocomplete
+              id="countryCode"
+              countries={countries}
+              /* La etiqueta va dentro del componente, no como <label
+                 htmlFor> externo: el disparador es un <button>, que es
+                 etiquetable, y el <label> nativo gana a name-from-content,
+                 así que un lector de pantalla decía "Nacionalidad" y nunca
+                 el país elegido. El <select> anterior decía los dos */
+              label={
+                <>
+                  {t('register.countryLabel')}{' '}
+                  <span className="text-tinta-suave font-normal">
+                    {t('register.countryOptional')}
+                  </span>
+                </>
+              }
+              labelClassName="block text-sm font-semibold text-gray-700 mb-2"
+              value={formData.countryCode}
+              placeholder={t('register.countryPlaceholder')}
+              disabled={isLoading || isLoadingCountries}
+              onChange={(code) =>
+                handleChange({
+                  target: { name: 'countryCode', value: code },
+                })
+              }
+            />
+            <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fillRule="evenodd"
+                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {t('register.countryHint')}
+            </p>
+          </div>
+
+          {/* 5. Password */}
+          <div>
+            <label
+              htmlFor="password"
+              className="block text-sm font-semibold text-gray-700 mb-2"
+            >
+              {t('register.passwordLabel')}
+            </label>
+            <PasswordInput
+              name="password"
+              value={formData.password}
+              onChange={handleChange}
+              placeholder={t('register.passwordPlaceholder')}
+              error={!!errors.password}
+              disabled={isLoading}
+              label=""
+              autoComplete="new-password"
+              className={`w-full px-4 py-3 rounded-lg border-2 transition-all duration-200 ${
+                errors.password
+                  ? 'border-red-300 focus:border-red-500 focus:ring-2 focus:ring-red-200'
+                  : 'border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20'
+              } outline-none`}
+            />
+            {errors.password && (
+              <motion.p
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-red-500 text-xs mt-2 flex items-center gap-1"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                {errors.password}
+              </motion.p>
+            )}
+            {/* Password Requirements */}
+            <PasswordRequirements password={formData.password} />
+            {/* Password Strength Meter */}
+            <PasswordStrengthMeter password={formData.password} />
+          </div>
+
+          {/* 6. Confirm Password */}
+          <div>
+            <label
+              htmlFor="confirmPassword"
+              className="block text-sm font-semibold text-gray-700 mb-2"
+            >
+              {t('register.confirmPasswordLabel')}
+            </label>
+            <PasswordInput
+              name="confirmPassword"
+              value={formData.confirmPassword}
+              onChange={handleChange}
+              placeholder={t('register.confirmPasswordPlaceholder')}
+              error={!!errors.confirmPassword}
+              disabled={isLoading}
+              label=""
+              autoComplete="new-password"
+              className={`w-full px-4 py-3 rounded-lg border-2 transition-all duration-200 ${
+                errors.confirmPassword
+                  ? 'border-red-300 focus:border-red-500 focus:ring-2 focus:ring-red-200'
+                  : 'border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20'
+              } outline-none`}
+            />
+            {errors.confirmPassword && (
+              <motion.p
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-red-500 text-xs mt-2 flex items-center gap-1"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                {errors.confirmPassword}
+              </motion.p>
+            )}
+          </div>
+
+          {/* Términos y edad mínima; la privacidad, solo informada */}
+          <AceptacionDeTerminos
+            id="acceptTerms"
+            checked={acceptedTerms}
+            onChange={handleAcceptTermsChange}
+            error={errors.acceptTerms}
+            disabled={isLoading}
+          />
+
+          {/* Submit Button */}
+          <motion.button
+            type="submit"
+            disabled={isLoading}
+            whileHover={{ scale: isLoading ? 1 : 1.02 }}
+            whileTap={{ scale: isLoading ? 1 : 0.98 }}
+            className={BOTON_PRINCIPAL}
+          >
+            {isLoading ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg
+                  className="animate-spin h-5 w-5"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  ></circle>
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  ></path>
+                </svg>
+                {t('register.creatingAccount')}
+              </span>
+            ) : (
+              t('register.createAccountButton')
+            )}
+          </motion.button>
+        </form>
+
+        {/* Divider */}
+        <div className="relative my-6">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-200"></div>
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="px-4 bg-tarjeta text-tinta-suave">
+              {t('google.orDivider', { ns: 'auth' })}
+            </span>
+          </div>
+        </div>
+
+        {/* Google Sign Up. Sin la casilla de arriba a propósito: este botón
+            también entra con cuentas que ya existen, y los usuarios nuevos
+            de Google aceptan los Términos en /auth/complete-profile */}
+        <GoogleSignInButton
+          flow="login"
+          label={t('google.signUpWithGoogle', { ns: 'auth' })}
+          disabled={isLoading}
+        />
+
+        {/* Login Link */}
+        <div className="text-center mt-6">
+          <p className="text-gray-600 text-sm">
+            {t('register.alreadyHaveAccount')}{' '}
+            <Link
+              to="/login"
+              className="font-semibold text-primary hover:text-primary-600 transition-colors"
+            >
+              {t('register.signInLink')}
+            </Link>
+          </p>
+        </div>
+      </div>
+    </MarcoDeAcceso>
+  );
+};
+
+export default Register;

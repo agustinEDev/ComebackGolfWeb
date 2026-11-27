@@ -1,0 +1,375 @@
+import { useState } from 'react';
+import { useNavigate, useParams } from 'react-router';
+import { useTranslation } from 'react-i18next';
+import { ArrowLeft, Bot, Timer, Trophy } from 'lucide-react';
+import HeaderAuth from '../components/layout/HeaderAuth';
+import FullScreenLoader from '../components/ui/FullScreenLoader';
+import BlockLoader from '../components/ui/BlockLoader';
+import { useAuth } from '../hooks/useAuth';
+import useDraftRoom from '../hooks/useDraftRoom';
+import { useCargaCancelableEffect } from '../hooks/useCargaCancelableEffect';
+import { getCompetitionDetailUseCase } from '../composition';
+import { formatoDeIndice } from '../utils/formatoDeHandicap';
+import { PANTALLA_MENOS_BARRA_INFERIOR } from '../utils/barraInferior';
+import { DraftStatus } from '../domain/value_objects/DraftStatus';
+import { Team } from '../domain/value_objects/Team';
+
+/**
+ * La sala de draft en directo (FE #653).
+ *
+ * La ve el grupo entero, no solo los dos capitanes: esa es la gracia. La
+ * pantalla dice tres cosas distintas según quién mire —al de turno, «te toca»
+ * con su minuto; al otro capitán y a los espectadores, de quién es el turno—
+ * y solo ofrece elegir a quien de verdad puede, que un botón que el servidor
+ * va a rechazar con un 409 es peor que no tenerlo.
+ *
+ * Lo que eligió la aplicación al agotarse un minuto se marca: al capitán que
+ * vuelve de quedarse sin cobertura le tiene que quedar claro por qué tiene a
+ * ese jugador y no a otro.
+ */
+const mmss = (segundos) =>
+  `${Math.floor(segundos / 60)}:${String(segundos % 60).padStart(2, '0')}`;
+
+// El turno perdido lo cuenta el hook, que sabe cómo quedó la sala al perderlo
+const TURNO_PERDIDO = {
+  turnoPerdido: 'draft.turnLost',
+  turnoPerdidoYTerminado: 'draft.turnLostDraftOver',
+};
+
+const DraftRoomPage = () => {
+  const navigate = useNavigate();
+  const { id } = useParams();
+  const { t } = useTranslation('competitions');
+  const { user } = useAuth();
+  // La ficha con la competición de la que es: al pasar a otra sin salir, la
+  // de la anterior (sus equipos y quién organiza, que enseña «Lanzar sorteo»)
+  // no se queda mientras llega la nueva
+  const [ficha, setFicha] = useState({ id: null, datos: null });
+  const competition = ficha.id === id ? ficha.datos : null;
+  const [eligiendo, setEligiendo] = useState(null);
+
+  const {
+    sala,
+    cargando,
+    cargandoSala,
+    error,
+    segundosRestantes,
+    esMiTurno,
+    abrirSala,
+    elegir,
+  } = useDraftRoom(id, user?.id);
+  // Propias y no heredadas: un mensaje de error como «toString» no es un aviso
+  const avisoDeTurno = Object.hasOwn(TURNO_PERDIDO, error ?? '')
+    ? TURNO_PERDIDO[error]
+    : null;
+
+  // La ficha, solo para los nombres de los equipos y saber quién organiza. No
+  // se espera por ella. Si cambia la competición sin salir, la de la anterior
+  // que llega tarde ya no se pinta: traía sus equipos y su «Lanzar sorteo».
+  // Sin `t` en las dependencias: cambiar de idioma no la vuelve a pedir
+  useCargaCancelableEffect(
+    () => getCompetitionDetailUseCase.execute(id),
+    [id],
+    {
+      alCargar: (datos) => setFicha({ id, datos }),
+      // La sala se pinta igual sin la ficha: solo se pierden los nombres de
+      // los equipos, que caen a «Equipo A» y «Equipo B»
+      alFallar: () => setFicha({ id, datos: null }),
+    },
+  );
+
+  // Lo que enseñe la ficha, que es lo que la gente ve en el resto de la app.
+  // La letra solo cuando NO hay ficha: si la hay, sus nombres nunca faltan
+  // —el mapper de competiciones ya rellena los que vengan vacíos—
+  const nombreDe = (equipo) =>
+    competition
+      ? equipo === Team.A
+        ? competition.team1Name
+        : competition.team2Name
+      : t(`draft.team${equipo}`);
+
+  const capitanDe = (equipo) =>
+    equipo === Team.A ? sala?.teamACaptainName : sala?.teamBCaptainName;
+
+  const elegidosDe = (equipo) =>
+    (sala?.picks || []).filter((pick) => pick.team === equipo);
+
+  // Por hándicap, de menor a mayor, que es como se elige; sin él, al final
+  // (#710). El mapper ya lo deja en número o null
+  const hcp = (jugador) => jugador.handicap ?? Infinity;
+  const porElegir = [...(sala?.availablePlayers || [])].sort(
+    (a, b) => hcp(a) - hcp(b),
+  );
+
+  const organiza = Boolean(user?.id) && competition?.creatorId === user.id;
+
+  // El equipo que capitanea quien mira, y el último que entró solo en él (#723)
+  const capitaneo =
+    user?.id && sala?.teamACaptainId === user.id
+      ? Team.A
+      : user?.id && sala?.teamBCaptainId === user.id
+        ? Team.B
+        : null;
+  const ultimoParaMi = (sala?.picks || []).find(
+    (pick) => pick.lastRemaining && pick.team === capitaneo,
+  );
+
+  const alElegir = async (playerId) => {
+    setEligiendo(playerId);
+    try {
+      await elegir(playerId);
+    } finally {
+      setEligiendo(null);
+    }
+  };
+
+  if (cargando) return <FullScreenLoader />;
+
+  // Recién cambiada la competición sin salir, mientras llega su sala: la
+  // espera del bloque, y nada de la anterior que elegir ni lanzar
+  if (cargandoSala) {
+    return (
+      <div className={`${PANTALLA_MENOS_BARRA_INFERIOR} bg-fondo`}>
+        <HeaderAuth
+          user={user}
+          title={t('draft.title')}
+          backTo={`/competitions/${id}`}
+        />
+        <div className="mx-auto max-w-3xl px-4 py-6">
+          <BlockLoader />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`${PANTALLA_MENOS_BARRA_INFERIOR} bg-fondo`}>
+      {/* Con la sesión: sin ella la cabecera pintaba «?» y sin la insignia
+          de administrador (#710) */}
+      <HeaderAuth
+        user={user}
+        title={t('draft.title')}
+        backTo={`/competitions/${id}`}
+      />
+      <div className="mx-auto max-w-3xl px-4 py-6">
+        <button
+          type="button"
+          onClick={() => navigate(`/competitions/${id}`)}
+          className="mb-4 flex items-center gap-2 text-sm text-tinta-suave hover:text-tinta"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          {t('draft.back')}
+        </button>
+
+        {/* `hidden md:block`: en móvil el título lo pinta la cabecera
+            contextual, y un segundo encabezado de nivel 1 rompe la jerarquía
+            para un lector de pantalla. `hidden` sí lo saca del árbol de
+            accesibilidad, al contrario que una clase de solo-lectores */}
+        <h1 className="hidden md:block mb-1 text-2xl font-bold text-tinta">
+          {t('draft.title')}
+        </h1>
+        <p className="mb-6 text-sm text-tinta-suave">{competition?.name}</p>
+
+        {error && !avisoDeTurno && (
+          <p className="mb-4 rounded-lg border border-error bg-error-suave p-3 text-sm text-error">
+            {error}
+          </p>
+        )}
+        {avisoDeTurno && (
+          <p className="mb-4 rounded-lg border border-aviso bg-aviso-suave p-3 text-sm text-aviso">
+            {t(avisoDeTurno)}
+          </p>
+        )}
+
+        {!sala && (
+          <div className="rounded-tarjeta border border-contorno bg-tarjeta p-5 text-center">
+            <p
+              className="mb-4 text-sm text-tinta-suave"
+              data-testid="sin-sorteo"
+            >
+              {/* Quien lo lanza no lee «el organizador todavía no…» al lado
+                  de su propio botón (#710) */}
+              {t(organiza ? 'draft.notStartedYouLaunch' : 'draft.notStarted')}
+            </p>
+            {/* `user?.id &&` por delante: sin sesión hidratada y sin ficha,
+                los dos lados valían `undefined` y el botón salía para
+                cualquiera, para que el servidor lo rechazara con un 403 */}
+            {organiza && (
+              <button
+                type="button"
+                data-testid="lanzar-sorteo"
+                // El error ya se pinta desde el estado del hook; sin capturar
+                // aquí, además subía a Sentry como promesa rechazada
+                onClick={() => {
+                  abrirSala().catch(() => {});
+                }}
+                className="w-full rounded-boton bg-exito px-4 py-3 font-semibold text-sobre-contraste transition-opacity hover:opacity-90"
+              >
+                {t('draft.start')}
+              </button>
+            )}
+          </div>
+        )}
+
+        {sala && (
+          <div data-testid="sala-de-draft" className="space-y-4">
+            {sala.status === DraftStatus.IN_PROGRESS && (
+              <div
+                className={`rounded-tarjeta border p-4 ${
+                  esMiTurno
+                    ? 'border-exito bg-exito-suave'
+                    : 'border-linea bg-tarjeta'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  {esMiTurno ? (
+                    <span
+                      data-testid="mi-turno"
+                      className="font-semibold text-exito"
+                    >
+                      {t('draft.yourTurn')}
+                    </span>
+                  ) : (
+                    <span data-testid="turno-de" className="text-sm text-tinta">
+                      {t('draft.turnOf', { name: capitanDe(sala.currentTeam) })}
+                    </span>
+                  )}
+                  <span
+                    data-testid="contador"
+                    className={`flex items-center gap-1 font-mono text-lg font-bold ${
+                      // `null <= 10` es cierto: sin reloj no se pinta la
+                      // alarma, que daría por vencido un turno del que no se
+                      // sabe nada
+                      segundosRestantes !== null && segundosRestantes <= 10
+                        ? 'text-error'
+                        : 'text-tinta'
+                    }`}
+                  >
+                    <Timer className="h-4 w-4" />
+                    {mmss(segundosRestantes ?? 0)}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {sala.status === DraftStatus.COMPLETED && (
+              <div
+                data-testid="draft-terminado"
+                className="flex items-center gap-2 rounded-tarjeta border border-exito bg-exito-suave p-4 text-exito"
+              >
+                <Trophy className="h-5 w-5 shrink-0" />
+                <span className="font-semibold">{t('draft.finished')}</span>
+              </div>
+            )}
+
+            {/* Los dos equipos, uno al lado del otro también en el móvil: es lo
+                que la gente mira, y apilados obligaría a bajar para comparar */}
+            <div className="grid grid-cols-2 gap-3">
+              {[Team.A, Team.B].map((equipo) => (
+                <div
+                  key={equipo}
+                  data-testid={`equipo-${equipo}`}
+                  className={`rounded-tarjeta border bg-tarjeta p-3 ${
+                    sala.currentTeam === equipo
+                      ? 'border-exito'
+                      : 'border-linea'
+                  }`}
+                >
+                  {/* `min-w-0` para que el nombre largo pueda cortarse en vez de
+                      ensanchar la columna y sacar la fila de la pantalla */}
+                  <h2 className="mb-2 truncate text-sm font-bold text-tinta">
+                    {nombreDe(equipo)}
+                  </h2>
+                  <ul className="space-y-1 text-sm">
+                    {/* Los nombres se parten en líneas, pero por palabras: si
+                        el nombre y la insignia no caben juntos, la insignia
+                        baja a la línea siguiente en vez de estrechar el nombre
+                        hasta partirlo por mitad de palabra (#710; 26 nov 2026) */}
+                    <li className="flex min-w-0 flex-wrap items-baseline gap-x-1 gap-y-0.5">
+                      <span className="min-w-0 break-words font-semibold text-tinta">
+                        {capitanDe(equipo)}
+                      </span>
+                      <span className="shrink-0 rounded border border-linea px-1 text-xs text-tinta-suave">
+                        {t('draft.captain')}
+                      </span>
+                    </li>
+                    {elegidosDe(equipo).map((pick) => (
+                      <li
+                        key={pick.userId}
+                        className="flex min-w-0 items-start gap-1"
+                      >
+                        <span className="min-w-0 break-words text-tinta">
+                          {pick.name}
+                        </span>
+                        {pick.automatic && (
+                          <Bot
+                            data-testid={`automatica-${pick.userId}`}
+                            className="h-3.5 w-3.5 shrink-0 text-tinta-suave"
+                            aria-label={t('draft.pickedByTheApp')}
+                          />
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+
+            {/* El último entra solo, y solo lo lee el capitán que lo recibe: al
+                resto no le cuenta nada y la etiqueta cortaba el nombre (#723) */}
+            {ultimoParaMi && (
+              <p
+                data-testid="ultimo-incluido"
+                className="text-sm text-tinta-suave"
+              >
+                {t('draft.lastIncluded', { name: ultimoParaMi.name })}
+              </p>
+            )}
+
+            {sala.availablePlayers.length > 0 && (
+              <div className="rounded-tarjeta border border-contorno bg-tarjeta p-3">
+                <h2 className="mb-2 text-sm font-bold text-tinta">
+                  {t('draft.available')}
+                </h2>
+                <ul className="divide-y divide-linea">
+                  {porElegir.map((jugador) => (
+                    <li
+                      key={jugador.userId}
+                      data-testid={`disponible-${jugador.userId}`}
+                      className="flex items-center justify-between gap-2 py-2"
+                    >
+                      <span className="min-w-0 truncate text-sm text-tinta">
+                        {jugador.name}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        {/* Nombre y hándicap, y nada más: es con lo que se
+                            elige, y cualquier otro dato convertiría la
+                            elección en un informe */}
+                        <span className="rounded border border-linea px-2 py-0.5 text-xs font-semibold text-tinta">
+                          {formatoDeIndice(jugador.handicap)}
+                        </span>
+                        {esMiTurno && (
+                          <button
+                            type="button"
+                            data-testid={`elegir-${jugador.userId}`}
+                            disabled={eligiendo !== null}
+                            onClick={() => alElegir(jugador.userId)}
+                            className="rounded-boton bg-exito px-3 py-1.5 text-sm font-semibold text-sobre-contraste disabled:opacity-50 transition-opacity hover:opacity-90"
+                          >
+                            {t('draft.pick')}
+                          </button>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default DraftRoomPage;

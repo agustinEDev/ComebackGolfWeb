@@ -1,0 +1,108 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import QuickMatchHoleSelector from './QuickMatchHoleSelector';
+
+describe('QuickMatchHoleSelector', () => {
+  const mockOnSelect = vi.fn();
+
+  beforeEach(() => {
+    mockOnSelect.mockClear();
+  });
+
+  it('should render 18 hole buttons by default', () => {
+    render(<QuickMatchHoleSelector currentHole={1} onSelect={mockOnSelect} />);
+    expect(screen.getByTestId('quick-match-hole-selector')).toBeInTheDocument();
+    expect(screen.getByTestId('quick-match-hole-btn-1')).toBeInTheDocument();
+    expect(screen.getByTestId('quick-match-hole-btn-18')).toBeInTheDocument();
+  });
+
+  it('should highlight the current hole', () => {
+    render(<QuickMatchHoleSelector currentHole={5} onSelect={mockOnSelect} />);
+    expect(screen.getByTestId('quick-match-hole-btn-5').className).toContain(
+      'ring-2',
+    );
+  });
+
+  it('should call onSelect when a hole is clicked', () => {
+    render(<QuickMatchHoleSelector currentHole={1} onSelect={mockOnSelect} />);
+    fireEvent.click(screen.getByTestId('quick-match-hole-btn-7'));
+    expect(mockOnSelect).toHaveBeenCalledWith(7);
+  });
+
+  it('should mark a hole as complete only when all covered participants have a score', () => {
+    render(
+      <QuickMatchHoleSelector
+        currentHole={1}
+        onSelect={mockOnSelect}
+        expectedScoreIdGroups={[['p-1'], ['p-2']]}
+        holeScores={[
+          { holeNumber: 3, participantId: 'p-1', score: 4 },
+          { holeNumber: 3, participantId: 'p-2', score: 5 },
+          { holeNumber: 4, participantId: 'p-1', score: 4 },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('quick-match-hole-btn-3').dataset.estado).toBe(
+      'complete',
+    );
+    expect(screen.getByTestId('quick-match-hole-btn-4').dataset.estado).toBe(
+      'partial',
+    );
+    expect(screen.getByTestId('quick-match-hole-btn-5').dataset.estado).toBe(
+      'empty',
+    );
+  });
+
+  /**
+   * En foursomes cada grupo es un BANDO: el hoyo está completo con las dos
+   * bolas, no con cuatro golpes, y la bola cuenta la anote quien la anote.
+   */
+  it('should count one score per group, not per participant', () => {
+    render(
+      <QuickMatchHoleSelector
+        currentHole={1}
+        onSelect={mockOnSelect}
+        expectedScoreIdGroups={[
+          ['p-1', 'p-2'],
+          ['p-3', 'p-4'],
+        ]}
+        holeScores={[
+          // Una bola por bando, y la del segundo bando la metió el compañero.
+          { holeNumber: 3, participantId: 'p-1', score: 4 },
+          { holeNumber: 3, participantId: 'p-4', score: 5 },
+          { holeNumber: 4, participantId: 'p-1', score: 4 },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('quick-match-hole-btn-3').dataset.estado).toBe(
+      'complete',
+    );
+    // Falta la bola del otro bando, no los golpes de los otros tres jugadores.
+    expect(screen.getByTestId('quick-match-hole-btn-4').dataset.estado).toBe(
+      'partial',
+    );
+  });
+
+  it('should count a picked-up hole as scored', () => {
+    // La raya cierra el hoyo aunque no traiga numero. Exigiendo numero, un
+    // hoyo recogido se quedaba en amarillo para siempre y la partida no se
+    // podia dar por terminada de un vistazo.
+    render(
+      <QuickMatchHoleSelector
+        currentHole={1}
+        onSelect={mockOnSelect}
+        expectedScoreIdGroups={[['p-1'], ['p-2']]}
+        holeScores={[
+          { holeNumber: 3, participantId: 'p-1', score: null },
+          { holeNumber: 3, participantId: 'p-2', score: 5 },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('quick-match-hole-btn-3').dataset.estado).toBe(
+      'complete',
+    );
+  });
+});

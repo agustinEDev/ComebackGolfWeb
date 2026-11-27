@@ -1,0 +1,152 @@
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { BrowserRouter, Routes, Route } from 'react-router';
+
+/**
+ * FE #776: la página de verificar el correo tenía todos sus textos en inglés
+ * fijo, fuera de t(), y en el error enseñaba el mensaje del backend, que viene
+ * siempre en español.
+ *
+ *   #   estado                       | se ve
+ *   ----|-----------------------------|------------------------------------------
+ *   E1  verificando                  | verifyEmail.verifyingTitle / verifyingBody
+ *   E3  enlace sin token             | verifyEmail.invalidTitle / invalidMessage
+ *   E4  la verificación falla        | verifyEmail.errorTitle y sus dos botones
+ *   E5  el backend da su mensaje     | el texto propio, no el del backend
+ *   E6  en ningún estado             | ni un texto fijo en inglés (sinIngles(), en cada test)
+ *
+ * Desde BE #753 verificar no abre sesión (y desde la fase 3 el front ya no
+ * mira si la respuesta trae tokens):
+ *   E8  verificado                   | «inicia sesión» y su enlace; no va al panel
+ */
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (clave) => clave, i18n: { language: 'es' } }),
+}));
+vi.mock('../composition', () => ({ verifyEmailUseCase: { execute: vi.fn() } }));
+
+const { verifyEmailUseCase } = await import('../composition');
+const { default: VerifyEmail } = await import('./VerifyEmail');
+
+const INGLES = [
+  'Verifying your email',
+  'Please wait while we verify',
+  'Email Verified',
+  'Redirecting to dashboard',
+  'Go to Dashboard Now',
+  'Verification Failed',
+  'Go to Login',
+  'Go to Home',
+  'Invalid Link',
+  'Back to Home',
+  'Verification token is missing',
+  'Failed to verify email',
+  'has been verified successfully',
+];
+const sinIngles = () => {
+  for (const texto of INGLES)
+    expect(document.body.textContent).not.toContain(texto);
+};
+
+const abrir = (url = '/verify-email?token=abc123') => {
+  window.history.replaceState(null, '', url);
+  render(
+    <BrowserRouter>
+      <Routes>
+        <Route path="/verify-email" element={<VerifyEmail />} />
+      </Routes>
+    </BrowserRouter>,
+  );
+};
+
+describe('VerifyEmail · textos traducidos (FE #776)', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('E1: mientras verifica', () => {
+    verifyEmailUseCase.execute.mockReturnValue(new Promise(() => {}));
+    abrir();
+    expect(screen.getByText('verifyEmail.verifyingTitle')).toBeInTheDocument();
+    expect(screen.getByText('verifyEmail.verifyingBody')).toBeInTheDocument();
+    sinIngles();
+  });
+
+  it('E8: backend nuevo, sin sesión: verificado y a iniciar sesión, sin ir al panel', async () => {
+    verifyEmailUseCase.execute.mockResolvedValue({ emailVerified: true });
+    abrir();
+    expect(
+      await screen.findByText(
+        'verifyEmail.successTitle',
+        {},
+        { timeout: 4000 },
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('verifyEmail.signInNow')).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'verifyEmail.goToLogin' }),
+    ).toHaveAttribute('href', '/login');
+    expect(
+      screen.queryByText('verifyEmail.redirecting'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('verifyEmail.goToDashboard'),
+    ).not.toBeInTheDocument();
+    sinIngles();
+  });
+
+  it('E3: sin token en el enlace', async () => {
+    abrir('/verify-email');
+    expect(
+      await screen.findByText('verifyEmail.invalidTitle'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('verifyEmail.invalidMessage')).toBeInTheDocument();
+    sinIngles();
+  });
+
+  it('E7: cuenta desactivada: el correo SÍ se verificó, pero no entra (BE #750)', async () => {
+    verifyEmailUseCase.execute.mockRejectedValue(
+      Object.assign(new Error('deactivated'), {
+        status: 403,
+        errorCode: 'ACCOUNT_DEACTIVATED',
+      }),
+    );
+    abrir();
+
+    expect(
+      await screen.findByText(
+        'verifyEmail.successTitle',
+        {},
+        { timeout: 4000 },
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('google.accountDeactivated')).toBeInTheDocument();
+    expect(
+      screen.queryByText('verifyEmail.errorTitle'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('verifyEmail.redirecting'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'verifyEmail.goToHome' }),
+    ).toHaveAttribute('href', '/');
+    sinIngles();
+  });
+
+  it('E4 y E5: la verificación falla y el mensaje es el propio', async () => {
+    verifyEmailUseCase.execute.mockRejectedValue(
+      new Error('Token de verificación inválido'),
+    );
+    abrir();
+    expect(
+      await screen.findByText('verifyEmail.errorTitle', {}, { timeout: 4000 }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('verifyEmail.errorMessage')).toBeInTheDocument();
+    expect(screen.getByText('verifyEmail.goToLogin')).toBeInTheDocument();
+    expect(screen.getByText('verifyEmail.goToHome')).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(
+      'Token de verificación inválido',
+    );
+    sinIngles();
+  });
+});

@@ -1,0 +1,722 @@
+/**
+ * Tests de useRedirectIfAuthenticated (FE #305)
+ *
+ * Lo que se vigila aquí no es tanto "redirige" como las formas de meter la pata:
+ * redirigir por lo que dice `localStorage` (bucle con `ProtectedRoute`), dar por
+ * muerta una sesión que solo tenía el access caducado (la PWA abierta horas
+ * después, que es el caso de la issue), y confundir un tropiezo de red con un
+ * "no" del backend, que dejaría al usuario sin la redirección durante días.
+ */
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { useRedirectIfAuthenticated } from './useRedirectIfAuthenticated';
+
+const navigate = vi.fn();
+let locationState = null;
+
+import {
+  noAvisesDeCierres,
+  seCierraLaSesionAPeticion,
+  vuelvenLosAvisosDeCierre,
+} from '../utils/avisoDeCierreForzado';
+vi.mock('react-router', () => ({
+  useNavigate: () => navigate,
+  useLocation: () => ({ state: locationState }),
+}));
+
+const setUser = vi.fn();
+const clearAuth = vi.fn();
+let storedUser = null;
+
+vi.mock('./useAuthContext', () => ({
+  useAuthContext: () => ({ user: storedUser, setUser, clearAuth }),
+}));
+
+vi.mock('../utils/avisoDeVueltaALaAnotacion', () => ({
+  avisaDeLaVueltaALaAnotacion: vi.fn(),
+}));
+const { avisaDeLaVueltaALaAnotacion } =
+  await import('../utils/avisoDeVueltaALaAnotacion');
+
+vi.mock('../infrastructure/http/tokenRefreshInterceptor', () => ({
+  refrescoCompartido: vi.fn(),
+}));
+
+vi.mock('../infrastructure/http/deviceRevocationLogout', () => ({
+  isDeviceRevoked: vi.fn(() => false),
+  handleDeviceRevocationLogout: vi.fn(),
+  clearDeviceRevocationFlag: vi.fn(),
+  // La fachada composition/http carga el registro de limpiezas al importarse
+  alCerrarLaSesion: vi.fn(),
+  olvidaLoGuardadoDeLaCuenta: vi.fn(),
+}));
+
+const { refrescoCompartido } =
+  await import('../infrastructure/http/tokenRefreshInterceptor');
+const {
+  isDeviceRevoked,
+  handleDeviceRevocationLogout,
+  olvidaLoGuardadoDeLaCuenta,
+} = await import('../infrastructure/http/deviceRevocationLogout');
+
+/** Forma que devuelve el backend: snake_case, la que espera la entidad User */
+const BACKEND_USER = {
+  id: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+  email: 'agustin@example.com',
+  first_name: 'Agustín',
+  last_name: 'Estévez',
+  email_verified: true,
+};
+
+const okResponse = (body) => ({
+  ok: true,
+  status: 200,
+  json: async () => body,
+  clone() {
+    return this;
+  },
+});
+
+const errorResponse = (status) => ({
+  ok: false,
+  status,
+  json: async () => ({ detail: 'nope' }),
+  clone() {
+    return this;
+  },
+});
+
+/** El 401 con el que el backend dice que el refresh token ya no vale */
+const rejectedRefresh = () => {
+  const error = new Error('Refresh token expired');
+  error.response = { status: 401 };
+  return error;
+};
+
+describe('useRedirectIfAuthenticated', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    isDeviceRevoked.mockReturnValue(false);
+    storedUser = null;
+    locationState = null;
+    // `restoreAllMocks` no deshace una asignación directa a `globalThis`, así
+    // que el fetch simulado sobreviviría a la suite
+    vi.stubGlobal('fetch', vi.fn());
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  describe('sin sesión guardada', () => {
+    it('pinta el formulario sin tocar la red', () => {
+      const { result } = renderHook(() => useRedirectIfAuthenticated());
+
+      expect(result.current).toBe(false);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+      expect(navigate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('desactivado', () => {
+    beforeEach(() => {
+      storedUser = { id: 'u1' };
+    });
+
+    it('no toca la red ni redirige aunque haya sesión guardada', () => {
+      // La portada lo usa así en el navegador: ahí no debe rebotar al panel, y
+      // tampoco gastar una petición autenticada en cada visita anónima a la
+      // página pública más visitada.
+      const { result } = renderHook(() =>
+        useRedirectIfAuthenticated({ enabled: false }),
+      );
+
+      expect(result.current).toBe(false);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+      expect(navigate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('con sesión guardada', () => {
+    beforeEach(() => {
+      storedUser = { id: 'u1' };
+    });
+
+    it('deja la sesión confirmada anotada, para que el destino no vuelva a preguntar', async () => {
+      // Sin esto, `ProtectedRoute` pintaba su espera gris a pantalla completa en
+      // cada arranque con sesion y abria una SEGUNDA consulta, justo despues de
+      // que esta acabara de confirmarla (FE #489)
+      const { reiniciaLaSesionCompartida, loQueHaySobreLaSesion } =
+        await import('../services/sesionCompartida');
+      reiniciaLaSesionCompartida();
+      const delBackend = {
+        id: 'u1',
+        email: 'a@b.c',
+        first_name: 'Agustin',
+        last_name: 'Estevez',
+      };
+      globalThis.fetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => delBackend,
+      });
+
+      renderHook(() => useRedirectIfAuthenticated());
+
+      await waitFor(() => expect(navigate).toHaveBeenCalled());
+      // El DTO tal cual, no la entidad de dominio: quien lee de `useAuth` espera
+      // `first_name`, no `firstName`
+      expect(loQueHaySobreLaSesion().user).toEqual(delBackend);
+      expect(loQueHaySobreLaSesion().resuelta).toBe(true);
+    });
+
+    it('oculta el formulario mientras comprueba', () => {
+      globalThis.fetch.mockReturnValue(new Promise(() => {}));
+
+      const { result } = renderHook(() => useRedirectIfAuthenticated());
+
+      expect(result.current).toBe(true);
+    });
+
+    describe('entrarSinRed, para el arranque de la aplicación instalada', () => {
+      it('entra con la sesión guardada si no se pudo PREGUNTAR', async () => {
+        // En el campo no hay cobertura y esta es la pantalla de entrada: dejar
+        // un formulario que no se puede enviar deja al usuario sin poder anotar,
+        // que es el caso de uso del producto
+        globalThis.fetch.mockRejectedValue(new TypeError('Failed to fetch'));
+
+        renderHook(() => useRedirectIfAuthenticated({ entrarSinRed: true }));
+
+        await waitFor(() =>
+          expect(navigate).toHaveBeenCalledWith('/dashboard', {
+            replace: true,
+          }),
+        );
+      });
+
+      it('pero NO si el backend rechaza la sesión', async () => {
+        // Aquí sí hubo respuesta y dice que no: entrar seria colar a alguien
+        // cuya sesión ya no vale
+        globalThis.fetch.mockResolvedValue(errorResponse(401));
+
+        const { result } = renderHook(() =>
+          useRedirectIfAuthenticated({ entrarSinRed: true }),
+        );
+
+        await waitFor(() => expect(result.current).toBe(false));
+        expect(navigate).not.toHaveBeenCalled();
+      });
+
+      it('entra también cuando la petición se queda COLGADA', async () => {
+        // Este es el caso de verdad sin cobertura: la peticion no falla rapido,
+        // se cuelga hasta agotar el plazo. Cubrir solo el rechazo dejaba el
+        // arreglo sirviendo para el caso raro y no para el habitual.
+        vi.useFakeTimers();
+        globalThis.fetch.mockReturnValue(new Promise(() => {}));
+
+        renderHook(() => useRedirectIfAuthenticated({ entrarSinRed: true }));
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5000);
+        });
+
+        expect(navigate).toHaveBeenCalledWith('/dashboard', { replace: true });
+      });
+
+      it('sin la opción, un corte de red sigue enseñando el formulario', async () => {
+        globalThis.fetch.mockRejectedValue(new TypeError('Failed to fetch'));
+
+        const { result } = renderHook(() => useRedirectIfAuthenticated());
+
+        await waitFor(() => expect(result.current).toBe(false));
+        expect(navigate).not.toHaveBeenCalled();
+      });
+    });
+
+    it('C5: la sesión confirmada acaba el silencio de un cierre anterior (8 nov)', async () => {
+      noAvisesDeCierres();
+      globalThis.fetch.mockResolvedValue(okResponse(BACKEND_USER));
+
+      renderHook(() => useRedirectIfAuthenticated());
+
+      await waitFor(() => expect(navigate).toHaveBeenCalled());
+      expect(seCierraLaSesionAPeticion()).toBe(false);
+    });
+
+    it.each([
+      [
+        'sin red',
+        () =>
+          globalThis.fetch.mockRejectedValue(new TypeError('Failed to fetch')),
+      ],
+    ])(
+      'C5: entrar %s, sin sesión confirmada, no acaba el silencio',
+      async (_caso, prepara) => {
+        storedUser = { id: 'u1' };
+        noAvisesDeCierres();
+        prepara();
+
+        renderHook(() => useRedirectIfAuthenticated({ entrarSinRed: true }));
+
+        await waitFor(() => expect(navigate).toHaveBeenCalled());
+        expect(seCierraLaSesionAPeticion()).toBe(true);
+        vuelvenLosAvisosDeCierre();
+      },
+    );
+
+    it.each([
+      [
+        'la misma cuenta vuelve a la página',
+        BACKEND_USER.id,
+        '/competitions/7',
+      ],
+      ['otra cuenta va al panel', 'otra-cuenta', '/dashboard'],
+    ])(
+      '3b: sesión confirmada y página guardada por una cuenta: %s',
+      async (_caso, deQuien, destino) => {
+        sessionStorage.setItem('vuelta_tras_entrar', '/competitions/7');
+        sessionStorage.setItem('vuelta_tras_entrar_cuenta', deQuien);
+        globalThis.fetch.mockResolvedValue(okResponse(BACKEND_USER));
+
+        renderHook(() => useRedirectIfAuthenticated());
+
+        await waitFor(() =>
+          expect(navigate).toHaveBeenCalledWith(destino, { replace: true }),
+        );
+        sessionStorage.clear();
+      },
+    );
+
+    it.each([
+      ['la misma cuenta guardada vuelve a la página', 'u-1', '/competitions/7'],
+      ['otra cuenta guardada va al panel', 'u-2', '/dashboard'],
+    ])(
+      '3b: sin red, con la sesión guardada: %s',
+      async (_caso, guardada, destino) => {
+        storedUser = { id: guardada, firstName: 'Ana' };
+        sessionStorage.setItem('vuelta_tras_entrar', '/competitions/7');
+        sessionStorage.setItem('vuelta_tras_entrar_cuenta', 'u-1');
+        globalThis.fetch.mockRejectedValue(new TypeError('Failed to fetch'));
+
+        renderHook(() => useRedirectIfAuthenticated({ entrarSinRed: true }));
+
+        await waitFor(() =>
+          expect(navigate).toHaveBeenCalledWith(destino, { replace: true }),
+        );
+        sessionStorage.clear();
+      },
+    );
+
+    describe('la anotación en curso al arrancar la app instalada (11 nov 2026)', () => {
+      const ANOTACION =
+        '/quick-matches/0b5a6c1e-2d3f-4a5b-8c7d-9e0f1a2b3c4d/scoring';
+      const memoria = () => {
+        const datos = new Map();
+        return {
+          getItem: (k) => (datos.has(k) ? datos.get(k) : null),
+          setItem: (k, v) => datos.set(k, String(v)),
+          removeItem: (k) => datos.delete(k),
+          clear: () => datos.clear(),
+        };
+      };
+      beforeEach(async () => {
+        vi.stubGlobal('localStorage', memoria());
+        const { guardaLaAnotacionEnCurso } =
+          await import('../utils/anotacionEnCurso');
+        guardaLaAnotacionEnCurso({
+          cuenta: BACKEND_USER.id,
+          pathname: ANOTACION,
+          search: '',
+          pestana: 'input',
+          hoyo: 12,
+          mapa: false,
+        });
+      });
+      afterEach(() => vi.unstubAllGlobals());
+
+      it('B1: con la sesión confirmada vuelve a la anotación de esa cuenta', async () => {
+        storedUser = { id: BACKEND_USER.id };
+        globalThis.fetch.mockResolvedValue(okResponse(BACKEND_USER));
+
+        renderHook(() => useRedirectIfAuthenticated({ entrarSinRed: true }));
+
+        await waitFor(() =>
+          expect(navigate).toHaveBeenCalledWith(ANOTACION, { replace: true }),
+        );
+      });
+
+      it('D1: la vuelta al arrancar la app instalada se avisa a Sentry; el formulario de entrar, no', async () => {
+        storedUser = { id: BACKEND_USER.id };
+        globalThis.fetch.mockResolvedValue(okResponse(BACKEND_USER));
+
+        renderHook(() => useRedirectIfAuthenticated({ entrarSinRed: true }));
+
+        await waitFor(() =>
+          expect(navigate).toHaveBeenCalledWith(ANOTACION, { replace: true }),
+        );
+        expect(avisaDeLaVueltaALaAnotacion).toHaveBeenCalledTimes(1);
+      });
+
+      it('D1: sin entrarSinRed (la pantalla de entrar) vuelve igual, pero sin aviso', async () => {
+        storedUser = { id: BACKEND_USER.id };
+        globalThis.fetch.mockResolvedValue(okResponse(BACKEND_USER));
+
+        renderHook(() => useRedirectIfAuthenticated());
+
+        await waitFor(() =>
+          expect(navigate).toHaveBeenCalledWith(ANOTACION, { replace: true }),
+        );
+        expect(avisaDeLaVueltaALaAnotacion).not.toHaveBeenCalled();
+      });
+
+      it('B4: sin cobertura, con la sesión guardada, también vuelve a la anotación', async () => {
+        storedUser = { id: BACKEND_USER.id, firstName: 'Ana' };
+        globalThis.fetch.mockRejectedValue(new TypeError('Failed to fetch'));
+
+        renderHook(() => useRedirectIfAuthenticated({ entrarSinRed: true }));
+
+        await waitFor(() =>
+          expect(navigate).toHaveBeenCalledWith(ANOTACION, { replace: true }),
+        );
+      });
+
+      it('B3: con la sesión de otra cuenta, al panel', async () => {
+        storedUser = { id: 'u-otra', firstName: 'Bea' };
+        globalThis.fetch.mockRejectedValue(new TypeError('Failed to fetch'));
+
+        renderHook(() => useRedirectIfAuthenticated({ entrarSinRed: true }));
+
+        await waitFor(() =>
+          expect(navigate).toHaveBeenCalledWith('/dashboard', {
+            replace: true,
+          }),
+        );
+      });
+    });
+
+    it('lleva al dashboard cuando el backend confirma la sesión', async () => {
+      globalThis.fetch.mockResolvedValue(okResponse(BACKEND_USER));
+
+      const { result } = renderHook(() => useRedirectIfAuthenticated());
+
+      await waitFor(() =>
+        expect(navigate).toHaveBeenCalledWith('/dashboard', { replace: true }),
+      );
+      // Sigue oculto: la página se va y bajarlo enseñaría el formulario
+      expect(result.current).toBe(true);
+    });
+
+    it('guarda la entidad de dominio, no el DTO del backend', async () => {
+      globalThis.fetch.mockResolvedValue(okResponse(BACKEND_USER));
+
+      renderHook(() => useRedirectIfAuthenticated());
+
+      await waitFor(() => expect(setUser).toHaveBeenCalledTimes(1));
+      const stored = setUser.mock.calls[0][0];
+      expect(stored.firstName).toBe('Agustín');
+      expect(stored.emailVerified).toBe(true);
+    });
+
+    it('renueva el access caducado en vez de dar la sesión por perdida', async () => {
+      globalThis.fetch
+        .mockResolvedValueOnce(errorResponse(401))
+        .mockResolvedValueOnce(okResponse(BACKEND_USER));
+      refrescoCompartido.mockResolvedValue(true);
+
+      renderHook(() => useRedirectIfAuthenticated());
+
+      await waitFor(() =>
+        expect(navigate).toHaveBeenCalledWith('/dashboard', { replace: true }),
+      );
+      expect(refrescoCompartido).toHaveBeenCalledTimes(1);
+      expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('vuelve a donde iba el usuario cuando ProtectedRoute lo desvió', async () => {
+      locationState = { from: { pathname: '/competitions/42' } };
+      globalThis.fetch.mockResolvedValue(okResponse(BACKEND_USER));
+
+      renderHook(() => useRedirectIfAuthenticated());
+
+      await waitFor(() =>
+        expect(navigate).toHaveBeenCalledWith('/competitions/42', {
+          replace: true,
+        }),
+      );
+    });
+
+    it('ignora un destino externo disfrazado de ruta (CWE-601)', async () => {
+      locationState = { from: { pathname: '//evil.example' } };
+      globalThis.fetch.mockResolvedValue(okResponse(BACKEND_USER));
+
+      renderHook(() => useRedirectIfAuthenticated());
+
+      await waitFor(() =>
+        expect(navigate).toHaveBeenCalledWith('/dashboard', { replace: true }),
+      );
+    });
+
+    it('no se queda en la propia pantalla de acceso', async () => {
+      // Navegar a donde ya estamos dejaría `isChecking` arriba para siempre: el
+      // cartel de carga se queda y el formulario no vuelve
+      locationState = { from: { pathname: '/login' } };
+      globalThis.fetch.mockResolvedValue(okResponse(BACKEND_USER));
+
+      renderHook(() => useRedirectIfAuthenticated());
+
+      await waitFor(() =>
+        expect(navigate).toHaveBeenCalledWith('/dashboard', { replace: true }),
+      );
+    });
+
+    describe('cuando la comprobación no sale bien', () => {
+      it('tira el usuario guardado si el backend rechaza el refresh', async () => {
+        globalThis.fetch.mockResolvedValue(errorResponse(401));
+        refrescoCompartido.mockRejectedValue(rejectedRefresh());
+
+        const { result } = renderHook(() => useRedirectIfAuthenticated());
+
+        await waitFor(() => expect(result.current).toBe(false));
+        expect(clearAuth).toHaveBeenCalledTimes(1);
+        // Lo que evita el bucle /login -> /dashboard -> /login
+        expect(navigate).not.toHaveBeenCalled();
+      });
+
+      it('tira el usuario guardado si sigue habiendo 401 tras renovar', async () => {
+        // El refresco funciona pero la sesión ya no vale: es el único camino que
+        // llega al 401 definitivo, y hasta ahora ningún test pasaba por él
+        globalThis.fetch.mockResolvedValue(errorResponse(401));
+        refrescoCompartido.mockResolvedValue(true);
+
+        const { result } = renderHook(() => useRedirectIfAuthenticated());
+
+        await waitFor(() => expect(result.current).toBe(false));
+        expect(refrescoCompartido).toHaveBeenCalledTimes(1);
+        expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+        expect(clearAuth).toHaveBeenCalledTimes(1);
+        expect(navigate).not.toHaveBeenCalled();
+      });
+
+      it('conserva el usuario guardado si lo que falla es la red', async () => {
+        globalThis.fetch.mockRejectedValue(new TypeError('Failed to fetch'));
+
+        const { result } = renderHook(() => useRedirectIfAuthenticated());
+
+        await waitFor(() => expect(result.current).toBe(false));
+        // Borrarlo dejaría al usuario sin redirección los 7 días que le quedan
+        // al refresh token, por un corte de red de un segundo
+        expect(clearAuth).not.toHaveBeenCalled();
+        expect(navigate).not.toHaveBeenCalled();
+      });
+
+      it('conserva el usuario guardado si el backend está caído', async () => {
+        globalThis.fetch.mockResolvedValue(errorResponse(502));
+
+        const { result } = renderHook(() => useRedirectIfAuthenticated());
+
+        await waitFor(() => expect(result.current).toBe(false));
+        expect(clearAuth).not.toHaveBeenCalled();
+      });
+
+      it('enseña el formulario si el backend no contesta a tiempo', async () => {
+        vi.useFakeTimers();
+        globalThis.fetch.mockReturnValue(new Promise(() => {}));
+
+        const { result } = renderHook(() => useRedirectIfAuthenticated());
+        expect(result.current).toBe(true);
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5000);
+        });
+
+        expect(result.current).toBe(false);
+        expect(clearAuth).not.toHaveBeenCalled();
+      });
+    });
+
+    // Revisión del 21 oct: al pasar a `sondaDeSesion` se perdió el try/catch de
+    // fuera. Si fallaba algo al ENTRAR, ya con la comprobación dada por cerrada,
+    // la promesa se rechazaba sin nadie que la recogiera y el formulario se
+    // quedaba oculto para siempre
+    describe('si falla algo al entrar con la sesión confirmada', () => {
+      it('E1: si setUser lanza, enseña el formulario como ante un tropiezo', async () => {
+        globalThis.fetch.mockResolvedValue(okResponse(BACKEND_USER));
+        setUser.mockImplementationOnce(() => {
+          throw new Error('setUser roto');
+        });
+
+        const { result } = renderHook(() => useRedirectIfAuthenticated());
+
+        await waitFor(() => expect(result.current).toBe(false));
+        expect(navigate).not.toHaveBeenCalled();
+        expect(clearAuth).not.toHaveBeenCalled();
+        expect(console.warn).toHaveBeenCalledWith(
+          '[auth] no se pudo comprobar la sesión:',
+          expect.any(Error),
+        );
+      });
+
+      it('E2: con entrarSinRed entra con la sesión guardada, como cuando no se pudo preguntar', async () => {
+        globalThis.fetch.mockResolvedValue(okResponse(BACKEND_USER));
+        setUser.mockImplementationOnce(() => {
+          throw new Error('setUser roto');
+        });
+
+        renderHook(() => useRedirectIfAuthenticated({ entrarSinRed: true }));
+
+        await waitFor(() =>
+          expect(navigate).toHaveBeenCalledWith('/dashboard', {
+            replace: true,
+          }),
+        );
+        expect(clearAuth).not.toHaveBeenCalled();
+      });
+
+      it('E3: si navigate lanza también al reintentar, acaba enseñando el formulario', async () => {
+        globalThis.fetch.mockResolvedValue(okResponse(BACKEND_USER));
+        navigate.mockImplementation(() => {
+          throw new Error('navigate roto');
+        });
+
+        const { result } = renderHook(() =>
+          useRedirectIfAuthenticated({ entrarSinRed: true }),
+        );
+
+        await waitFor(() => expect(result.current).toBe(false));
+        expect(navigate).toHaveBeenCalledTimes(2);
+        navigate.mockReset();
+      });
+
+      it('E4: si navigate lanza sin entrarSinRed, enseña el formulario', async () => {
+        globalThis.fetch.mockResolvedValue(okResponse(BACKEND_USER));
+        navigate.mockImplementationOnce(() => {
+          throw new Error('navigate roto');
+        });
+
+        const { result } = renderHook(() => useRedirectIfAuthenticated());
+
+        await waitFor(() => expect(result.current).toBe(false));
+        expect(navigate).toHaveBeenCalledTimes(1);
+      });
+
+      it('E5: con la página ya desmontada, un fallo no entra por ella', async () => {
+        // El aviso de revocación se da aunque la página se haya ido; si lanza,
+        // no hay formulario que enseñar ni a dónde llevar a nadie
+        let contesta;
+        globalThis.fetch.mockReturnValue(
+          new Promise((r) => {
+            contesta = r;
+          }),
+        );
+        isDeviceRevoked.mockReturnValue(true);
+        handleDeviceRevocationLogout.mockImplementationOnce(() => {
+          throw new Error('aviso roto');
+        });
+
+        const { unmount } = renderHook(() =>
+          useRedirectIfAuthenticated({ entrarSinRed: true }),
+        );
+        unmount();
+        await act(async () => {
+          contesta(errorResponse(401));
+        });
+
+        expect(handleDeviceRevocationLogout).toHaveBeenCalledTimes(1);
+        expect(navigate).not.toHaveBeenCalled();
+      });
+    });
+
+    // Revisión del 21 oct: el 401 de /current-user es llano y la revocación la
+    // dice el 401 del refresco
+    it('avisa de la revocación también cuando la dice el refresco', async () => {
+      const detalle = {
+        detail: 'Dispositivo revocado. Por favor, inicia sesión nuevamente.',
+      };
+      globalThis.fetch.mockResolvedValue(errorResponse(401));
+      isDeviceRevoked.mockImplementation(
+        (_respuesta, datos) => datos === detalle,
+      );
+      refrescoCompartido.mockRejectedValue(
+        Object.assign(rejectedRefresh(), { errorData: detalle }),
+      );
+
+      const { result } = renderHook(() => useRedirectIfAuthenticated());
+
+      await waitFor(() =>
+        expect(handleDeviceRevocationLogout).toHaveBeenCalledWith(detalle, {
+          metodo: 'GET',
+          endpoint: '/api/v1/auth/current-user',
+          estado: 401,
+        }),
+      );
+      expect(refrescoCompartido).toHaveBeenCalledTimes(1);
+      expect(result.current).toBe(false);
+    });
+
+    it('avisa de la revocación del dispositivo en vez de dejar un formulario mudo', async () => {
+      globalThis.fetch.mockResolvedValue(errorResponse(401));
+      isDeviceRevoked.mockReturnValue(true);
+
+      const { result } = renderHook(() => useRedirectIfAuthenticated());
+
+      await waitFor(() =>
+        expect(handleDeviceRevocationLogout).toHaveBeenCalledTimes(1),
+      );
+      expect(refrescoCompartido).not.toHaveBeenCalled();
+      expect(result.current).toBe(false);
+    });
+  });
+});
+
+/**
+ * La pantalla de entrar sin usuario guardado es un camino «sin sesión» (fase 3, FE-06):
+ * hace la misma limpieza que salir. Con usuario guardado espera a la respuesta (un
+ * rechazo limpia con `clearAuth`; sin red no se borra nada). Desactivado (la portada en
+ * el navegador) no toca nada: ahí puede haber una sesión abierta.
+ */
+describe('useRedirectIfAuthenticated · pantalla de entrar sin sesión (fase 3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    storedUser = null;
+    locationState = null;
+  });
+
+  it('L1: sin usuario guardado limpia lo de la cuenta, una vez', () => {
+    const { rerender } = renderHook(() => useRedirectIfAuthenticated());
+    rerender();
+
+    expect(olvidaLoGuardadoDeLaCuenta).toHaveBeenCalledTimes(1);
+  });
+
+  it('L1b: si otra pestaña acaba de entrar (hay usuario en el almacenamiento), no limpia', () => {
+    // El contexto es una foto de cuando cargó esta pestaña; el almacenamiento es lo de ahora
+    globalThis.localStorage.setItem(
+      'user',
+      JSON.stringify({ id: 'otra-pestana' }),
+    );
+
+    renderHook(() => useRedirectIfAuthenticated());
+
+    expect(olvidaLoGuardadoDeLaCuenta).not.toHaveBeenCalled();
+    globalThis.localStorage.removeItem('user');
+  });
+
+  it('L2: desactivado no limpia nada', () => {
+    renderHook(() => useRedirectIfAuthenticated({ enabled: false }));
+
+    expect(olvidaLoGuardadoDeLaCuenta).not.toHaveBeenCalled();
+  });
+
+  it('L3: con usuario guardado no limpia al montar (lo decide la respuesta)', () => {
+    storedUser = { id: BACKEND_USER.id };
+    globalThis.fetch = vi.fn(() => new Promise(() => {}));
+
+    renderHook(() => useRedirectIfAuthenticated());
+
+    expect(olvidaLoGuardadoDeLaCuenta).not.toHaveBeenCalled();
+  });
+});

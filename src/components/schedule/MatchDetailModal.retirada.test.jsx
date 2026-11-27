@@ -1,0 +1,112 @@
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+
+/** F10 (25 oct 2026): la retirada del organizador solo para quien gestiona. */
+vi.mock('react-router', () => ({ useNavigate: () => vi.fn() }));
+vi.mock('../../composition', () => ({
+  getMatchDetailUseCase: {
+    execute: vi.fn().mockResolvedValue({
+      id: 'm-1',
+      status: 'IN_PROGRESS',
+      teamAPlayers: [],
+      teamBPlayers: [],
+    }),
+  },
+}));
+vi.mock('./RetiradaPorElOrganizador', () => ({
+  default: ({ matchId }) => (
+    <div data-testid="retirada-organizador">{matchId}</div>
+  ),
+}));
+
+const { default: MatchDetailModal } = await import('./MatchDetailModal');
+const { getMatchDetailUseCase } = await import('../../composition');
+
+const pinta = (canManage, matchFormat = 'FOURBALL') =>
+  render(
+    <MatchDetailModal
+      isOpen
+      onClose={() => {}}
+      matchId="m-1"
+      playerNameMap={new Map()}
+      playerHandicapMap={new Map()}
+      teamNames={{ teamA: 'A', teamB: 'B' }}
+      t={(k) => k}
+      canManage={canManage}
+      matchFormat={matchFormat}
+    />,
+  );
+
+describe('MatchDetailModal · retirada del organizador', () => {
+  it('F10: quien gestiona la ve', async () => {
+    pinta(true);
+    expect(await screen.findByTestId('retirada-organizador')).toHaveTextContent(
+      'm-1',
+    );
+  });
+
+  // /code-review (26 oct 2026): en individual o foursomes no hay retirada, y
+  // leer la vista de anotar para nada pesa
+  it.each(['SINGLES', 'FOURSOMES', null])(
+    'F10: en %s, no se monta',
+    async (formato) => {
+      pinta(true, formato);
+      await screen.findByText('status.IN_PROGRESS');
+      expect(
+        screen.queryByTestId('retirada-organizador'),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it('F10: un jugador que mira el calendario, no', async () => {
+    pinta(false);
+    await screen.findByText('status.IN_PROGRESS');
+    expect(
+      screen.queryByTestId('retirada-organizador'),
+    ).not.toBeInTheDocument();
+  });
+});
+
+// Un partido concedido está terminado: su color es el de COMPLETED, no el azul
+// de reserva de un programado (18 nov 2026, como en MatchCard)
+describe('MatchDetailModal · color del estado', () => {
+  it.each(['COMPLETED', 'CONCEDED'])(
+    '%s se pinta en tinta, como un partido terminado',
+    async (status) => {
+      getMatchDetailUseCase.execute.mockResolvedValueOnce({
+        id: 'm-1',
+        status,
+        teamAPlayers: [],
+        teamBPlayers: [],
+      });
+      pinta(false, 'SINGLES');
+      const etiqueta = await screen.findByText(`status.${status}`);
+      expect(etiqueta).toHaveClass('text-tinta', 'border-current');
+      // No el apagado de un partido programado
+      expect(etiqueta).not.toHaveClass('text-tinta-suave');
+    },
+  );
+});
+
+// «Ver tarjeta»: un partido en juego o terminado jugando, también el concedido
+// (18 nov 2026: está terminado, y la anotación lo dice como cerrado). El
+// walkover no se jugó: sin tarjeta que ver
+describe('MatchDetailModal · ver la tarjeta', () => {
+  it.each([
+    ['IN_PROGRESS', true],
+    ['COMPLETED', true],
+    ['CONCEDED', true],
+    ['WALKOVER', false],
+    ['SCHEDULED', false],
+  ])('%s: botón %s', async (status, sale) => {
+    getMatchDetailUseCase.execute.mockResolvedValueOnce({
+      id: 'm-1',
+      status,
+      teamAPlayers: [],
+      teamBPlayers: [],
+    });
+    pinta(false, 'SINGLES');
+    await screen.findByText(`status.${status}`);
+    expect(Boolean(screen.queryByText('matches.viewScorecard'))).toBe(sale);
+  });
+});

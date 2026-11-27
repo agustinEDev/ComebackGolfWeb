@@ -1,0 +1,3037 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+  within,
+} from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router';
+import QuickMatchScoringPage from './QuickMatchScoringPage';
+import PersonalRoundCalculator from '../../domain/services/PersonalRoundCalculator';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    // Los valores se pegan detrás de la clave: sin esto, un texto al que no le
+    // llega el número —o al que le llega el que no es— pasaría el test igual
+    t: (key, opts) =>
+      opts && Object.keys(opts).length
+        ? `${key} ${Object.values(opts).join(' ')}`
+        : key,
+    i18n: { language: 'en' },
+  }),
+}));
+
+vi.mock('../../hooks/useAuth', () => ({
+  useAuth: () => ({ user: { id: 'user-1' }, loading: false }),
+}));
+
+vi.mock('../../components/layout/HeaderAuth', () => ({
+  default: () => <div data-testid="header-auth">Header</div>,
+}));
+
+const mockUseQuickMatchScoring = vi.fn();
+const mapaHoyo = vi.hoisted(() => ({
+  args: null,
+  ventana: null,
+  valor: {
+    abierto: false,
+    abrir: () => {},
+    cerrar: () => {},
+    mapaDelCampo: null,
+    disponible: true,
+  },
+}));
+vi.mock('../../hooks/useMapaDelHoyo', () => ({
+  useMapaDelHoyo: (args) => {
+    mapaHoyo.args = args;
+    return mapaHoyo.valor;
+  },
+}));
+vi.mock('../../components/scoring/mapa/VentanaDelMapa', () => ({
+  default: (props) => {
+    mapaHoyo.ventana = props;
+    return null;
+  },
+}));
+vi.mock('../../hooks/useQuickMatchScoring', () => ({
+  useQuickMatchScoring: (...args) => {
+    const estado = mockUseQuickMatchScoring(...args);
+    // El hook real siempre devuelve esta lista, y sin nada guardado en el móvil
+    // es exactamente la del servidor: los tests que no la fijan describen ese
+    // caso, y así no hay que repetirla en los veintiún montajes de aquí
+    return estado && estado.holeScoresVisibles === undefined
+      ? { ...estado, holeScoresVisibles: estado.quickMatch?.holeScores ?? [] }
+      : estado;
+  },
+}));
+
+// Regression fixture: the shape ListMyQuickMatchesUseCase/GetQuickMatchUseCase
+// actually return (QuickMatchAssembler.toSimpleDTO) — isCompleted is a plain
+// boolean field here, NOT a method, unlike the raw QuickMatch domain entity.
+const baseQuickMatch = {
+  id: 'qm-1',
+  name: null,
+  matchFormat: null,
+  scoringFormat: 'STABLEFORD',
+  status: 'COMPLETED',
+  isCompleted: true,
+  participants: [
+    {
+      participantId: 'user-1',
+      userId: 'user-1',
+      name: 'Test User',
+      handicap: 0,
+    },
+    { participantId: 'user-2', userId: 'user-2', name: 'Friend', handicap: 0 },
+  ],
+  holeScores: [],
+  standing: null,
+  effectiveAllowance: 100,
+};
+
+const renderTree = () => (
+  <MemoryRouter initialEntries={['/quick-matches/qm-1/scoring']}>
+    <Routes>
+      <Route
+        path="/quick-matches/:quickMatchId/scoring"
+        element={<QuickMatchScoringPage />}
+      />
+      <Route
+        path="/quick-matches"
+        element={<div data-testid="my-quick-matches-page" />}
+      />
+    </Routes>
+  </MemoryRouter>
+);
+const renderPage = () => render(renderTree());
+
+const baseHookState = {
+  quickMatch: baseQuickMatch,
+  holes: [{ holeNumber: 1, par: 4, strokeIndex: 5 }],
+  tees: [],
+  courseName: 'Real Club de Golf',
+  currentHole: 1,
+  isLoading: false,
+  loadError: null,
+  saveError: null,
+  isSubmitting: false,
+  myParticipant: baseQuickMatch.participants[0],
+  isCreator: false,
+  isScorer: false,
+  coveredParticipantIds: [],
+  totalHoles: 1,
+};
+
+describe('QuickMatchScoringPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      cancelMatch: vi.fn(),
+      refetch: vi.fn(),
+    });
+  });
+
+  it('should render the classification tab for a completed match without crashing', async () => {
+    // Regression test: the page used to call quickMatch.isCompleted() as a
+    // function to compute the classification table's isCompleted prop, but
+    // this DTO shape has it as a plain boolean — threw
+    // "quickMatch.isCompleted is not a function" and crashed the whole page.
+    renderPage();
+
+    fireEvent.click(screen.getByTestId('quick-match-tab-classification'));
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('quick-match-classification-table'),
+      ).toBeInTheDocument();
+    });
+  });
+
+  // Pasada en el Kind (4 nov 2026): salía «SINGLES», el valor interno
+  it.each([
+    [
+      { matchFormat: 'SINGLES', scoringFormat: null },
+      /history\.format\.SINGLES/,
+    ],
+    [
+      { matchFormat: null, scoringFormat: 'STABLEFORD' },
+      /history\.format\.STABLEFORD/,
+    ],
+  ])('K4: la cabecera dice el formato traducido (%o)', (formato, esperado) => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: { ...baseQuickMatch, ...formato },
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      cancelMatch: vi.fn(),
+      refetch: vi.fn(),
+    });
+    renderPage();
+
+    expect(screen.getByText(esperado)).toBeInTheDocument();
+  });
+
+  it('FE #658: las vistas son pestañas de verdad, con su nombre, su panel y las flechas', async () => {
+    renderPage();
+
+    const barra = screen.getByRole('tablist', { name: 'scoring.tabsLabel' });
+    expect(barra).toBe(screen.getByTestId('quick-match-scoring-tabs'));
+    // La barra no es una parada ni recibe foco: lo recibe la pestaña abierta
+    expect(barra).not.toHaveAttribute('tabindex');
+    const [anotar, clasificacion, tarjeta] = within(barra).getAllByRole('tab');
+    expect(anotar).toBe(screen.getByTestId('quick-match-tab-input'));
+    expect(anotar).toHaveAttribute('aria-selected', 'true');
+    expect(clasificacion).toHaveAttribute('aria-selected', 'false');
+    expect(
+      screen.getByRole('tabpanel', { name: 'scoring.tabs.input' }),
+    ).toHaveAttribute('id', anotar.getAttribute('aria-controls'));
+    // Anotar está lleno de botones: el panel no es una parada más
+    expect(
+      screen.getByRole('tabpanel', { name: 'scoring.tabs.input' }),
+    ).not.toHaveAttribute('tabindex');
+
+    fireEvent.keyDown(anotar, { key: 'ArrowRight' });
+    expect(clasificacion).toHaveAttribute('aria-selected', 'true');
+    expect(clasificacion).toHaveFocus();
+    const panel = await screen.findByRole('tabpanel', {
+      name: 'scoring.tabs.classification',
+    });
+    expect(
+      within(panel).getByTestId('quick-match-classification-table'),
+    ).toBeInTheDocument();
+    // La clasificación y la tarjeta son tablas: el panel sí
+    expect(panel).toHaveAttribute('tabindex', '0');
+
+    fireEvent.keyDown(clasificacion, { key: 'End' });
+    expect(tarjeta).toHaveAttribute('aria-selected', 'true');
+    expect(
+      screen.getByRole('tabpanel', { name: 'scoring.tabs.scorecard' }),
+    ).toHaveAttribute('tabindex', '0');
+    fireEvent.keyDown(tarjeta, { key: 'ArrowRight' });
+    expect(anotar).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('should show the golf course the match was played on', () => {
+    renderPage();
+
+    expect(screen.getByTestId('campo-de-la-partida')).toHaveTextContent(
+      'Real Club de Golf',
+    );
+  });
+
+  it('should not show the course line while the course has not been loaded yet', () => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      courseName: null,
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      refetch: vi.fn(),
+    });
+
+    renderPage();
+
+    expect(screen.queryByTestId('campo-de-la-partida')).not.toBeInTheDocument();
+  });
+
+  it('should navigate back to the quick matches list, not the dashboard', async () => {
+    renderPage();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /backToMyQuickMatches/ }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('my-quick-matches-page')).toBeInTheDocument();
+    });
+  });
+});
+
+describe('QuickMatchScoringPage - copia de los errores', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const renderWithError = (error, quickMatch = null, kind = 'load') => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch,
+      loadError: kind === 'load' ? error : null,
+      saveError: kind === 'save' ? error : null,
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      refetch: vi.fn(),
+    });
+    return renderPage();
+  };
+
+  const withStatus = (message, status) => {
+    const error = new Error(message);
+    error.status = status;
+    return error;
+  };
+
+  /**
+   * El `detail` del backend está en inglés, y llegaba tal cual a una pantalla
+   * en español: "You are not a participant of this quick match."
+   */
+  it('traduce un 403 de carga en vez de pintar el mensaje del servidor', () => {
+    renderWithError(
+      withStatus('You are not a participant of this quick match.', 403),
+    );
+
+    const shown = screen.getByTestId('quick-match-scoring-error');
+    expect(shown).toHaveTextContent('scoring.errors.forbidden');
+    expect(shown).not.toHaveTextContent('You are not a participant');
+  });
+
+  it('traduce un 404 de carga con su propia copia', () => {
+    renderWithError(withStatus('Quick match not found', 404));
+
+    expect(screen.getByTestId('quick-match-scoring-error')).toHaveTextContent(
+      'scoring.errors.notFound',
+    );
+  });
+
+  it('con un 404 de la API, el botón lleva de verdad a mis partidas rápidas', () => {
+    // La partida ya no existe: reintentar daría otro 404. La salida es el
+    // botón, como en la anotación normal; la cabecera no pinta flecha en esta
+    // pantalla, que no tiene título (Agustín, 26 nov 2026)
+    renderWithError(
+      Object.assign(withStatus('Quick match not found', 404), {
+        deLaApi: true,
+      }),
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'scoring.backToMyQuickMatches' }),
+    );
+
+    expect(screen.getByTestId('my-quick-matches-page')).toBeInTheDocument();
+  });
+
+  it('un error de carga sin status es falta de señal, y se dice como tal', () => {
+    // Antes caía en el mensaje genérico —«ha ocurrido un error»—, que suena a
+    // que algo se ha roto. Sin status es que no hubo respuesta: quedarse sin
+    // cobertura no es un error, y es la misma regla del resto de la pantalla
+    renderWithError(new Error('Failed to fetch'));
+
+    const shown = screen.getByTestId('quick-match-scoring-error');
+    expect(shown).toHaveTextContent('scoring.offline.noSeActualiza');
+    expect(shown).not.toHaveTextContent('Failed to fetch');
+  });
+
+  /**
+   * `useQuickMatchScoring` guarda en el MISMO estado el fallo de cargar y el de
+   * guardar, así que el status por sí solo no basta: un 403 al anotar es "no
+   * eres el anotador de ese jugador", y decirle "no participas en esta partida"
+   * a alguien que se está viendo en la lista es peor que no decirle nada.
+   */
+  it('no dice "no participas" ante un 403 al anotar, con la partida en pantalla', () => {
+    renderWithError(
+      withStatus('You are not an assigned scorer for this participant.', 403),
+      baseQuickMatch,
+      'save',
+    );
+
+    const shown = screen.getByTestId('quick-match-scoring-error');
+    expect(shown).toHaveTextContent('scoring.errors.saveForbidden');
+    expect(shown).not.toHaveTextContent('scoring.errors.forbidden"');
+    expect(shown).not.toHaveTextContent('You are not an assigned scorer');
+  });
+
+  it('distingue el conflicto y la validación al anotar, que antes caían en el genérico', () => {
+    renderWithError(
+      withStatus('Quick match is already completed.', 409),
+      baseQuickMatch,
+      'save',
+    );
+    expect(screen.getByTestId('quick-match-scoring-error')).toHaveTextContent(
+      'scoring.errors.saveConflict',
+    );
+
+    renderWithError(
+      withStatus('Score must be between 1 and 20.', 422),
+      baseQuickMatch,
+      'save',
+    );
+    expect(
+      screen.getAllByTestId('quick-match-scoring-error')[1],
+    ).toHaveTextContent('scoring.errors.saveInvalid');
+  });
+
+  /**
+   * El sondeo cada 10 s recarga la partida mucho después de que se cargara la
+   * primera vez, y `fetchQuickMatch` conserva la anterior a propósito. Con la
+   * partida en pantalla, deducir la operación de su presencia daba la copia de
+   * guardado a un fallo que es de carga.
+   */
+  it('un 403 del sondeo, con la partida ya en pantalla, sigue siendo un error de carga', () => {
+    renderWithError(
+      withStatus('You are not a participant of this quick match.', 403),
+      baseQuickMatch,
+      'load',
+    );
+
+    const shown = screen.getByTestId('quick-match-scoring-error');
+    expect(shown).toHaveTextContent('scoring.errors.forbidden');
+    expect(shown).not.toHaveTextContent('scoring.errors.saveForbidden');
+  });
+
+  it('un fallo de red al anotar dice que no se ha podido guardar, no un error de carga', () => {
+    renderWithError(new Error('Failed to fetch'), baseQuickMatch, 'save');
+
+    const shown = screen.getByTestId('quick-match-scoring-error');
+    expect(shown).toHaveTextContent('scoring.errors.saveFailed');
+    expect(shown).not.toHaveTextContent('Failed to fetch');
+  });
+
+  /**
+   * El par, el stroke index y los metros son de la barra que juega cada uno.
+   * `holes` es solo la tarjeta de la PRIMERA barra del campo, y en 56 de los
+   * 800 campos federados el stroke index cambia de una barra a otra: pintar esa
+   * tarjeta a quien juega otra le ensena un indice que no es el suyo, mientras
+   * el reparto de golpes -que si resuelve la barra- le da golpe en otro hoyo.
+   */
+  describe('tarjeta de la barra del jugador', () => {
+    const renderWithCard = ({
+      holes,
+      tees,
+      participant,
+      others = [],
+      currentHole = 1,
+    }) => {
+      const me = { ...baseHookState.myParticipant, ...participant };
+      mockUseQuickMatchScoring.mockReturnValue({
+        ...baseHookState,
+        quickMatch: { ...baseQuickMatch, participants: [me, ...others] },
+        holes,
+        tees,
+        currentHole,
+        totalHoles: holes.length,
+        myParticipant: me,
+        // La cabecera del hoyo solo se pinta a quien anota
+        isScorer: true,
+        coveredParticipantIds: [
+          'user-1',
+          ...others.map((o) => o.participantId),
+        ],
+        setCurrentHole: vi.fn(),
+        submitScore: vi.fn(),
+        completeMatch: vi.fn(),
+        refetch: vi.fn(),
+      });
+      return renderPage();
+    };
+
+    const teeWithCard = {
+      color: 'YELLOW',
+      gender: 'MALE',
+      holes: [{ holeNumber: 1, par: 3, strokeIndex: 15, meters: 142 }],
+    };
+
+    it('pinta el par y el indice de su barra, no los del campo', () => {
+      renderWithCard({
+        holes: [{ holeNumber: 1, par: 4, strokeIndex: 5 }],
+        tees: [teeWithCard],
+        participant: { color: 'YELLOW', teeGender: 'MALE' },
+      });
+
+      expect(screen.getByText('input.par 3')).toBeInTheDocument();
+      expect(screen.getByText('input.strokeIndex 15')).toBeInTheDocument();
+      expect(screen.queryByText('input.par 4')).not.toBeInTheDocument();
+      expect(screen.queryByText('input.strokeIndex 5')).not.toBeInTheDocument();
+    });
+
+    it('muestra los metros de la barra', () => {
+      renderWithCard({
+        holes: [{ holeNumber: 1, par: 4, strokeIndex: 5 }],
+        tees: [teeWithCard],
+        participant: { color: 'YELLOW', teeGender: 'MALE' },
+      });
+
+      expect(screen.getByText('input.meters 142')).toBeInTheDocument();
+    });
+
+    it('cae a la tarjeta del campo cuando la barra no trae la suya', () => {
+      renderWithCard({
+        holes: [{ holeNumber: 1, par: 4, strokeIndex: 5 }],
+        tees: [{ color: 'YELLOW', gender: 'MALE' }],
+        participant: { color: 'YELLOW', teeGender: 'MALE' },
+      });
+
+      expect(screen.getByText('input.par 4')).toBeInTheDocument();
+      expect(screen.getByText('input.strokeIndex 5')).toBeInTheDocument();
+    });
+
+    /**
+     * Las salidas dadas de alta a mano no traen metros, y la tarjeta del campo
+     * no tiene donde guardarlos. Se ensena la etiqueta con un guion: el hueco
+     * se lee como "aqui falta el dato", y la cabecera no cambia de tamano
+     * segun el campo.
+     */
+
+    /**
+     * Quien anota puede estar anotando a alguien de otra barra: con una sola
+     * cabecera se le pintaba —y se le dibujaba la figura— contra un par que no
+     * era el suyo, mientras sus golpes sí venían resueltos por su barra.
+     */
+    it('con barras distintas, la cabecera es la de quien anota y el otro lleva la suya', () => {
+      renderWithCard({
+        holes: [{ holeNumber: 1, par: 4, strokeIndex: 5 }],
+        tees: [
+          teeWithCard,
+          {
+            color: 'RED',
+            gender: 'FEMALE',
+            holes: [{ holeNumber: 1, par: 5, strokeIndex: 3, meters: 300 }],
+          },
+        ],
+        participant: { color: 'YELLOW', teeGender: 'MALE' },
+        others: [
+          {
+            participantId: 'user-2',
+            userId: 'user-2',
+            name: 'Friend',
+            handicap: 0,
+            color: 'RED',
+            teeGender: 'FEMALE',
+          },
+        ],
+      });
+
+      // Los mios, en la cabecera: es la vuelta que estoy jugando
+      expect(screen.getByText('input.par 3')).toBeInTheDocument();
+      expect(screen.getByText('input.meters 142')).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('quick-match-hole-facts-user-1'),
+      ).not.toBeInTheDocument();
+
+      const theirs = screen.getByTestId('quick-match-hole-facts-user-2');
+      expect(theirs).toHaveTextContent('input.par 5');
+      expect(theirs).toHaveTextContent('input.meters 300');
+    });
+
+    it('con la misma barra, los datos van una sola vez en la cabecera', () => {
+      renderWithCard({
+        holes: [{ holeNumber: 1, par: 4, strokeIndex: 5 }],
+        tees: [teeWithCard],
+        participant: { color: 'YELLOW', teeGender: 'MALE' },
+      });
+
+      expect(screen.getByText('input.par 3')).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('quick-match-hole-facts-user-1'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('ensena la etiqueta con un guion cuando el hoyo no tiene metros', () => {
+      renderWithCard({
+        holes: [{ holeNumber: 1, par: 4, strokeIndex: 5 }],
+        tees: [],
+        participant: { color: 'YELLOW', teeGender: 'MALE' },
+      });
+
+      expect(screen.getByText('input.meters -')).toBeInTheDocument();
+    });
+
+    /**
+     * La reserva de quien no trae su hoyo es la tarjeta del campo, que es de
+     * todos, y NUNCA la barra de quien anota: pintarle a otro jugador el par
+     * amarillo bajo su nombre es el error que esta pantalla viene a quitar.
+     * Pasa con tarjetas importadas a medias, que existen pero no traen el hoyo.
+     */
+    it('a quien le falta el hoyo en su barra le pinta el del campo, no el de quien anota', () => {
+      renderWithCard({
+        holes: [{ holeNumber: 1, par: 4, strokeIndex: 5 }],
+        tees: [
+          teeWithCard,
+          {
+            color: 'RED',
+            gender: 'FEMALE',
+            holes: [{ holeNumber: 2, par: 5, strokeIndex: 3, meters: 300 }],
+          },
+        ],
+        participant: { color: 'YELLOW', teeGender: 'MALE' },
+        others: [
+          {
+            participantId: 'user-2',
+            userId: 'user-2',
+            name: 'Friend',
+            handicap: 0,
+            color: 'RED',
+            teeGender: 'FEMALE',
+          },
+        ],
+      });
+
+      const theirs = screen.getByTestId('quick-match-hole-facts-user-2');
+      expect(theirs).toHaveTextContent('input.par 4');
+      expect(theirs).toHaveTextContent('input.strokeIndex 5');
+      expect(theirs).not.toHaveTextContent('input.par 3');
+      expect(theirs).not.toHaveTextContent('input.meters 142');
+    });
+
+    /**
+     * Nada obliga a que la tarjeta de una barra este completa: la trae el
+     * importador. Con el panel colgando solo de la barra propia, en los hoyos
+     * que le faltaran desaparecia la entrada de golpes y no se podia anotar a
+     * NADIE, mientras el boton de siguiente seguia llevando hasta alli.
+     */
+    it('con la barra propia a medias sigue dejando anotar, con la tarjeta del campo', () => {
+      renderWithCard({
+        holes: [
+          { holeNumber: 1, par: 4, strokeIndex: 5 },
+          { holeNumber: 2, par: 3, strokeIndex: 11 },
+        ],
+        tees: [teeWithCard],
+        participant: { color: 'YELLOW', teeGender: 'MALE' },
+        currentHole: 2,
+      });
+
+      expect(screen.getByTestId('quick-match-hole-input')).toBeInTheDocument();
+      expect(screen.getByText('input.par 3')).toBeInTheDocument();
+      expect(screen.getByText('input.strokeIndex 11')).toBeInTheDocument();
+    });
+
+    /**
+     * Los metros son justo lo que distingue una barra de otra, y no deciden
+     * como se lee el golpe. Comparados junto al par y al indice, cualquier
+     * partido mixto partia la cabecera y apretaba los datos de cada uno en
+     * media columna a 320 px, que es lo que se acababa de arreglar. Cada campo
+     * se mira por su cuenta: del otro jugador solo baja lo que difiera.
+     */
+    it('con el mismo par e indice pero metros distintos, solo bajan los metros', () => {
+      renderWithCard({
+        holes: [{ holeNumber: 1, par: 4, strokeIndex: 5 }],
+        tees: [
+          {
+            color: 'YELLOW',
+            gender: 'MALE',
+            holes: [{ holeNumber: 1, par: 4, strokeIndex: 5, meters: 142 }],
+          },
+          {
+            color: 'RED',
+            gender: 'FEMALE',
+            holes: [{ holeNumber: 1, par: 4, strokeIndex: 5, meters: 300 }],
+          },
+        ],
+        participant: { color: 'YELLOW', teeGender: 'MALE' },
+        others: [
+          {
+            participantId: 'user-2',
+            userId: 'user-2',
+            name: 'Friend',
+            handicap: 0,
+            color: 'RED',
+            teeGender: 'FEMALE',
+          },
+        ],
+      });
+
+      // El par y el indice, una sola vez arriba, con mis metros
+      expect(screen.getByText('input.par 4')).toBeInTheDocument();
+      expect(screen.getByText('input.strokeIndex 5')).toBeInTheDocument();
+      expect(screen.getByText('input.meters 142')).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('quick-match-hole-facts-user-1'),
+      ).not.toBeInTheDocument();
+
+      // Del otro jugador solo bajan los metros: el par y el indice son los mismos
+      const theirs = screen.getByTestId('quick-match-hole-facts-user-2');
+      expect(theirs).toHaveTextContent('input.meters 300');
+      expect(theirs).not.toHaveTextContent('input.par');
+      expect(theirs).not.toHaveTextContent('input.strokeIndex');
+    });
+
+    /**
+     * De los 800 campos federados, 56 cambian el indice entre barras y solo 25
+     * el par: agrupar los dos repetia debajo del otro jugador un par que ya
+     * estaba en la cabecera y era el mismo, justo en el caso mas frecuente.
+     */
+    it('si solo cambia el indice, no repite debajo el par que ya esta arriba', () => {
+      renderWithCard({
+        holes: [{ holeNumber: 1, par: 4, strokeIndex: 5 }],
+        tees: [
+          {
+            color: 'YELLOW',
+            gender: 'MALE',
+            holes: [{ holeNumber: 1, par: 4, strokeIndex: 5, meters: 142 }],
+          },
+          {
+            color: 'RED',
+            gender: 'FEMALE',
+            holes: [{ holeNumber: 1, par: 4, strokeIndex: 3, meters: 142 }],
+          },
+        ],
+        participant: { color: 'YELLOW', teeGender: 'MALE' },
+        others: [
+          {
+            participantId: 'user-2',
+            userId: 'user-2',
+            name: 'Friend',
+            handicap: 0,
+            color: 'RED',
+            teeGender: 'FEMALE',
+          },
+        ],
+      });
+
+      const theirs = screen.getByTestId('quick-match-hole-facts-user-2');
+      expect(theirs).toHaveTextContent('input.strokeIndex 3');
+      expect(theirs).not.toHaveTextContent('input.par');
+      expect(theirs).not.toHaveTextContent('input.meters');
+    });
+  });
+});
+
+describe('QuickMatchScoringPage · foursomes anota una bola por bando', () => {
+  const foursomesMatch = {
+    ...baseQuickMatch,
+    matchFormat: 'FOURSOMES',
+    scoringFormat: null,
+    status: 'IN_PROGRESS',
+    isCompleted: false,
+    participants: [
+      {
+        participantId: 'user-1',
+        userId: 'user-1',
+        name: 'Yo',
+        handicap: 18,
+        team: 'A',
+      },
+      { participantId: 'p-partner', name: 'Socio', handicap: 12, team: 'A' },
+      {
+        participantId: 'p-rival-1',
+        name: 'Rival Uno',
+        handicap: 10,
+        team: 'B',
+      },
+      {
+        participantId: 'p-rival-2',
+        name: 'Rival Dos',
+        handicap: 14,
+        team: 'B',
+      },
+    ],
+    holeScores: [],
+  };
+
+  const renderFoursomes = (overrides = {}, submitScore = vi.fn()) => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: { ...foursomesMatch, ...overrides },
+      myParticipant: foursomesMatch.participants[0],
+      isScorer: true,
+      coveredParticipantIds: ['user-1', 'p-partner', 'p-rival-1', 'p-rival-2'],
+      setCurrentHole: vi.fn(),
+      submitScore,
+      completeMatch: vi.fn(),
+      refetch: vi.fn(),
+    });
+    renderPage();
+    return submitScore;
+  };
+
+  it('shows one box per side, named after both partners', () => {
+    renderFoursomes();
+
+    expect(screen.getByText('Yo & Socio')).toBeInTheDocument();
+    expect(screen.getByText('Rival Uno & Rival Dos')).toBeInTheDocument();
+    // Una casilla por bando, no una por jugador.
+    expect(
+      screen.getByTestId('quick-match-score-button-user-1'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('quick-match-score-button-p-rival-1'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-score-button-p-partner'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-score-button-p-rival-2'),
+    ).not.toBeInTheDocument();
+  });
+
+  /**
+   * El bando se llama igual aquí que en la tarjeta: quien anota va delante (FE
+   * #550). Solo cambia el texto —la bola sigue escribiéndose bajo el titular del
+   * bando—, así que la casilla es la misma antes y después.
+   */
+  it('escribe delante al que mira, sin mover la bola del bando', () => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: foursomesMatch,
+      myParticipant: foursomesMatch.participants[1],
+      isScorer: true,
+      coveredParticipantIds: ['user-1', 'p-partner', 'p-rival-1', 'p-rival-2'],
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      refetch: vi.fn(),
+    });
+    renderPage();
+
+    expect(screen.getByText('Socio & Yo')).toBeInTheDocument();
+    // El bando rival no lo juega: se queda como viene.
+    expect(screen.getByText('Rival Uno & Rival Dos')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('quick-match-score-button-user-1'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-score-button-p-partner'),
+    ).not.toBeInTheDocument();
+  });
+
+  /**
+   * La bola del bando la anota cualquiera de los dos: si la metió el compañero,
+   * la casilla del bando tiene que enseñarla igual. Antes, cada jugador solo
+   * veía la suya y el hoyo parecía sin anotar.
+   */
+  it('shows the ball the partner entered', () => {
+    renderFoursomes({
+      holeScores: [{ holeNumber: 1, participantId: 'p-partner', score: 5 }],
+    });
+
+    expect(
+      screen.getByTestId('quick-match-score-button-user-1'),
+    ).toHaveTextContent('5');
+  });
+
+  it('keeps one box per player in fourball', () => {
+    renderFoursomes({ matchFormat: 'FOURBALL' });
+
+    // Dos bolas por bando: cada jugador anota la suya.
+    expect(
+      screen.getByTestId('quick-match-score-button-user-1'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('quick-match-score-button-p-partner'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('quick-match-score-button-p-rival-1'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('quick-match-score-button-p-rival-2'),
+    ).toBeInTheDocument();
+  });
+
+  /**
+   * Una bola, una fila: la del primer jugador del bando, la anote quien la
+   * anote. A nombre de quien tuviera el móvil, los dos anotadores escribían
+   * filas distintas del mismo golpe y cada pantalla leía una.
+   */
+  it('writes the side ball under the first player of the side', () => {
+    const submitScore = vi.fn();
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: foursomesMatch,
+      myParticipant: foursomesMatch.participants[2],
+      isScorer: true,
+      // Anotación cruzada: en foursomes cada anotador cubre a los cuatro.
+      coveredParticipantIds: ['user-1', 'p-partner', 'p-rival-1', 'p-rival-2'],
+      setCurrentHole: vi.fn(),
+      submitScore,
+      completeMatch: vi.fn(),
+      refetch: vi.fn(),
+    });
+
+    renderPage();
+
+    // El rival anota la bola del bando de enfrente bajo su primer jugador, no
+    // bajo sí mismo ni bajo el compañero.
+    expect(
+      screen.getByTestId('quick-match-score-button-user-1'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('quick-match-score-button-p-rival-1'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-score-button-p-partner'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-score-button-p-rival-2'),
+    ).not.toBeInTheDocument();
+
+    // Y al anotar de verdad, el golpe se guarda a ese nombre: que se pinte la
+    // casilla correcta no dice nada de bajo quién escribe.
+    fireEvent.click(screen.getByTestId('quick-match-score-button-user-1'));
+    fireEvent.click(screen.getByText('5').closest('button'));
+
+    expect(submitScore).toHaveBeenCalledWith(1, 'user-1', 5);
+  });
+
+  /**
+   * Con la anotación cruzada del backend todos cubren la fila del bando. Si no
+   * —un backend aún sin ese reparto, o un detalle sin asignaciones— se escribe
+   * bajo el primer miembro que sí se cubra: dejar al compañero con la pantalla
+   * en blanco y sin poder anotar es peor que una fila a otro nombre.
+   */
+  it('falls back to a covered member when the card holder is not covered', () => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: foursomesMatch,
+      myParticipant: foursomesMatch.participants[0],
+      isScorer: true,
+      coveredParticipantIds: ['user-1', 'p-rival-2'],
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      refetch: vi.fn(),
+    });
+
+    renderPage();
+
+    expect(
+      screen.getByTestId('quick-match-score-button-user-1'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('quick-match-score-button-p-rival-2'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-score-button-p-rival-1'),
+    ).not.toBeInTheDocument();
+  });
+
+  /**
+   * Y la casilla enseña la fila que se escribe, no la del titular: con el
+   * respaldo mandando, corregir el golpe guardaba bien pero la pantalla seguía
+   * devolviendo el viejo, como si la corrección se hubiera perdido.
+   */
+  it('shows the entry of the row it actually writes to', () => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: {
+        ...foursomesMatch,
+        holeScores: [
+          { holeNumber: 1, participantId: 'p-rival-1', score: 4 },
+          { holeNumber: 1, participantId: 'p-rival-2', score: 6 },
+        ],
+      },
+      myParticipant: foursomesMatch.participants[0],
+      isScorer: true,
+      coveredParticipantIds: ['user-1', 'p-rival-2'],
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      refetch: vi.fn(),
+    });
+
+    renderPage();
+
+    expect(
+      screen.getByTestId('quick-match-score-button-p-rival-2'),
+    ).toHaveTextContent('6');
+  });
+
+  /** Sin cubrir a nadie del bando no hay dónde escribir: la casilla no se pinta. */
+  it('hides the side box when this scorer covers nobody on that side', () => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: foursomesMatch,
+      myParticipant: foursomesMatch.participants[0],
+      isScorer: true,
+      coveredParticipantIds: ['user-1', 'p-partner'],
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      refetch: vi.fn(),
+    });
+
+    renderPage();
+
+    expect(
+      screen.getByTestId('quick-match-score-button-user-1'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-score-button-p-rival-1'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-score-button-p-rival-2'),
+    ).not.toBeInTheDocument();
+  });
+
+  /**
+   * La bola anotada a nombre del compañero cuenta para el hoyo: el selector
+   * miraba solo al titular de la tarjeta y el hoyo no llegaba a ponerse verde.
+   */
+  it("counts a side ball entered under the partner as the side's ball", () => {
+    renderFoursomes({
+      holeScores: [
+        { holeNumber: 1, participantId: 'p-partner', score: 4 },
+        { holeNumber: 1, participantId: 'p-rival-2', score: 5 },
+      ],
+    });
+
+    expect(screen.getByTestId('quick-match-hole-btn-1').dataset.estado).toBe(
+      'complete',
+    );
+  });
+
+  /**
+   * El hoyo está completo cuando están las dos bolas, no cuatro golpes: el
+   * selector contaba los participantes que cubre el anotador —los cuatro, con
+   * anotación cruzada— y ningún hoyo de foursomes llegaba a ponerse verde.
+   */
+  it('marks a foursomes hole complete with one ball per side', () => {
+    renderFoursomes({
+      holeScores: [
+        { holeNumber: 1, participantId: 'user-1', score: 4 },
+        { holeNumber: 1, participantId: 'p-rival-1', score: 5 },
+      ],
+    });
+
+    expect(screen.getByTestId('quick-match-hole-btn-1').dataset.estado).toBe(
+      'complete',
+    );
+  });
+
+  /**
+   * Sin `team` no hay bando: cada jugador va solo. Agruparlos a todos bajo el
+   * mismo dejaba una única casilla con los cuatro nombres.
+   */
+  it('keeps a box per player when the participants have no team', () => {
+    renderFoursomes({
+      participants: foursomesMatch.participants.map((p) => ({
+        ...p,
+        team: null,
+      })),
+    });
+
+    expect(
+      screen.getByTestId('quick-match-score-button-user-1'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('quick-match-score-button-p-partner'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('quick-match-score-button-p-rival-1'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('quick-match-score-button-p-rival-2'),
+    ).toBeInTheDocument();
+  });
+
+  describe('raya (bola recogida)', () => {
+    const scoringState = (overrides = {}) => ({
+      ...baseHookState,
+      quickMatch: {
+        ...baseQuickMatch,
+        status: 'IN_PROGRESS',
+        isCompleted: false,
+        ...(overrides.quickMatch || {}),
+      },
+      isScorer: true,
+      coveredParticipantIds: ['user-1'],
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      refetch: vi.fn(),
+      ...overrides,
+    });
+
+    it('ofrece la raya en Stableford', () => {
+      mockUseQuickMatchScoring.mockReturnValue(scoringState());
+      renderPage();
+
+      fireEvent.click(screen.getByTestId('quick-match-score-button-user-1'));
+
+      expect(screen.getByTestId('picked-up-button')).toBeInTheDocument();
+    });
+
+    it('no ofrece la raya en Medal', () => {
+      // En stroke play hay que embocar en todos los hoyos: quien no lo hace no
+      // entrega tarjeta. El backend rechaza ahi el score nulo, asi que ofrecer
+      // el boton seria ofrecer algo que no se puede guardar.
+      mockUseQuickMatchScoring.mockReturnValue(
+        scoringState({ quickMatch: { scoringFormat: 'MEDAL' } }),
+      );
+      renderPage();
+
+      fireEvent.click(screen.getByTestId('quick-match-score-button-user-1'));
+
+      expect(screen.queryByTestId('picked-up-button')).not.toBeInTheDocument();
+    });
+
+    it('ofrece la raya en match play, donde recoger es conceder el hoyo', () => {
+      mockUseQuickMatchScoring.mockReturnValue(
+        scoringState({
+          quickMatch: { scoringFormat: null, matchFormat: 'SINGLES' },
+        }),
+      );
+      renderPage();
+
+      fireEvent.click(screen.getByTestId('quick-match-score-button-user-1'));
+
+      expect(screen.getByTestId('picked-up-button')).toBeInTheDocument();
+    });
+
+    it('el foursomes de match play sigue ofreciendo la raya del bando (23 oct 2026)', () => {
+      mockUseQuickMatchScoring.mockReturnValue(
+        scoringState({
+          quickMatch: {
+            scoringFormat: null,
+            matchFormat: 'FOURSOMES',
+            participants: [
+              {
+                participantId: 'user-1',
+                userId: 'user-1',
+                name: 'Ana',
+                team: 'A',
+              },
+              {
+                participantId: 'user-2',
+                userId: 'user-2',
+                name: 'Bea',
+                team: 'A',
+              },
+              {
+                participantId: 'user-3',
+                userId: 'user-3',
+                name: 'Carla',
+                team: 'B',
+              },
+              {
+                participantId: 'user-4',
+                userId: 'user-4',
+                name: 'Dora',
+                team: 'B',
+              },
+            ],
+          },
+        }),
+      );
+      renderPage();
+
+      fireEvent.click(screen.getByTestId('quick-match-score-button-user-1'));
+
+      expect(screen.getByTestId('picked-up-button')).toBeInTheDocument();
+    });
+
+    it('sin formato conocido no ofrece la raya: solo donde se permite (23 oct 2026)', () => {
+      mockUseQuickMatchScoring.mockReturnValue(
+        scoringState({
+          quickMatch: { scoringFormat: undefined, matchFormat: null },
+        }),
+      );
+      renderPage();
+
+      fireEvent.click(screen.getByTestId('quick-match-score-button-user-1'));
+
+      expect(screen.queryByTestId('picked-up-button')).not.toBeInTheDocument();
+    });
+
+    it('ensena la raya anotada distinta del hoyo sin anotar', () => {
+      mockUseQuickMatchScoring.mockReturnValue(
+        scoringState({
+          quickMatch: {
+            holeScores: [
+              { holeNumber: 1, participantId: 'user-1', score: null },
+            ],
+          },
+        }),
+      );
+      renderPage();
+
+      const boton = screen.getByTestId('quick-match-score-button-user-1');
+      expect(boton.querySelector('[data-picked-up="true"]')).not.toBeNull();
+    });
+  });
+});
+
+describe('QuickMatchScoringPage · cancelar una partida en curso', () => {
+  // `baseQuickMatch` esta COMPLETADA; esto es una que se esta jugando
+  const enCurso = {
+    ...baseQuickMatch,
+    status: 'IN_PROGRESS',
+    isCompleted: false,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const comoCreador = (extra = {}) => {
+    const cancelMatch = vi.fn();
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: enCurso,
+      isCreator: true,
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn().mockResolvedValue({ ok: true }),
+      cancelMatch,
+      refetch: vi.fn(),
+      // Al final: antes iba antes y el helper pisaba en silencio cualquier
+      // funcion que le pasaran, asi que el `cancelMatch` de quien lo llamara
+      // no se invocaba nunca y no habia pista de por que.
+      ...extra,
+    });
+    return { cancelMatch };
+  };
+
+  it('offers cancelling to the creator of a match under way', async () => {
+    // Hasta ahora no habia salida para una vuelta que se abandona: el unico
+    // que puede cerrarla acababa dandola por TERMINADA, metiendo una vuelta a
+    // medias en las estadisticas de todo el grupo.
+    comoCreador();
+    renderPage();
+
+    expect(
+      await screen.findByTestId('quick-match-cancel-button'),
+    ).toBeInTheDocument();
+  });
+
+  it('does not offer it to someone who did not create the match', async () => {
+    // El servidor lo rechaza con NotQuickMatchCreatorError, asi que ofrecerlo
+    // seria enseñar un boton que solo sabe fallar.
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: enCurso,
+      isCreator: false,
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      cancelMatch: vi.fn(),
+      refetch: vi.fn(),
+    });
+    renderPage();
+
+    await screen.findByTestId('quick-match-scoring-tabs');
+    expect(
+      screen.queryByTestId('quick-match-cancel-button'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('asks first, and says that it affects the whole group', async () => {
+    comoCreador();
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('quick-match-cancel-button'));
+
+    expect(screen.getByTestId('quick-match-cancel-body')).toHaveTextContent(
+      'scoring.cancelMatch.confirmBody',
+    );
+  });
+
+  it('does nothing until it is confirmed', async () => {
+    const { cancelMatch } = comoCreador();
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('quick-match-cancel-button'));
+    expect(cancelMatch).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('quick-match-cancel-confirm'));
+    expect(cancelMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops accepting scores once the match is cancelled', async () => {
+    // Sin esto la pantalla seguia editable y cada guardado se estrellaba contra
+    // un 409 que se traduce como «vuelve a cargarla»; recargar no la resucita,
+    // asi que el usuario se quedaba reintentando para siempre.
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: { ...enCurso, isCancelled: true },
+      isCreator: true,
+      isScorer: true,
+      myParticipant: enCurso.participants[0],
+      coveredParticipantIds: ['user-1'],
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      cancelMatch: vi.fn(),
+      refetch: vi.fn(),
+    });
+    const { unmount } = renderPage();
+
+    await screen.findByTestId('quick-match-scoring-tabs');
+    // En modo lectura la casilla deja de ser un boton: no hay donde pulsar
+    expect(
+      screen.queryByTestId('quick-match-score-button-user-1'),
+    ).not.toBeInTheDocument();
+    unmount();
+
+    // Y la misma partida sin cancelar si deja anotar, que si no esto pasaria
+    // igual con la pantalla rota de cualquier otra forma
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: enCurso,
+      isCreator: true,
+      isScorer: true,
+      myParticipant: enCurso.participants[0],
+      coveredParticipantIds: ['user-1'],
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      cancelMatch: vi.fn(),
+      refetch: vi.fn(),
+    });
+    renderPage();
+
+    expect(
+      await screen.findByTestId('quick-match-score-button-user-1'),
+    ).toBeInTheDocument();
+  });
+
+  it('says on screen that the match is cancelled', async () => {
+    // Los demas no vieron el aviso: se enteran por aqui cuando el sondeo traiga
+    // el estado nuevo. Sin esto su pantalla quedaba igual que antes.
+    comoCreador({ quickMatch: { ...enCurso, isCancelled: true } });
+    renderPage();
+
+    expect(
+      await screen.findByTestId('quick-match-cancelled-badge'),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the dialog open when cancelling fails', async () => {
+    // Cerrandolo pase lo que pase, un fallo dejaba al usuario delante de la
+    // misma pantalla, con los botones intactos y sin saber que no se cancelo.
+    const cancelMatch = vi.fn().mockResolvedValue({ ok: false });
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: enCurso,
+      isCreator: true,
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn().mockResolvedValue({ ok: true }),
+      cancelMatch,
+      refetch: vi.fn(),
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('quick-match-cancel-button'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('quick-match-cancel-confirm'));
+    });
+
+    expect(
+      screen.getByTestId('quick-match-cancel-confirm'),
+    ).toBeInTheDocument();
+    // Y con un aviso propio: el general habla de anotar y ademas queda detras
+    // del velo del dialogo, fuera de la vista
+    // Exacto: `toHaveTextContent` casa por subcadena, y con «failed» a secas
+    // este test pasaba tambien con `failedServer` y `failedOffline` —que es lo
+    // que de verdad salia aqui—.
+    expect(screen.getByTestId('quick-match-cancel-error').textContent).toBe(
+      'scoring.cancelMatch.failedServer',
+    );
+  });
+
+  it('blames the connection, not another device, when there is no 409', async () => {
+    // «Puede que otro dispositivo ya la haya cerrado» es una explicacion
+    // concreta y equivocada para el caso mas probable en un campo: sin
+    // cobertura. Solo un 409 significa que ya estaba cerrada.
+    const cancelMatch = vi
+      .fn()
+      .mockResolvedValue({ ok: false, error: new Error('sin red') });
+    comoCreador({ cancelMatch });
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('quick-match-cancel-button'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('quick-match-cancel-confirm'));
+    });
+
+    expect(screen.getByTestId('quick-match-cancel-error').textContent).toBe(
+      'scoring.cancelMatch.failedOffline',
+    );
+  });
+
+  it('says it was already closed when the server answers 409', async () => {
+    const conflicto = new Error('conflicto');
+    conflicto.status = 409;
+    const cancelMatch = vi
+      .fn()
+      .mockResolvedValue({ ok: false, error: conflicto });
+    comoCreador({ cancelMatch });
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('quick-match-cancel-button'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('quick-match-cancel-confirm'));
+    });
+
+    expect(screen.getByTestId('quick-match-cancel-error').textContent).toBe(
+      'scoring.cancelMatch.failed',
+    );
+  });
+
+  it('leaves the focus somewhere usable after cancelling', async () => {
+    // El boton que abrio el aviso desaparece al cancelar de verdad, asi que
+    // devolver el foco «a donde estaba» lo mandaba a un nodo desmontado y de
+    // ahi al principio de la pagina.
+    // Al cancelarse de verdad la partida pasa a CANCELLED y el boton desaparece,
+    // que es justo lo que deja el foco huerfano. Con un mock fijo eso no pasa.
+    const cancelMatch = vi.fn(() => {
+      mockUseQuickMatchScoring.mockReturnValue({
+        ...baseHookState,
+        quickMatch: { ...enCurso, isCancelled: true },
+        isCreator: true,
+        setCurrentHole: vi.fn(),
+        submitScore: vi.fn(),
+        completeMatch: vi.fn().mockResolvedValue({ ok: true }),
+        cancelMatch: vi.fn().mockResolvedValue({ ok: true }),
+        refetch: vi.fn(),
+      });
+      return Promise.resolve({ ok: true });
+    });
+    comoCreador({ cancelMatch });
+    renderPage();
+
+    // Enfocar de verdad el boton: `fireEvent.click` no mueve el foco, y sin
+    // esto el test pasaba por el foco que la pagina ponia al montarse, no por
+    // lo que dice comprobar.
+    const boton = await screen.findByTestId('quick-match-cancel-button');
+    boton.focus();
+    expect(document.activeElement).toBe(boton);
+
+    fireEvent.click(boton);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('quick-match-cancel-confirm'));
+    });
+
+    // A la pestaña abierta, no a la barra: la barra no es enfocable en el
+    // patrón de pestañas, y desde ella las flechas no hacían nada
+    expect(document.activeElement).toBe(
+      screen.getByRole('tab', { selected: true }),
+    );
+    expect(document.activeElement).toBe(
+      screen.getByTestId('quick-match-tab-input'),
+    );
+  });
+
+  it('returns the focus to the open tab when nothing was focused before the dialog (Safari)', async () => {
+    // En Safari tocar un botón no lo enfoca: al abrir el aviso el foco está en
+    // body, que no se guarda. Al cerrarlo tiene que ir a la pestaña abierta, no
+    // quedarse en ninguna parte (CodeRabbit, FE #1108)
+    comoCreador();
+    renderPage();
+
+    const boton = await screen.findByTestId('quick-match-cancel-button');
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.click(boton);
+    await screen.findByTestId('quick-match-cancel-confirm');
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'Escape' });
+    });
+
+    expect(document.activeElement).toBe(
+      screen.getByRole('tab', { selected: true }),
+    );
+  });
+
+  it('a second dialog opened from a focused button gives the focus back to that button', async () => {
+    // Cerrar el primer aviso tiene que dejarlo todo como antes de abrirlo: si
+    // no, el segundo no guarda el botón que lo abrió y el foco acaba en las
+    // pestañas (CodeRabbit, FE #1108)
+    comoCreador();
+    renderPage();
+
+    const boton = await screen.findByTestId('quick-match-cancel-button');
+    fireEvent.click(boton);
+    await screen.findByTestId('quick-match-cancel-confirm');
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'Escape' });
+    });
+
+    boton.focus();
+    fireEvent.click(boton);
+    await screen.findByTestId('quick-match-cancel-confirm');
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'Escape' });
+    });
+
+    expect(document.activeElement).toBe(boton);
+  });
+
+  it('does not touch the focus when the page just loads', async () => {
+    // El efecto corre tambien al montar, con los dos avisos cerrados: si toca
+    // el foco ahi, se lo lleva a las pestanas en cada carga de la pantalla.
+    comoCreador();
+    renderPage();
+
+    await screen.findByTestId('quick-match-scoring-tabs');
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('blames the server, not the connection, on a 403 or a 404', async () => {
+    // El backend usa 403 para «ya no eres quien la creo» y 404 para «esa
+    // partida ya no existe»: mandar a mirar el wifi con buena cobertura deja al
+    // usuario reintentando sin enterarse nunca del motivo.
+    const prohibido = new Error('prohibido');
+    prohibido.status = 403;
+    const cancelMatch = vi
+      .fn()
+      .mockResolvedValue({ ok: false, error: prohibido });
+    comoCreador({ cancelMatch });
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('quick-match-cancel-button'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('quick-match-cancel-confirm'));
+    });
+
+    expect(screen.getByTestId('quick-match-cancel-error').textContent).toBe(
+      'scoring.cancelMatch.failedServer',
+    );
+  });
+
+  it('forgets the failure notice once the dialog is dismissed with Escape', async () => {
+    // Si no, la proxima vez que abra el dialogo se lo encuentra ya con el error
+    // de la vez anterior, sin haber confirmado nada.
+    const cancelMatch = vi.fn().mockResolvedValue({ ok: false });
+    comoCreador({ cancelMatch });
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('quick-match-cancel-button'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('quick-match-cancel-confirm'));
+    });
+    expect(screen.getByTestId('quick-match-cancel-error')).toBeInTheDocument();
+
+    act(() => {
+      fireEvent.keyDown(document, { key: 'Escape' });
+    });
+    fireEvent.click(screen.getByTestId('quick-match-cancel-button'));
+
+    expect(
+      screen.queryByTestId('quick-match-cancel-error'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps the finish dialog open and says so when finishing fails', async () => {
+    // El hermano de al lado se quedaba peor que el nuevo: cerraba pasara lo que
+    // pasara, y la partida seguia en curso sin que nadie dijera que fallo.
+    const completeMatch = vi.fn().mockResolvedValue({ ok: false });
+    comoCreador({ completeMatch });
+    renderPage();
+
+    fireEvent.click(await screen.findByText('scoring.finish.button'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('scoring.finish.confirm'));
+    });
+
+    expect(screen.getByTestId('quick-match-finish-error')).toBeInTheDocument();
+  });
+
+  it('is gone once the match is already cancelled', async () => {
+    comoCreador({ quickMatch: { ...enCurso, isCancelled: true } });
+    renderPage();
+
+    await screen.findByTestId('quick-match-scoring-tabs');
+    expect(
+      screen.queryByTestId('quick-match-cancel-button'),
+    ).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * LA TABLA D — qué enseña la pantalla de lo que la cola trae de vuelta.
+ *
+ * El aviso NO se apoya en `navigator.onLine`: en un campo con dos barras dice
+ * que hay conexión mientras no pasa nada. Lo que se cuenta es un hecho —
+ * cuántos golpes siguen en el móvil—, no un estado de la red que la aplicación
+ * no puede conocer.
+ *
+ *   estado                    | qué se ve
+ *   --------------------------|---------------------------------------------
+ *   nada pendiente            | ningún aviso
+ *   golpes sin enviar         | aviso en ámbar, con el número. NO el rojo:
+ *                             | para el jugador están anotados
+ *   golpes que se perdieron   | aviso en rojo con los hoyos: el servidor los
+ *                             | rechazó y reintentar no cambiaría nada
+ *   anotación distinta        | modal: lo mío, lo suyo, y quién lo anotó
+ *   «pongo el mío»            | resuelve a mi favor
+ *   «dejo el que hay»         | resuelve a favor del servidor
+ *   dos discrepancias         | de una en una; al cerrar la primera sigue la
+ *                             | segunda, sin perderla
+ */
+describe('QuickMatchScoringPage · lo que quedó sin enviar (FE #515, tabla D)', () => {
+  const resuelveDiscrepancia = vi.fn();
+
+  const pinta = (extra) => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: {
+        ...baseQuickMatch,
+        status: 'IN_PROGRESS',
+        isCompleted: false,
+      },
+      isScorer: true,
+      coveredParticipantIds: ['user-1'],
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      cancelMatch: vi.fn(),
+      refetch: vi.fn(),
+      pendientes: 0,
+      perdidos: [],
+      discrepancias: [],
+      resuelveDiscrepancia,
+      ...extra,
+    });
+    return renderPage();
+  };
+
+  const unaDiscrepancia = (holeNumber = 7) => ({
+    holeNumber,
+    participantId: 'user-1',
+    mio: 5,
+    enElServidor: 6,
+    anotadoPor: 'user-2',
+  });
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it('sin nada pendiente no enseña ningún aviso', () => {
+    pinta();
+    expect(
+      screen.queryByTestId('quick-match-pendientes'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-perdidos'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-discrepancia'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('con golpes sin enviar lo dice, y no como un error', () => {
+    // Para el jugador el golpe está anotado: solo no ha salido del móvil.
+    // El recuadro rojo se reserva para lo que de verdad no se pudo guardar.
+    pinta({ pendientes: 3 });
+    const aviso = screen.getByTestId('quick-match-pendientes');
+    expect(aviso).toBeInTheDocument();
+    expect(aviso.className).toContain('aviso');
+    expect(aviso.className).not.toContain('error');
+  });
+
+  it('revisor: sin red y sin pendientes, quien anota ya ve el aviso de anotar, y uno solo', async () => {
+    const { default: AvisoSinConexion } =
+      await import('../../components/ui/AvisoSinConexion');
+    Object.defineProperty(globalThis.navigator, 'onLine', {
+      value: false,
+      configurable: true,
+    });
+    try {
+      mockUseQuickMatchScoring.mockReturnValue({
+        ...baseHookState,
+        quickMatch: {
+          ...baseQuickMatch,
+          status: 'IN_PROGRESS',
+          isCompleted: false,
+        },
+        isScorer: true,
+        coveredParticipantIds: ['user-1'],
+        setCurrentHole: vi.fn(),
+        submitScore: vi.fn(),
+        completeMatch: vi.fn(),
+        cancelMatch: vi.fn(),
+        refetch: vi.fn(),
+        pendientes: 0,
+        perdidos: [],
+        discrepancias: [],
+        resuelveDiscrepancia,
+        loadError: { message: 'sin red' },
+      });
+      render(
+        <>
+          <AvisoSinConexion />
+          {renderTree()}
+        </>,
+      );
+
+      expect(screen.getByTestId('aviso-sin-conexion')).toHaveTextContent(
+        'sinConexion.anotando',
+      );
+      expect(screen.queryByTestId('quick-match-sin-conexion')).toBeNull();
+    } finally {
+      Object.defineProperty(globalThis.navigator, 'onLine', {
+        value: true,
+        configurable: true,
+      });
+    }
+  });
+
+  it('regresión (12 oct 2026): sin red, las pendientes van en el aviso de arriba, no en otro recuadro', async () => {
+    const { default: AvisoSinConexion } =
+      await import('../../components/ui/AvisoSinConexion');
+    Object.defineProperty(globalThis.navigator, 'onLine', {
+      value: false,
+      configurable: true,
+    });
+    try {
+      mockUseQuickMatchScoring.mockReturnValue({
+        ...baseHookState,
+        quickMatch: {
+          ...baseQuickMatch,
+          status: 'IN_PROGRESS',
+          isCompleted: false,
+        },
+        isScorer: true,
+        coveredParticipantIds: ['user-1'],
+        setCurrentHole: vi.fn(),
+        submitScore: vi.fn(),
+        completeMatch: vi.fn(),
+        cancelMatch: vi.fn(),
+        refetch: vi.fn(),
+        pendientes: 2,
+        perdidos: [],
+        discrepancias: [],
+        resuelveDiscrepancia,
+      });
+      render(
+        <>
+          <AvisoSinConexion />
+          {renderTree()}
+        </>,
+      );
+
+      expect(screen.queryByTestId('quick-match-pendientes')).toBeNull();
+      expect(screen.getByTestId('aviso-sin-conexion')).toHaveTextContent(
+        'sinConexion.anotando',
+      );
+    } finally {
+      Object.defineProperty(globalThis.navigator, 'onLine', {
+        value: true,
+        configurable: true,
+      });
+    }
+  });
+
+  it('con varios jugadores, cada hoyo se nombra una vez', () => {
+    // El caso real: el creador termina la partida mientras un anotador está
+    // sin cobertura cubriendo a tres invitados. Todo lo suyo se rechaza, y
+    // «Los hoyos 7, 7, 7, 8, 8, 8» es lo que sale si se listan sin agrupar
+    pinta({
+      perdidos: [
+        { holeNumber: 7, participantId: 'user-1' },
+        { holeNumber: 7, participantId: 'user-2' },
+        { holeNumber: 8, participantId: 'user-1' },
+      ],
+    });
+
+    const aviso = screen.getByTestId('quick-match-perdidos');
+    expect(aviso.textContent).toContain('7, 8');
+    expect(aviso.textContent).not.toContain('7, 7');
+  });
+
+  it('los golpes que el servidor rechazó se cuentan aparte, y en rojo', () => {
+    pinta({ perdidos: [{ holeNumber: 4, participantId: 'user-1' }] });
+    const aviso = screen.getByTestId('quick-match-perdidos');
+    expect(aviso).toBeInTheDocument();
+    expect(aviso.className).toContain('error');
+    expect(aviso.textContent).toContain('4');
+  });
+
+  it('una anotación distinta abre el modal con los dos resultados', () => {
+    pinta({ discrepancias: [unaDiscrepancia()] });
+    const modal = screen.getByTestId('quick-match-discrepancia');
+    expect(modal).toBeInTheDocument();
+    expect(modal.getAttribute('aria-modal')).toBe('true');
+    expect(modal.textContent).toContain('5');
+    expect(modal.textContent).toContain('6');
+  });
+
+  it('el modal dice quién anotó qué, y qué ibas a anotar tú', () => {
+    // Los dos números salen también en los botones: si esto se mirara sobre el
+    // modal entero, un cuerpo que no dijera nada pasaría igual
+    pinta({ discrepancias: [unaDiscrepancia()] });
+    const cuerpo = screen.getByTestId('quick-match-discrepancia-body');
+    expect(cuerpo.textContent).toContain('Friend');
+    expect(cuerpo.textContent).toContain('6');
+    expect(cuerpo.textContent).toContain('5');
+  });
+
+  it('si el que anotó ya no está en la partida, no deja el hueco en blanco', () => {
+    pinta({ discrepancias: [{ ...unaDiscrepancia(), anotadoPor: 'se-fue' }] });
+    const cuerpo = screen.getByTestId('quick-match-discrepancia-body');
+    expect(cuerpo.textContent).toContain('conflictScorerUnknown');
+  });
+
+  it('«pongo el mío» resuelve a mi favor', () => {
+    pinta({ discrepancias: [unaDiscrepancia()] });
+    fireEvent.click(screen.getByTestId('quick-match-discrepancia-mio'));
+    expect(resuelveDiscrepancia).toHaveBeenCalledWith(7, 'user-1', 'mio');
+  });
+
+  it('«dejo el que hay» resuelve a favor del servidor', () => {
+    pinta({ discrepancias: [unaDiscrepancia()] });
+    fireEvent.click(screen.getByTestId('quick-match-discrepancia-servidor'));
+    // El hook solo entiende 'mio' y 'elQueHay': cualquier otra cosa no hace
+    // nada, así que un nombre distinto aquí dejaba el botón muerto en silencio
+    expect(resuelveDiscrepancia).toHaveBeenCalledWith(7, 'user-1', 'elQueHay');
+  });
+
+  it('con dos discrepancias enseña la primera, no las dos a la vez', () => {
+    // Se resuelven de una en una: dos modales superpuestos no se pueden usar,
+    // y la segunda no se pierde porque el hook la mantiene en la lista
+    pinta({ discrepancias: [unaDiscrepancia(7), unaDiscrepancia(12)] });
+    expect(screen.getAllByTestId('quick-match-discrepancia')).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('quick-match-discrepancia-mio'));
+    expect(resuelveDiscrepancia).toHaveBeenCalledWith(7, 'user-1', 'mio');
+    expect(resuelveDiscrepancia).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('QuickMatchScoringPage · lo guardado se ve y se entiende (FE #515, tabla D bis)', () => {
+  const resuelveDiscrepancia = vi.fn();
+
+  const pinta = (extra) => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: {
+        ...baseQuickMatch,
+        status: 'IN_PROGRESS',
+        isCompleted: false,
+      },
+      isScorer: true,
+      coveredParticipantIds: ['user-1'],
+      holes: [{ holeNumber: 1, par: 4, strokeIndex: 5 }],
+      totalHoles: 1,
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      cancelMatch: vi.fn(),
+      refetch: vi.fn(),
+      holeScoresVisibles: [],
+      pendientes: 0,
+      perdidos: [],
+      discrepancias: [],
+      resuelveDiscrepancia,
+      ...extra,
+    });
+    return renderPage();
+  };
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it('un golpe que solo está en el móvil marca el hoyo como anotado', () => {
+    // Lo pinta todo la misma lista. Si la pantalla siguiera leyendo la del
+    // servidor, el jugador anotaría, no vería error —para él está anotado— y
+    // la casilla seguiría diciendo «Anotar»: lo natural es volver a pulsar
+    pinta({
+      holeScoresVisibles: [
+        {
+          holeNumber: 1,
+          participantId: 'user-1',
+          score: 5,
+          recordedByParticipantId: null,
+        },
+      ],
+    });
+
+    expect(screen.getByTestId('quick-match-hole-btn-1').dataset.estado).toBe(
+      'complete',
+    );
+  });
+
+  it('si la partida no llegó a cargar por falta de señal, no lo llama error', () => {
+    // Es la misma regla del resto de la pantalla: quedarse sin cobertura no es
+    // un error. Aquí llegaba con «Ha ocurrido un error. Inténtalo de nuevo»,
+    // que suena a que algo se ha roto
+    pinta({ quickMatch: null, loadError: new TypeError('Failed to fetch') });
+
+    expect(
+      screen.getByTestId('quick-match-scoring-error').textContent,
+    ).toContain('scoring.offline.noSeActualiza');
+  });
+
+  it('si no llegó a cargar por un fallo del servidor, sí lo llama error', () => {
+    pinta({
+      quickMatch: null,
+      loadError: Object.assign(new Error('boom'), { status: 500 }),
+    });
+
+    expect(
+      screen.getByTestId('quick-match-scoring-error').textContent,
+    ).not.toContain('scoring.offline.noSeActualiza');
+  });
+
+  it('si la partida no llegó a cargar, dice igualmente lo que queda sin enviar', () => {
+    // Es el caso que motivó todo: se vuelve a la app en el campo, la carga
+    // falla y esta pantalla es la única que se ve. Sin esto, los golpes
+    // guardados no aparecen por ningún lado
+    pinta({ quickMatch: null, loadError: { status: 0 }, pendientes: 2 });
+
+    expect(screen.getByTestId('quick-match-scoring-error')).toBeInTheDocument();
+    expect(screen.getByTestId('quick-match-pendientes')).toBeInTheDocument();
+  });
+
+  it('una bola recogida no deja un hueco en blanco en el modal', () => {
+    pinta({
+      discrepancias: [
+        {
+          holeNumber: 7,
+          participantId: 'user-1',
+          mio: null,
+          enElServidor: 6,
+          anotadoPor: 'user-2',
+        },
+      ],
+    });
+
+    const boton = screen.getByTestId('quick-match-discrepancia-mio');
+    expect(boton.textContent).toContain('pickedUp');
+    expect(boton.textContent).not.toMatch(/\(\s*\)/);
+  });
+
+  it('cuando el hoyo es de otro jugador, el modal dice de quién', () => {
+    // Un anotador cubre a invitados, y en foursomes a los cuatro: sin el
+    // nombre no hay forma de saber qué tarjeta está en disputa
+    pinta({
+      // El que anotó soy yo: así el nombre del jugador solo puede venir del
+      // título, y no se cuela por el cuerpo, que nombra al anotador
+      discrepancias: [
+        {
+          holeNumber: 7,
+          participantId: 'user-2',
+          mio: 5,
+          enElServidor: 6,
+          anotadoPor: 'user-1',
+        },
+      ],
+    });
+
+    const titulo = screen.getByTestId('quick-match-discrepancia-title');
+    expect(titulo.textContent).toContain('conflictTitlePlayer');
+    expect(titulo.textContent).toContain('Friend');
+  });
+
+  it('cuando el hoyo es mío, el modal no me nombra a mí', () => {
+    // «El hoyo 7 de Test User» leído por Test User sobra y suena raro
+    pinta({
+      discrepancias: [
+        {
+          holeNumber: 7,
+          participantId: 'user-1',
+          mio: 5,
+          enElServidor: 6,
+          anotadoPor: 'user-2',
+        },
+      ],
+    });
+
+    const titulo = screen.getByTestId('quick-match-discrepancia-title');
+    expect(titulo.textContent).not.toContain('conflictTitlePlayer');
+    expect(titulo.textContent).not.toContain('Test User');
+  });
+
+  it('el modal se lleva el foco al abrirse', () => {
+    // Bloquea la anotación: sin foco, el tabulador pasea por la página de
+    // detrás y un lector de pantalla no llega a leer ni la pregunta
+    pinta({
+      discrepancias: [
+        {
+          holeNumber: 7,
+          participantId: 'user-1',
+          mio: 5,
+          enElServidor: 6,
+          anotadoPor: 'user-2',
+        },
+      ],
+    });
+
+    expect(document.activeElement).toBe(
+      screen.getByTestId('quick-match-discrepancia'),
+    );
+  });
+
+  it('el aviso de error dice de qué hoyo se trata', () => {
+    // El hook lo apunta en el error desde la tabla A. Si no se pinta, el
+    // jugador lee la misma frase genérica y no sabe qué hoyo repetir
+    pinta({
+      saveError: Object.assign(new Error('nope'), {
+        status: 409,
+        holeNumber: 12,
+      }),
+    });
+
+    expect(screen.getByTestId('quick-match-save-error').textContent).toContain(
+      '12',
+    );
+  });
+});
+
+describe('QuickMatchScoringPage · anotar el hoyo siguiente sin esperar (FE #564)', () => {
+  const pinta = (extra) => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: {
+        ...baseQuickMatch,
+        status: 'IN_PROGRESS',
+        isCompleted: false,
+      },
+      isScorer: true,
+      coveredParticipantIds: ['user-1'],
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      ...extra,
+    });
+    return renderPage();
+  };
+
+  it('con un golpe todavía de camino, la casilla se sigue pudiendo pulsar', () => {
+    // Sin cobertura ese envío dura los diez segundos que el móvil tarda en
+    // rendirse: dejar la casilla de solo lectura mientras tanto impedía anotar
+    // el hoyo siguiente hasta que muriera la petición del anterior
+    pinta({ isSubmitting: true });
+
+    expect(
+      screen.getByTestId('quick-match-score-button-user-1'),
+    ).toBeInTheDocument();
+  });
+
+  it('una partida terminada sí deja la casilla de solo lectura', () => {
+    // Lo que sigue bloqueando es lo que de verdad no admite anotaciones
+    pinta({
+      quickMatch: { ...baseQuickMatch, status: 'COMPLETED', isCompleted: true },
+    });
+
+    expect(
+      screen.queryByTestId('quick-match-score-button-user-1'),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe('QuickMatchScoringPage · el aviso del vaciado (FE #551)', () => {
+  const pinta = (extra) => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: {
+        ...baseQuickMatch,
+        status: 'IN_PROGRESS',
+        isCompleted: false,
+      },
+      isScorer: true,
+      coveredParticipantIds: ['user-1'],
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      ...extra,
+    });
+    return renderPage();
+  };
+
+  it('no pinta nada si no lo hay', () => {
+    pinta({ avisoDelVaciado: null });
+    expect(screen.queryByTestId('quick-match-aviso-vaciado')).toBeNull();
+  });
+
+  it('pinta el paro con la clave compartida de anotación, aparte del error general', () => {
+    // Estado propio del hook: en `saveError` lo pisaba la siguiente anotación
+    pinta({ avisoDelVaciado: 'no-se-pudo-escribir', saveError: null });
+    expect(screen.getByTestId('quick-match-aviso-vaciado')).toHaveTextContent(
+      'scoring:errors.vaciado.no-se-pudo-escribir',
+    );
+    expect(screen.queryByTestId('quick-match-save-error')).toBeNull();
+  });
+});
+
+describe('QuickMatchScoringPage · dos avisos a la vez (FE #515)', () => {
+  const pinta = (extra) => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: {
+        ...baseQuickMatch,
+        status: 'IN_PROGRESS',
+        isCompleted: false,
+      },
+      isScorer: true,
+      isCreator: true,
+      coveredParticipantIds: ['user-1'],
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      cancelMatch: vi.fn(),
+      refetch: vi.fn(),
+      pendientes: 0,
+      perdidos: [],
+      discrepancias: [],
+      resuelveDiscrepancia: vi.fn(),
+      ...extra,
+    });
+    return renderPage();
+  };
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it('el conflicto espera si ya hay otro aviso abierto', () => {
+    // El conflicto lo destapa el sondeo, no un toque del jugador, así que
+    // puede aparecer con el aviso de cancelar ya abierto. Dos ventanas a la
+    // misma altura se tapan, y el foco guardado para volver se pierde
+    pinta({
+      discrepancias: [
+        {
+          holeNumber: 7,
+          participantId: 'user-1',
+          mio: 5,
+          enElServidor: 6,
+          anotadoPor: 'user-2',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByText('scoring.cancelMatch.button'));
+
+    expect(screen.getByTestId('quick-match-cancel-body')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-discrepancia'),
+    ).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * LA TABLA I — la clasificación NO se inventa.
+ *
+ * Sin cobertura tenemos nuestros golpes, pero de los demás solo la última foto
+ * que dio el servidor: lo que hayan anotado desde el corte no ha llegado. Con
+ * eso no se puede saber cómo va el partido.
+ *
+ * Y recalcularla solo con lo nuestro es PEOR que dejarla quieta: sube nuestra
+ * puntuación y deja la de los demás congelada, así que dice que vamos por
+ * delante sin saberlo. Quieta al menos está atrasada por igual para todos.
+ *
+ *   caso                          | qué se ve
+ *   ------------------------------|-----------------------------------------
+ *   nada sin enviar               | la clasificación, como siempre
+ *   golpes sin enviar             | la del servidor, sin tocar, y un aviso de
+ *                                 | que no está al día
+ *   la tarjeta y el selector      | esos SÍ llevan lo guardado: son nuestros
+ *                                 | golpes, y de esos no dependemos de nadie
+ */
+describe('QuickMatchScoringPage · la clasificación no se inventa (FE #515, tabla I)', () => {
+  const conGolpes = [
+    {
+      holeNumber: 1,
+      participantId: 'user-1',
+      score: 5,
+      recordedByParticipantId: null,
+    },
+  ];
+
+  const pinta = (extra) => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: {
+        ...baseQuickMatch,
+        status: 'IN_PROGRESS',
+        isCompleted: false,
+        holeScores: [],
+      },
+      isScorer: true,
+      coveredParticipantIds: ['user-1'],
+      holes: [{ holeNumber: 1, par: 4, strokeIndex: 5 }],
+      totalHoles: 1,
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      cancelMatch: vi.fn(),
+      refetch: vi.fn(),
+      holeScoresVisibles: [],
+      pendientes: 0,
+      perdidos: [],
+      discrepancias: [],
+      resuelveDiscrepancia: vi.fn(),
+      ...extra,
+    });
+    return renderPage();
+  };
+
+  const vePestanaClasificacion = () => {
+    fireEvent.click(screen.getByTestId('quick-match-tab-classification'));
+  };
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it('con golpes sin enviar, avisa de que no está al día', () => {
+    pinta({ pendientes: 1, holeScoresVisibles: conGolpes });
+    vePestanaClasificacion();
+
+    expect(
+      screen.getByTestId('quick-match-clasificacion-atrasada'),
+    ).toBeInTheDocument();
+  });
+
+  it('nuestros datos sí están al día en la clasificación', () => {
+    // De lo nuestro no dependemos de nadie: son nuestros golpes
+    pinta({ pendientes: 1, holeScoresVisibles: conGolpes });
+    vePestanaClasificacion();
+
+    expect(
+      screen.getByTestId('quick-match-classification-table').textContent,
+    ).toContain('5');
+  });
+
+  it('los jugadores que no anotamos salen marcados como sin actualizar', () => {
+    // Y con TEXTO, no solo con un gris: al sol el texto apagado no se lee, y
+    // un lector de pantalla no ve el color. Es lo mismo que se decidió para la
+    // etiqueta «No cuenta» de las partidas rápidas
+    pinta({ pendientes: 1, holeScoresVisibles: conGolpes });
+    vePestanaClasificacion();
+
+    const suya = screen.getByTestId('quick-match-clasificacion-fila-user-2');
+    expect(suya.textContent).toContain('scoring.classification.stale');
+    const mia = screen.getByTestId('quick-match-clasificacion-fila-user-1');
+    expect(mia.textContent).not.toContain('scoring.classification.stale');
+  });
+
+  it('mientras falten datos no se afirma quién va primero', () => {
+    // El orden mezcla lo nuestro al día con lo suyo de hace rato: pondría un
+    // «1» al lado de nuestro nombre por la única razón de que a ellos no se
+    // les ha contado lo que llevan hecho desde el corte
+    pinta({ pendientes: 1, holeScoresVisibles: conGolpes });
+    vePestanaClasificacion();
+
+    expect(
+      screen.queryByTestId('quick-match-clasificacion-puesto'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('con todo enviado vuelve a haber puestos y nadie sale marcado', () => {
+    pinta({ pendientes: 0 });
+    vePestanaClasificacion();
+
+    expect(
+      screen.getAllByTestId('quick-match-clasificacion-puesto').length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getByTestId('quick-match-clasificacion-fila-user-2').textContent,
+    ).not.toContain('scoring.classification.stale');
+  });
+
+  it('sin nada pendiente no avisa de nada', () => {
+    pinta({ pendientes: 0 });
+    vePestanaClasificacion();
+
+    expect(
+      screen.queryByTestId('quick-match-clasificacion-atrasada'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('la tarjeta sí lleva lo guardado, aunque la clasificación no', () => {
+    // Nuestros golpes son nuestros: para pintarlos no dependemos de nadie
+    pinta({ pendientes: 1, holeScoresVisibles: conGolpes });
+
+    expect(screen.getByTestId('quick-match-hole-btn-1').dataset.estado).toBe(
+      'complete',
+    );
+  });
+});
+
+/**
+ * LA TABLA K — lo que se avisa, avisado donde toca. De probarlo en el campo.
+ *
+ * Quedarse sin cobertura NO es un error: la aplicación ya lo cuenta en ámbar y
+ * guarda el golpe. Pintar además el recuadro rojo del sondeo deja dos avisos
+ * juntos diciendo lo contrario el uno del otro.
+ *
+ * Y avisar de que faltan datos «de los demás» solo tiene sentido si hay
+ * alguien a quien no anotamos nosotros. Cuando el grupo entero se anota desde
+ * este móvil —lo normal en un cuarteto con invitados— la clasificación está
+ * completa, así que ni se avisa ni se le quita el puesto.
+ *
+ *   caso                                  | qué se ve
+ *   --------------------------------------|-------------------------------
+ *   el sondeo falla por RED               | ámbar, nunca el rojo
+ *   el sondeo falla con un estado (5xx…)  | el rojo, como siempre
+ *   anoto yo a todo el grupo, juego libre | puestos, y sin aviso: está entera
+ *   hay alguien a quien no anoto          | aviso, marca y sin puestos
+ *   match play con golpes sin enviar      | aviso propio: el resultado lo
+ *                                         | calcula el servidor, y le faltan
+ */
+describe('QuickMatchScoringPage · los avisos, tras probarlo en el campo (FE #515, tabla K)', () => {
+  const conGolpes = [
+    {
+      holeNumber: 1,
+      participantId: 'user-1',
+      score: 5,
+      recordedByParticipantId: null,
+    },
+  ];
+
+  const pinta = (extra) => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: {
+        ...baseQuickMatch,
+        status: 'IN_PROGRESS',
+        isCompleted: false,
+        holeScores: [],
+      },
+      isScorer: true,
+      coveredParticipantIds: ['user-1'],
+      holes: [{ holeNumber: 1, par: 4, strokeIndex: 5 }],
+      totalHoles: 1,
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      cancelMatch: vi.fn(),
+      refetch: vi.fn(),
+      holeScoresVisibles: [],
+      pendientes: 0,
+      perdidos: [],
+      discrepancias: [],
+      resuelveDiscrepancia: vi.fn(),
+      ...extra,
+    });
+    return renderPage();
+  };
+
+  const verClasificacion = () =>
+    fireEvent.click(screen.getByTestId('quick-match-tab-classification'));
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it('un sondeo que no llega no pinta el recuadro rojo', () => {
+    // Sin cobertura el sondeo falla cada diez segundos. El rojo diría «ha
+    // ocurrido un error» justo debajo del ámbar que dice que está todo guardado
+    pinta({ pendientes: 1, loadError: new TypeError('Failed to fetch') });
+
+    expect(screen.getByTestId('quick-match-pendientes')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-save-error'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('sin nada guardado, un sondeo que no llega lo dice en ámbar', () => {
+    // Que no haya golpes pendientes no quita que la pantalla lleve un rato sin
+    // actualizarse: si no se dice, se lee como si estuviera al día
+    pinta({ pendientes: 0, loadError: new TypeError('Failed to fetch') });
+
+    expect(screen.getByTestId('quick-match-sin-conexion')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-save-error'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('si lo que se ve sale de la memoria, se dice aunque el fallo tenga estado', () => {
+    // Con un 5xx la pantalla se pinta igual desde el móvil, y salía entera
+    // bajo un error rojo sin avisar de que era una foto de antes
+    pinta({
+      pintadoDeMemoria: true,
+      loadError: Object.assign(new Error('boom'), { status: 500 }),
+    });
+
+    expect(screen.getByTestId('quick-match-sin-conexion')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-save-error'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('un fallo del servidor sí es un error, y sale en rojo', () => {
+    pinta({
+      pendientes: 0,
+      loadError: Object.assign(new Error('boom'), { status: 500 }),
+    });
+
+    expect(screen.getByTestId('quick-match-save-error')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-sin-conexion'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('si anoto yo a todo el grupo, la clasificación está entera', () => {
+    // Todos los golpes salen de este móvil: no falta nada de nadie
+    pinta({
+      pendientes: 1,
+      holeScoresVisibles: conGolpes,
+      coveredParticipantIds: ['user-1', 'user-2'],
+    });
+    verClasificacion();
+
+    expect(
+      screen.queryByTestId('quick-match-clasificacion-atrasada'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByTestId('quick-match-clasificacion-puesto').length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('con alguien a quien no anoto, avisa y quita los puestos', () => {
+    pinta({
+      pendientes: 1,
+      holeScoresVisibles: conGolpes,
+      coveredParticipantIds: ['user-1'],
+    });
+    verClasificacion();
+
+    expect(
+      screen.getByTestId('quick-match-clasificacion-atrasada'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-clasificacion-puesto'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('en match play el aviso es otro: el resultado lo calcula el servidor', () => {
+    // Aquí no hay tabla que recalcular, y el «2 up» viene ya hecho de fuera:
+    // aunque anotemos nosotros a todos, le faltan los golpes sin enviar
+    pinta({
+      pendientes: 1,
+      coveredParticipantIds: ['user-1', 'user-2'],
+      quickMatch: {
+        ...baseQuickMatch,
+        status: 'IN_PROGRESS',
+        isCompleted: false,
+        holeScores: [],
+        scoringFormat: null,
+        matchFormat: 'SINGLES',
+      },
+    });
+    verClasificacion();
+
+    expect(
+      screen.getByTestId('quick-match-resultado-atrasado'),
+    ).toBeInTheDocument();
+  });
+});
+
+describe('QuickMatchScoringPage — el mapa del hoyo (BE #532)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: {
+        ...baseQuickMatch,
+        golfCourseId: 'gc-1',
+        participants: [baseHookState.myParticipant],
+      },
+      // La tarjeta del hoyo solo se pinta a quien anota
+      isScorer: true,
+      coveredParticipantIds: ['user-1'],
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      cancelMatch: vi.fn(),
+      refetch: vi.fn(),
+    });
+    mapaHoyo.valor = {
+      abierto: false,
+      abrir: vi.fn(),
+      cerrar: vi.fn(),
+      mapaDelCampo: null,
+      disponible: true,
+    };
+    mapaHoyo.ventana = null;
+  });
+
+  it('pide el mapa del campo de lo que se anota', () => {
+    renderPage();
+
+    expect(mapaHoyo.args).toEqual({ golfCourseId: 'gc-1', pais: null });
+  });
+
+  it('T2 (16 oct): «Mapa» va entre Anterior y Siguiente, y lo abre', () => {
+    renderPage();
+
+    const boton = screen.getByRole('button', { name: 'mapa.abrir' });
+    expect(screen.getByTestId('quick-match-prev-hole').nextElementSibling).toBe(
+      boton,
+    );
+    expect(boton.nextElementSibling).toBe(
+      screen.getByTestId('quick-match-next-hole'),
+    );
+    fireEvent.click(boton);
+    expect(mapaHoyo.valor.abrir).toHaveBeenCalled();
+  });
+
+  it('CodeRabbit: hasta que llega el campo (con su país), no se pide su mapa', () => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...mockUseQuickMatchScoring(),
+      holes: [],
+    });
+
+    renderPage();
+
+    expect(mapaHoyo.args.golfCourseId).toBeNull();
+  });
+
+  it('19 oct: el mapa recibe el país del campo; si no hay mapa en él, sin «Mapa»', () => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...mockUseQuickMatchScoring(),
+      courseCountryCode: 'PT',
+    });
+    mapaHoyo.valor = { ...mapaHoyo.valor, disponible: false };
+
+    renderPage();
+
+    expect(mapaHoyo.args.pais).toBe('PT');
+    expect(screen.queryByRole('button', { name: 'mapa.abrir' })).toBeNull();
+  });
+
+  it('la ventana del mapa recibe el hoyo que se anota', () => {
+    renderPage();
+
+    expect(mapaHoyo.ventana).toMatchObject({
+      golfCourseId: 'gc-1',
+      numeroDeHoyo: 1,
+      par: 4,
+    });
+    expect(mapaHoyo.ventana.mapaDelHoyo).toBe(mapaHoyo.valor);
+  });
+
+  it('16 oct: el mapa recibe mi barra (color y sexo), para las muestras', () => {
+    const yo = {
+      ...baseHookState.myParticipant,
+      userId: 'user-1',
+      color: 'RED',
+      teeGender: 'FEMALE',
+    };
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...mockUseQuickMatchScoring(),
+      quickMatch: {
+        ...baseQuickMatch,
+        golfCourseId: 'gc-1',
+        participants: [yo],
+      },
+    });
+
+    renderPage();
+
+    expect(mapaHoyo.ventana.barra).toEqual({ color: 'RED', gender: 'FEMALE' });
+  });
+
+  it('16 oct: sin mi barra (sin color), el mapa no recibe barra', () => {
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...mockUseQuickMatchScoring(),
+      quickMatch: {
+        ...baseQuickMatch,
+        golfCourseId: 'gc-1',
+        participants: [
+          { ...baseHookState.myParticipant, userId: 'user-1', color: null },
+        ],
+      },
+    });
+
+    renderPage();
+
+    expect(mapaHoyo.ventana.barra).toBeNull();
+  });
+
+  it('T1: en la tarjeta no se pide el GPS', () => {
+    const watchPosition = vi.fn();
+    vi.stubGlobal('navigator', {
+      ...globalThis.navigator,
+      geolocation: { watchPosition, clearWatch: vi.fn() },
+    });
+    try {
+      renderPage();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    expect(watchPosition).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * «Tu vuelta» (21 oct): la página calcula el acumulado de quien anota con su
+ * hándicap de juego propio y se lo pasa a la casilla del hoyo.
+ *
+ *   N1+N3  solo me anoto, match play: mis golpes, no la diferencia | M1
+ *   N3+N7  Medal: allowance de la partida y golpes aún sin enviar  | M2
+ *   N2+N4  Stableford anotando a dos: línea con neto y puntos      | M3
+ *   N5     foursomes: nada                                         | M4
+ */
+describe('QuickMatchScoringPage · «Tu vuelta» mientras se anota', () => {
+  const yo = {
+    participantId: 'user-1',
+    userId: 'user-1',
+    name: 'Yo',
+    handicap: 2,
+  };
+  const rival = {
+    participantId: 'user-2',
+    userId: 'user-2',
+    name: 'Rival',
+    handicap: 12,
+  };
+
+  const montar = ({ quickMatch = {}, ...estado } = {}) => {
+    const partida = {
+      ...baseQuickMatch,
+      status: 'IN_PROGRESS',
+      isCompleted: false,
+      participants: [yo, rival],
+      ...quickMatch,
+    };
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...baseHookState,
+      quickMatch: partida,
+      myParticipant: yo,
+      isScorer: true,
+      coveredParticipantIds: ['user-1'],
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn(),
+      refetch: vi.fn(),
+      ...estado,
+    });
+    return renderPage();
+  };
+
+  it('M1: en match play cuenta con MIS golpes aunque el reparto sea del rival', () => {
+    montar({
+      quickMatch: {
+        matchFormat: 'SINGLES',
+        scoringFormat: null,
+        participantStrokes: [
+          { participantId: 'user-1', playingHandicap: 1, strokesByHole: {} },
+          {
+            participantId: 'user-2',
+            playingHandicap: 11,
+            strokesByHole: { 1: 1 },
+          },
+        ],
+      },
+      holes: [
+        { holeNumber: 1, par: 4, strokeIndex: 5 },
+        { holeNumber: 2, par: 3, strokeIndex: 15 },
+      ],
+      totalHoles: 2,
+      holeScoresVisibles: [
+        { holeNumber: 1, participantId: 'user-1', score: 6 },
+        { holeNumber: 2, participantId: 'user-1', score: 3 },
+      ],
+    });
+
+    // Su hándicap de juego (el del backend, 1) le da golpe en el hoyo 1: netos
+    // 5 y 3 sobre par 7. Con la diferencia (0 golpes) saldría +2, y con el
+    // local (2) PAR
+    const casilla = screen.getByTestId('quick-match-my-round-cell');
+    expect(casilla).toHaveTextContent('input.myRound');
+    expect(casilla).toHaveTextContent('+1');
+  });
+
+  it('M2: en Medal aplica el allowance de la partida y cuenta lo pendiente de enviar', () => {
+    const veinte = { ...yo, handicap: 20 };
+    montar({
+      quickMatch: {
+        scoringFormat: 'MEDAL',
+        effectiveAllowance: 50,
+        holeScores: [],
+        participants: [veinte, rival],
+      },
+      myParticipant: veinte,
+      // El golpe aún no ha salido del móvil: solo está en la lista visible
+      holeScoresVisibles: [
+        { holeNumber: 1, participantId: 'user-1', score: 4 },
+      ],
+    });
+
+    // Hcp 20 al 50% = 10 golpes, 1 en este hoyo: neto 3 sobre par 4. Al 100%
+    // serían 2 y saldría -2
+    expect(screen.getByTestId('quick-match-my-round-cell')).toHaveTextContent(
+      '-1',
+    );
+  });
+
+  it('M3: en Stableford anotando a dos, una línea con el neto, sin los puntos (22 oct)', () => {
+    montar({
+      quickMatch: { scoringFormat: 'STABLEFORD', effectiveAllowance: 50 },
+      coveredParticipantIds: ['user-1', 'user-2'],
+      holeScoresVisibles: [
+        { holeNumber: 1, participantId: 'user-1', score: 6 },
+      ],
+    });
+
+    // Neto 5 sobre par 4: +1. Los puntos se ven en la clasificación
+    expect(screen.getByTestId('quick-match-my-round-line')).toHaveTextContent(
+      /^input\.myRound: \+1/,
+    );
+    expect(
+      screen.getByTestId('quick-match-my-round-line'),
+    ).not.toHaveTextContent('myRoundPoints');
+    expect(screen.queryByTestId('quick-match-my-round-cell')).toBeNull();
+  });
+
+  it('M4: en foursomes no hay vuelta propia', () => {
+    montar({
+      quickMatch: {
+        matchFormat: 'FOURSOMES',
+        scoringFormat: null,
+        participants: [
+          { ...yo, team: 'A' },
+          { ...rival, team: 'B' },
+        ],
+      },
+      coveredParticipantIds: ['user-1', 'user-2'],
+      holeScoresVisibles: [
+        { holeNumber: 1, participantId: 'user-1', score: 6 },
+      ],
+    });
+
+    expect(screen.queryByTestId('quick-match-my-round-cell')).toBeNull();
+    expect(screen.queryByTestId('quick-match-my-round-line')).toBeNull();
+  });
+
+  // Lo que cambia la vuelta tiene que rehacerla: un useMemo al que le falta una
+  // dependencia se quedaría con el número viejo
+  it.each([
+    ['el allowance', { effectiveAllowance: 100 }, '-2'],
+    ['SCRATCH', { playMode: 'SCRATCH' }, 'input.myRoundPar'],
+  ])('M5b: si cambia %s, la vuelta se rehace', (_, cambio, esperado) => {
+    const veinte = { ...yo, handicap: 20 };
+    const { rerender } = montar({
+      quickMatch: {
+        scoringFormat: 'MEDAL',
+        effectiveAllowance: 50,
+        participants: [veinte, rival],
+      },
+      myParticipant: veinte,
+      holeScoresVisibles: [
+        { holeNumber: 1, participantId: 'user-1', score: 4 },
+      ],
+    });
+    expect(screen.getByTestId('quick-match-my-round-cell')).toHaveTextContent(
+      '-1',
+    );
+
+    const estado = mockUseQuickMatchScoring.mock.results.at(-1).value;
+    mockUseQuickMatchScoring.mockReturnValue({
+      ...estado,
+      quickMatch: { ...estado.quickMatch, ...cambio },
+    });
+    rerender(renderTree());
+
+    expect(screen.getByTestId('quick-match-my-round-value')).toHaveTextContent(
+      esperado,
+    );
+  });
+
+  // Revisión final del 21 oct: el cálculo va en un useMemo. Un render que no
+  // cambia nada de lo que decide la vuelta no lo repite; un golpe nuevo, sí
+  it('M5: no recalcula la vuelta si no cambia lo que la decide', () => {
+    const espia = vi.spyOn(PersonalRoundCalculator, 'runningResult');
+    try {
+      const golpes = [{ holeNumber: 1, participantId: 'user-1', score: 6 }];
+      const { rerender } = montar({ holeScoresVisibles: golpes });
+      const antes = espia.mock.calls.length;
+      expect(antes).toBeGreaterThan(0);
+
+      rerender(renderTree());
+      expect(espia).toHaveBeenCalledTimes(antes);
+
+      const estado = mockUseQuickMatchScoring.mock.results.at(-1).value;
+      mockUseQuickMatchScoring.mockReturnValue({
+        ...estado,
+        holeScoresVisibles: [
+          ...golpes,
+          { holeNumber: 2, participantId: 'user-1', score: 3 },
+        ],
+      });
+      rerender(renderTree());
+      expect(espia.mock.calls.length).toBeGreaterThan(antes);
+    } finally {
+      espia.mockRestore();
+    }
+  });
+
+  // Revisión del 22 oct: «Tu vuelta» ya no enseña puntos, así que el formato
+  // de juego no entra en el cálculo
+  it('M6: no le pasa el formato de juego', () => {
+    const espia = vi.spyOn(PersonalRoundCalculator, 'runningResult');
+    try {
+      montar({
+        holeScoresVisibles: [
+          { holeNumber: 1, participantId: 'user-1', score: 6 },
+        ],
+      });
+      expect(espia).toHaveBeenCalled();
+      expect(espia.mock.calls.at(-1)[0]).not.toHaveProperty('scoringFormat');
+    } finally {
+      espia.mockRestore();
+    }
+  });
+});
+
+/**
+ * La anotación en curso (11 nov 2026): la pantalla repone la pestaña y el hoyo guardados y
+ * deja de guardar con la partida terminada. El detalle vive en `useAnotacionEnCurso`.
+ */
+describe('QuickMatchScoringPage: la anotación en curso', () => {
+  const CLAVE = 'anotacion_en_curso';
+  const ID = '0b5a6c1e-2d3f-4a5b-8c7d-9e0f1a2b3c4d';
+  const RUTA = `/quick-matches/${ID}/scoring`;
+  const memoria = () => {
+    const datos = new Map();
+    return {
+      getItem: (k) => (datos.has(k) ? datos.get(k) : null),
+      setItem: (k, v) => datos.set(k, String(v)),
+      removeItem: (k) => datos.delete(k),
+      clear: () => datos.clear(),
+    };
+  };
+  const guarda = async (extra = {}) => {
+    const { guardaLaAnotacionEnCurso } =
+      await import('../../utils/anotacionEnCurso');
+    guardaLaAnotacionEnCurso({
+      cuenta: 'user-1',
+      pathname: RUTA,
+      search: '',
+      pestana: 'classification',
+      hoyo: 7,
+      mapa: false,
+      ...extra,
+    });
+  };
+  const monta = () =>
+    render(
+      <MemoryRouter initialEntries={[RUTA]}>
+        <Routes>
+          <Route
+            path="/quick-matches/:quickMatchId/scoring"
+            element={<QuickMatchScoringPage />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+  const estado = (quickMatch) => ({
+    ...baseHookState,
+    quickMatch,
+    totalHoles: 18,
+    setCurrentHole: vi.fn(),
+    submitScore: vi.fn(),
+    completeMatch: vi.fn(),
+    cancelMatch: vi.fn(),
+    refetch: vi.fn(),
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('localStorage', memoria());
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('E1: con su anotación guardada, abre en ese hoyo y esa pestaña', async () => {
+    await guarda();
+    const enJuego = estado({
+      ...baseQuickMatch,
+      status: 'IN_PROGRESS',
+      isCompleted: false,
+    });
+    mockUseQuickMatchScoring.mockReturnValue(enJuego);
+
+    monta();
+
+    expect(enJuego.setCurrentHole).toHaveBeenCalledWith(7);
+    const [, clasificacion] = within(
+      screen.getByRole('tablist', { name: 'scoring.tabsLabel' }),
+    ).getAllByRole('tab');
+    expect(clasificacion).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('E2: terminada, olvida la anotación', async () => {
+    await guarda();
+    const terminada = estado(baseQuickMatch);
+    mockUseQuickMatchScoring.mockReturnValue(terminada);
+
+    monta();
+
+    expect(localStorage.getItem(CLAVE)).toBeNull();
+    expect(terminada.setCurrentHole).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Caracterización antes de partir la página (refactor puro): moverse entre
+ * hoyos y lo que pasa tras confirmar o cerrar terminar y anular.
+ *
+ *   caso                                  | qué se ve
+ *   --------------------------------------|-----------------------------------
+ *   hoyo intermedio, «Siguiente»          | pide el hoyo de después
+ *   hoyo intermedio, «Anterior»           | pide el hoyo de antes
+ *   primer hoyo                           | «Anterior» apagado, no se mueve
+ *   último hoyo                           | «Siguiente» apagado, no se mueve
+ *   terminar sale bien                    | se cierra el aviso, sin recargar
+ *   terminar falla                        | se queda abierto y recarga
+ *   anular sale bien                      | se cierra el aviso, sin recargar
+ *   anular falla                          | se queda abierto y recarga
+ *   cerrar tras un fallo y volver a abrir | ya no está el aviso del fallo
+ */
+describe('QuickMatchScoringPage · moverse entre hoyos, terminar y anular', () => {
+  const enCurso = {
+    ...baseQuickMatch,
+    status: 'IN_PROGRESS',
+    isCompleted: false,
+  };
+  const hoyos = [1, 2, 3].map((holeNumber) => ({
+    holeNumber,
+    par: 4,
+    strokeIndex: holeNumber,
+  }));
+
+  const monta = (extra = {}) => {
+    const estado = {
+      ...baseHookState,
+      quickMatch: enCurso,
+      holes: hoyos,
+      totalHoles: 3,
+      currentHole: 2,
+      isCreator: true,
+      isScorer: true,
+      coveredParticipantIds: ['user-1'],
+      setCurrentHole: vi.fn(),
+      submitScore: vi.fn(),
+      completeMatch: vi.fn().mockResolvedValue({ ok: true }),
+      cancelMatch: vi.fn().mockResolvedValue({ ok: true }),
+      refetch: vi.fn(),
+      ...extra,
+    };
+    mockUseQuickMatchScoring.mockReturnValue(estado);
+    renderPage();
+    return estado;
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('en un hoyo intermedio, «Siguiente» pide el de después', () => {
+    const { setCurrentHole } = monta();
+
+    fireEvent.click(screen.getByTestId('quick-match-next-hole'));
+
+    expect(setCurrentHole).toHaveBeenCalledTimes(1);
+    expect(setCurrentHole).toHaveBeenCalledWith(3);
+  });
+
+  it('en un hoyo intermedio, «Anterior» pide el de antes', () => {
+    const { setCurrentHole } = monta();
+
+    fireEvent.click(screen.getByTestId('quick-match-prev-hole'));
+
+    expect(setCurrentHole).toHaveBeenCalledTimes(1);
+    expect(setCurrentHole).toHaveBeenCalledWith(1);
+  });
+
+  it('en el primer hoyo no se va más atrás', () => {
+    const { setCurrentHole } = monta({ currentHole: 1 });
+
+    const anterior = screen.getByTestId('quick-match-prev-hole');
+    expect(anterior).toBeDisabled();
+    fireEvent.click(anterior);
+
+    expect(setCurrentHole).not.toHaveBeenCalled();
+  });
+
+  it('en el último hoyo no se va más adelante', () => {
+    const { setCurrentHole } = monta({ currentHole: 3 });
+
+    const siguiente = screen.getByTestId('quick-match-next-hole');
+    expect(siguiente).toBeDisabled();
+    fireEvent.click(siguiente);
+
+    expect(setCurrentHole).not.toHaveBeenCalled();
+  });
+
+  it('terminar con éxito cierra el aviso y no recarga', async () => {
+    const { completeMatch, refetch } = monta();
+
+    fireEvent.click(screen.getByText('scoring.finish.button'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('scoring.finish.confirm'));
+    });
+
+    expect(completeMatch).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByText('scoring.finish.confirm'),
+    ).not.toBeInTheDocument();
+    expect(refetch).not.toHaveBeenCalled();
+  });
+
+  it('terminar con fallo deja el aviso abierto y recarga', async () => {
+    const { refetch } = monta({
+      completeMatch: vi.fn().mockResolvedValue({ ok: false }),
+    });
+
+    fireEvent.click(screen.getByText('scoring.finish.button'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('scoring.finish.confirm'));
+    });
+
+    expect(screen.getByText('scoring.finish.confirm')).toBeInTheDocument();
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('anular con éxito cierra el aviso y no recarga', async () => {
+    const { cancelMatch, refetch } = monta();
+
+    fireEvent.click(screen.getByTestId('quick-match-cancel-button'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('quick-match-cancel-confirm'));
+    });
+
+    expect(cancelMatch).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByTestId('quick-match-cancel-confirm'),
+    ).not.toBeInTheDocument();
+    expect(refetch).not.toHaveBeenCalled();
+  });
+
+  it('anular con fallo deja el aviso abierto y recarga', async () => {
+    const { refetch } = monta({
+      cancelMatch: vi.fn().mockResolvedValue({ ok: false }),
+    });
+
+    fireEvent.click(screen.getByTestId('quick-match-cancel-button'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('quick-match-cancel-confirm'));
+    });
+
+    expect(
+      screen.getByTestId('quick-match-cancel-confirm'),
+    ).toBeInTheDocument();
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('cerrar terminar tras un fallo olvida el fallo al volver a abrirlo', async () => {
+    monta({ completeMatch: vi.fn().mockResolvedValue({ ok: false }) });
+
+    fireEvent.click(screen.getByText('scoring.finish.button'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('scoring.finish.confirm'));
+    });
+    expect(screen.getByTestId('quick-match-finish-error')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('scoring.finish.cancel'));
+    expect(
+      screen.queryByText('scoring.finish.confirm'),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('scoring.finish.button'));
+
+    expect(
+      screen.queryByTestId('quick-match-finish-error'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('cerrar anular tras un fallo olvida el fallo al volver a abrirlo', async () => {
+    monta({ cancelMatch: vi.fn().mockResolvedValue({ ok: false }) });
+
+    fireEvent.click(screen.getByTestId('quick-match-cancel-button'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('quick-match-cancel-confirm'));
+    });
+    expect(screen.getByTestId('quick-match-cancel-error')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('scoring.cancelMatch.cancel'));
+    expect(
+      screen.queryByTestId('quick-match-cancel-confirm'),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('quick-match-cancel-button'));
+
+    expect(
+      screen.queryByTestId('quick-match-cancel-error'),
+    ).not.toBeInTheDocument();
+  });
+});

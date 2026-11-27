@@ -1,0 +1,410 @@
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { RefreshCw, Clock } from 'lucide-react';
+import {
+  launchHandicapUpdateUseCase,
+  scheduleHandicapUpdateUseCase,
+  cancelScheduledHandicapUpdateUseCase,
+  getCompetitionGolfCoursesUseCase,
+} from '../../composition';
+import customToast from '../../utils/toast';
+import { aCamposDeLaCompeticion } from '../../utils/camposDeLaCompeticion';
+import {
+  aIsoConHuso,
+  aEntradaDelCampo,
+  horaEnElCampo,
+  esZonaValida,
+  esEntradaDeFecha,
+} from '../../utils/horaDelCampo';
+import { useSondeoMientras } from '../../hooks/useSondeoMientras';
+import { mensajeDelError } from '../../utils/mensajeDelError';
+import { HandicapUpdateStatus } from '../../domain/value_objects/HandicapUpdateStatus';
+
+// Mientras hay una en marcha, cada cuánto se mira cómo va
+const CADA = 15000;
+
+// Los motivos que el servidor manda como código (BE #541), para decirlos
+// en el idioma de la app. Uno que no esté aquí deja el texto del servidor
+const MOTIVOS = new Set([
+  'STATUS',
+  'NO_WINDOWS',
+  'RYDER',
+  'DAY_IN_PLAY',
+  'NO_DAYS_LEFT',
+  'TOO_CLOSE',
+  'NO_TIMEZONE',
+  'DISABLED',
+  'RUNNING',
+  'IN_THE_PAST',
+  'TOO_TIGHT',
+]);
+// Al programar, estos son de la hora pedida, no de la ventana a esa hora
+const DE_LA_HORA_PEDIDA = new Set([
+  'IN_THE_PAST',
+  'TOO_TIGHT',
+  'DISABLED',
+  'RUNNING',
+]);
+
+/**
+ * La tarjeta «Hándicaps» del organizador (FE #824, PR 5; BE #507, #509,
+ * #510). Decidido con Agustín el 11 oct 2026:
+ *
+ *   - Cómo fue la última actualización con la RFEG: en marcha (cuántos faltan),
+ *     completa, incompleta (quién quedó sin actualizar) o cortada.
+ *   - «Actualizar hándicaps», con su ventana: hasta cuándo se puede o por qué
+ *     no (el motivo lo da el servidor). Si la última quedó a medias, la termina.
+ *   - Programarla, en la HORA DEL CAMPO (la de las salidas), y anularla.
+ *
+ * En una Ryder también (solo cambia el perfil). Mientras hay una en marcha, se
+ * relee sola cada 15 s; al acabar, para.
+ *
+ * @param {Object} props
+ * @param {string} props.competitionId
+ * @param {Object|null} props.handicapUpdate - La última, de la ficha
+ * @param {Object} props.handicapUpdateWindow - La ventana del botón, de la ficha
+ * @param {() => void} props.onReleer - Vuelve a pedir la ficha
+ */
+const HandicapsDeLaCompeticion = ({
+  competitionId,
+  handicapUpdate,
+  handicapUpdateWindow,
+  onReleer,
+  traerALaVista = false,
+  alTraerla,
+}) => {
+  const { t, i18n } = useTranslation('competitions');
+  const tarjeta = useRef(null);
+  const traida = useRef(false);
+  // Lo leído del campo, con el intento al que pertenece: mientras se reintenta,
+  // la zona no se da por sabida. Una competición nueva no lo arrastra: al
+  // cambiar de ficha la tarjeta se monta de nuevo (`/code-review`, #863)
+  const [lectura, setLectura] = useState(0);
+  const [leido, setLeido] = useState({
+    lectura: -1,
+    zona: null,
+    ilegible: false,
+  });
+  const { zona } = leido;
+  // Hasta saber la zona no se programa: una hora escrita antes se leería en
+  // otra (revisor). Si no se pudo leer, tampoco (ver `zonaIlegible`)
+  const zonaSabida = leido.lectura === lectura;
+  // No se pudo leer: no es que el campo no tenga zona, así que ni se dice eso
+  // ni se programa a ciegas en la del dispositivo (QA de la release, 14 oct).
+  // Mientras se reintenta, el aviso se queda
+  const zonaIlegible = leido.ilegible;
+
+  // Se llega desde «{N} jugadores sin actualizar con la RFEG» (15 nov 2026): la
+  // tarjeta se trae a la vista una vez, con la ficha ya asentada (lo dice quien
+  // la pinta) y la zona leída, que si no la tarjeta aún cambia de alto
+  const avisaDeQueSeTrajo = useEffectEvent(() => alTraerla?.());
+  useEffect(() => {
+    if (!traerALaVista || !zonaSabida || traida.current) return;
+    traida.current = true;
+    tarjeta.current?.scrollIntoView?.({ block: 'start' });
+    avisaDeQueSeTrajo();
+  }, [traerALaVista, zonaSabida]);
+  const [ocupado, setOcupado] = useState(false);
+  const [programando, setProgramando] = useState(null);
+
+  // La zona del campo, para escribir y decir las horas en la suya
+  useEffect(() => {
+    let vigente = true;
+    (async () => getCompetitionGolfCoursesUseCase.execute(competitionId))()
+      // La del primer campo que la tenga: casi todos los torneos son de un huso
+      .then((r) => {
+        if (!vigente) return;
+        const laZona =
+          aCamposDeLaCompeticion(r).find((c) => c.timezone)?.timezone ?? null;
+        setLeido({ lectura, zona: laZona, ilegible: false });
+      })
+      .catch(
+        () => vigente && setLeido({ lectura, zona: null, ilegible: true }),
+      );
+    return () => {
+      vigente = false;
+    };
+  }, [competitionId, lectura]);
+
+  const enMarcha = handicapUpdate?.status === HandicapUpdateStatus.IN_PROGRESS;
+  // En un hook propio, como el resto de sondeos del proyecto (así lo hace
+  // ADR-010 con la anotación)
+  useSondeoMientras(enMarcha, onReleer, CADA);
+
+  const cuando = (iso) => horaEnElCampo(iso, zona, i18n.language);
+
+  // El motivo de un código conocido, traducido; si no, null
+  const motivo = (codigo) =>
+    MOTIVOS.has(codigo) ? t(`handicaps.reasons.${codigo}`) : null;
+
+  // Por qué no se pudo: por su código si lo trae y se conoce; si no, lo que diga
+  // el servidor. Al programar, el de la ventana es «a esa hora no se podría»
+  const porQueNo = (error, alProgramar) => {
+    const codigo = error?.data?.reason_code;
+    const traducido = motivo(codigo);
+    if (!traducido) return mensajeDelError(error, t('handicaps.error'));
+    return alProgramar && !DE_LA_HORA_PEDIDA.has(codigo)
+      ? t('handicaps.notAtThatTime', { motivo: traducido })
+      : traducido;
+  };
+
+  const hacer = async (accion, alAcabar, { alProgramar = false } = {}) => {
+    setOcupado(true);
+    try {
+      await accion();
+      alAcabar?.();
+    } catch (error) {
+      customToast.error(porQueNo(error, alProgramar));
+    } finally {
+      // También si falló: un 409 es que ya hay otra en marcha, y la tarjeta
+      // tiene que enterarse (revisor)
+      onReleer?.();
+      setOcupado(false);
+    }
+  };
+
+  const lanzar = () =>
+    hacer(async () => {
+      const { resumed } =
+        await launchHandicapUpdateUseCase.execute(competitionId);
+      customToast.success(
+        t(resumed ? 'handicaps.resumed' : 'handicaps.launched'),
+      );
+    });
+
+  const programar = () =>
+    hacer(
+      () =>
+        scheduleHandicapUpdateUseCase.execute(
+          competitionId,
+          aIsoConHuso(programando, zona),
+        ),
+      () => setProgramando(null),
+      { alProgramar: true },
+    );
+
+  const anular = () =>
+    hacer(() => cancelScheduledHandicapUpdateUseCase.execute(competitionId));
+
+  // Quién se quedó sin actualizar: los mismos que el aviso al organizador
+  // (15 nov 2026), también con la completa y mientras se vuelve a pasar una
+  // incompleta (en la primera pasada y en la cortada viene vacía). En una
+  // incompleta, además, a quién volverá a preguntar el botón (un extranjero
+  // fuera de España no sale en el aviso), sin repetir a nadie. Un servidor de
+  // antes del campo no lo manda: entonces, como antes, los pendientes de la
+  // incompleta
+  const sinActualizar = (() => {
+    if (!handicapUpdate) return [];
+    const { status, pendingPlayers, notUpdatedPlayers } = handicapUpdate;
+    if (!notUpdatedPlayers)
+      return status === HandicapUpdateStatus.INCOMPLETE ? pendingPlayers : [];
+    if (status !== HandicapUpdateStatus.INCOMPLETE) return notUpdatedPlayers;
+    const nombrados = new Set(notUpdatedPlayers.map((p) => p.userId));
+    return [
+      ...notUpdatedPlayers,
+      ...pendingPlayers.filter((p) => !nombrados.has(p.userId)),
+    ];
+  })();
+
+  const estado = () => {
+    if (!handicapUpdate) return null;
+    const { status, finishedAt, pendingPlayers } = handicapUpdate;
+    if (status === HandicapUpdateStatus.IN_PROGRESS)
+      return t('handicaps.inProgress', { count: pendingPlayers.length });
+    // Con alguien sin actualizar no se dice «Actualizados»: lo dice la línea
+    // de quiénes
+    if (status === HandicapUpdateStatus.COMPLETED)
+      return sinActualizar.length > 0
+        ? null
+        : t('handicaps.completed', { cuando: cuando(finishedAt) });
+    if (status === HandicapUpdateStatus.INCOMPLETE)
+      return t('handicaps.incomplete', { cuando: cuando(finishedAt) });
+    // HandicapUpdateStatus.STOPPED, la cortada; y un estado que esta versión no
+    // conoce se dice igual, como antes
+    return t('handicaps.stopped');
+  };
+
+  const lineaDeEstado = estado();
+  const ventana = handicapUpdateWindow;
+  // «hora del campo (Madrid)», o la del dispositivo si el campo no la tiene
+  const delCampo = esZonaValida(zona);
+  const escrita = programando ? aIsoConHuso(programando, zona) : null;
+  const noExiste = escrita === null && esEntradaDeFecha(programando);
+  const boton =
+    'min-h-11 rounded-boton px-4 py-2 text-sm font-bold disabled:opacity-50';
+
+  return (
+    <section
+      ref={tarjeta}
+      data-testid="handicaps"
+      className="bg-tarjeta border border-contorno rounded-tarjeta p-5 space-y-3"
+    >
+      <h3 className="text-tinta font-bold text-lg flex items-center gap-2">
+        <RefreshCw className="w-5 h-5 text-tinta" />
+        {t('handicaps.title')}
+      </h3>
+
+      {handicapUpdate && (
+        // La región que se anuncia es el contenedor, que siempre está: así se
+        // oye el resultado aunque desaparezca la línea del estado (completa con
+        // alguien sin actualizar), sin pintar un párrafo vacío (CodeRabbit #1153)
+        <div data-testid="handicaps-resultado" aria-live="polite">
+          {lineaDeEstado && (
+            <p data-testid="handicaps-estado" className="text-sm text-tinta">
+              {lineaDeEstado}
+            </p>
+          )}
+          {sinActualizar.length > 0 && (
+            <p
+              data-testid="handicaps-pendientes"
+              className="text-sm text-aviso"
+            >
+              {t('handicaps.pending', {
+                jugadores: sinActualizar.map((p) => p.name).join(', '),
+              })}
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="space-y-1">
+        <button
+          type="button"
+          onClick={lanzar}
+          disabled={ocupado || !ventana?.open || enMarcha}
+          className={`${boton} bg-contraste text-sobre-contraste`}
+        >
+          {t('handicaps.update')}
+        </button>
+        <p data-testid="handicaps-ventana" className="text-xs text-tinta-suave">
+          {ventana?.open
+            ? ventana.closesAt
+              ? t(
+                  delCampo
+                    ? 'handicaps.openUntil'
+                    : 'handicaps.openUntilDevice',
+                  { cuando: cuando(ventana.closesAt) },
+                )
+              : t('handicaps.openUntilStart')
+            : (motivo(ventana?.reasonCode) ?? ventana?.reason)}
+        </p>
+      </div>
+
+      {ventana?.scheduledAt && (
+        <div className="flex flex-wrap items-center gap-2">
+          <p
+            data-testid="handicaps-programada"
+            className="flex items-center gap-1 text-sm text-tinta"
+          >
+            <Clock className="h-4 w-4 text-tinta-suave" />
+            {delCampo
+              ? t('handicaps.scheduled', {
+                  cuando: cuando(ventana.scheduledAt),
+                  zona,
+                })
+              : t(
+                  zonaIlegible || !zonaSabida
+                    ? 'handicaps.scheduledUnknownZone'
+                    : 'handicaps.scheduledDevice',
+                  {
+                    cuando: cuando(ventana.scheduledAt),
+                  },
+                )}
+          </p>
+          <button
+            type="button"
+            onClick={anular}
+            disabled={ocupado}
+            className={`${boton} border border-linea text-tinta`}
+          >
+            {t('handicaps.cancelSchedule')}
+          </button>
+        </div>
+      )}
+
+      {zonaIlegible && (
+        <div
+          data-testid="handicaps-zona-ilegible"
+          role="status"
+          className="flex flex-wrap items-center gap-2 text-sm text-aviso"
+        >
+          <span>{t('handicaps.zoneUnreadable')}</span>
+          <button
+            type="button"
+            onClick={() => setLectura((n) => n + 1)}
+            // Mientras lee, no: varios toques serían varias peticiones
+            disabled={!zonaSabida}
+            className={`${boton} border border-linea text-tinta`}
+          >
+            {t('handicaps.retryZone')}
+          </button>
+        </div>
+      )}
+
+      {programando === null ? (
+        <button
+          type="button"
+          onClick={() =>
+            setProgramando(
+              ventana?.scheduledAt
+                ? aEntradaDelCampo(ventana.scheduledAt, zona)
+                : '',
+            )
+          }
+          // Con la ventana cerrada también: se puede programar para cuando se
+          // abra, y si no, el servidor dice por qué (/code-review)
+          disabled={ocupado || !zonaSabida || zonaIlegible}
+          className={`${boton} border border-linea text-tinta`}
+        >
+          {t('handicaps.schedule')}
+        </button>
+      ) : (
+        <div className="space-y-2 rounded-lg bg-fondo p-3">
+          <label className="block text-xs text-tinta-suave">
+            {delCampo
+              ? t('handicaps.scheduleAt', { zona })
+              : t('handicaps.scheduleAtDevice')}
+            <input
+              type="datetime-local"
+              aria-label={
+                delCampo
+                  ? t('handicaps.scheduleAt', { zona })
+                  : t('handicaps.scheduleAtDevice')
+              }
+              value={programando}
+              onChange={(e) => setProgramando(e.target.value)}
+              // Sin apariencia nativa: en Safari de iOS el control de fecha impone
+              // su ancho y se salía de la tarjeta (el mismo defecto de la FE #648).
+              // Y con alto propio: sin apariencia y vacío, se queda en una raya
+              className="mt-0.5 block min-h-11 w-full min-w-0 max-w-full appearance-none rounded-lg border border-linea px-2 py-1 text-sm"
+            />
+          </label>
+          {noExiste && (
+            <p role="alert" className="text-sm text-error">
+              {t('handicaps.timeDoesNotExist')}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={programar}
+              disabled={ocupado || !escrita}
+              className={`${boton} bg-contraste text-sobre-contraste`}
+            >
+              {t('handicaps.scheduleSave')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setProgramando(null)}
+              className={`${boton} text-tinta-suave`}
+            >
+              {t('handicaps.cancel')}
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+};
+
+export default HandicapsDeLaCompeticion;

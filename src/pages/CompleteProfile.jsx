@@ -1,0 +1,350 @@
+import { AL_PASAR } from '../components/ui/clasesDeComportamiento';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router';
+import { useTranslation } from 'react-i18next';
+import { motion } from 'framer-motion';
+import { useAuth } from '../hooks/useAuth';
+import {
+  updateUserProfileUseCase,
+  updateManualHandicapUseCase,
+  fetchCountriesUseCase,
+  acceptTermsUseCase,
+} from '../composition';
+import customToast from '../utils/toast';
+import CountryAutocomplete from '../components/ui/CountryAutocomplete';
+import AceptacionDeTerminos from '../components/auth/AceptacionDeTerminos';
+import { anotaLaSesion } from '../services/sesionCompartida';
+import { debeAceptarLosTerminos } from '../domain/services/aceptacionDeTerminos';
+import CampoDeHandicap from '../components/ui/CampoDeHandicap';
+import { olvidaLaMarcaDeTerminos } from '../utils/terminosPendientes';
+import { mensajeDelError } from '../utils/mensajeDelError';
+import { registraElFallo } from '../utils/registraElFallo';
+import { Gender } from '../domain/value_objects/Gender';
+import {
+  BOTON_PRINCIPAL,
+  TARJETA_DE_ACCESO,
+} from '../components/auth/clasesDeAcceso';
+
+const CompleteProfile = () => {
+  const { t } = useTranslation('auth');
+  const navigate = useNavigate();
+  const { user, refetch: refetchUser } = useAuth();
+
+  const [formData, setFormData] = useState({
+    countryCode: '',
+    gender: '',
+    handicap: '',
+  });
+  const [countries, setCountries] = useState([]);
+  const [isLoadingCountries, setIsLoadingCountries] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  // Los usuarios nuevos de Google que entran desde /login o /start no han
+  // pasado por el registro: aquí aceptan los Términos y declaran la edad
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [termsError, setTermsError] = useState('');
+  const [acceptError, setAcceptError] = useState('');
+
+  // Load countries on mount
+  useEffect(() => {
+    const loadCountries = async () => {
+      try {
+        setIsLoadingCountries(true);
+        const countriesData = await fetchCountriesUseCase.execute();
+        setCountries(countriesData || []);
+      } catch (error) {
+        registraElFallo(
+          'CompleteProfile.error-loading-countries',
+          'Error loading countries:',
+          error,
+        );
+        setCountries([]);
+      } finally {
+        setIsLoadingCountries(false);
+      }
+    };
+    loadCountries();
+  }, []);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleAcceptTermsChange = (marcada) => {
+    setAcceptedTerms(marcada);
+    if (marcada) setTermsError('');
+  };
+
+  // Ya aceptados (quien se registró con el formulario y llega aquí, o un
+  // backend que no lo dice): ni se pinta la casilla ni se exige
+  const terminosPendientes = debeAceptarLosTerminos(user);
+
+  // Sin la casilla no se entra, ni guardando ni omitiendo el resto
+  const exigirTerminos = () => {
+    if (!terminosPendientes || acceptedTerms) return true;
+    setTermsError(t('google.completeProfile.acceptTermsRequired'));
+    return false;
+  };
+
+  /**
+   * Acepta los Términos en el backend (F2). Va ANTES de todo lo demás: hasta
+   * aceptarlos, guardar el perfil responde 403. Si falla, se dice y no se sigue.
+   * @returns {Promise<boolean>} si se aceptaron
+   */
+  const aceptaLosTerminos = async () => {
+    setAcceptError('');
+    // Ya aceptados (o un backend que no lo dice): no hay nada que aceptar
+    if (!debeAceptarLosTerminos(user)) return true;
+    try {
+      const datosDelBackend = await acceptTermsUseCase.execute();
+      // La sesión queda aceptada YA, con lo que responde el backend: aunque
+      // luego falle guardar el perfil o el hándicap, el guardia no devolverá
+      // a la pantalla de aceptar
+      anotaLaSesion(datosDelBackend);
+      olvidaLaMarcaDeTerminos();
+      return true;
+    } catch {
+      // Un solo aviso, junto a la casilla
+      setAcceptError(t('acceptTermsPage.error'));
+      return false;
+    }
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+
+    if (!exigirTerminos()) return;
+    if (!user) return;
+
+    setIsSaving(true);
+    if (!(await aceptaLosTerminos())) {
+      setIsSaving(false);
+      return;
+    }
+    try {
+      const updateData = {};
+
+      if (formData.countryCode) {
+        updateData.countryCode = formData.countryCode;
+      }
+      if (formData.gender) {
+        updateData.gender = formData.gender;
+      }
+
+      // Update profile if there are changes
+      if (Object.keys(updateData).length > 0) {
+        await updateUserProfileUseCase.execute(user.id, updateData);
+      }
+
+      // Update handicap if provided
+      if (formData.handicap !== '') {
+        await updateManualHandicapUseCase.execute({
+          userId: user.id,
+          handicap: formData.handicap,
+        });
+      }
+
+      await refetchUser();
+      customToast.success(t('google.completeProfile.success'));
+      navigate('/dashboard', { replace: true });
+    } catch (error) {
+      registraElFallo(
+        'CompleteProfile.error-completing-profile',
+        'Error completing profile:',
+        error,
+      );
+      customToast.error(mensajeDelError(error, t('google.genericError')));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    if (!exigirTerminos()) return;
+
+    setIsSaving(true);
+    if (!(await aceptaLosTerminos())) {
+      setIsSaving(false);
+      return;
+    }
+    // La sesión ya está sembrada con la aceptación: se entra sin más consultas
+    navigate('/dashboard', { replace: true });
+  };
+
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-fondo p-4">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="w-full max-w-md"
+      >
+        <div className={TARJETA_DE_ACCESO}>
+          {/* Header */}
+          <div className="mb-8 text-center">
+            <div className="w-16 h-16 bg-realce rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg
+                aria-hidden="true"
+                className="w-8 h-8 text-tinta"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 font-poppins">
+              {t('google.completeProfile.title')}
+            </h2>
+            <p className="text-gray-600 mt-2">
+              {t('google.completeProfile.subtitle')}
+            </p>
+          </div>
+
+          {/* Form */}
+          <form onSubmit={handleSave} className="space-y-5">
+            {/* Country */}
+            <div>
+              {/* Evento sintético para no saltarse handleChange, que es quien
+                  además limpia el error del campo */}
+              <CountryAutocomplete
+                id="countryCode"
+                countries={countries}
+                /* Dentro del componente y no como <label htmlFor> externo: sobre
+                   un <button> el <label> nativo gana a name-from-content y
+                   tapaba el país elegido */
+                label={t('google.completeProfile.countryLabel')}
+                labelClassName="block text-sm font-semibold text-gray-700 mb-2"
+                value={formData.countryCode}
+                placeholder={t('google.completeProfile.countryPlaceholder')}
+                disabled={isSaving || isLoadingCountries}
+                onChange={(code) =>
+                  handleChange({ target: { name: 'countryCode', value: code } })
+                }
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                {t('google.completeProfile.countryHint')}
+              </p>
+            </div>
+
+            {/* Gender */}
+            <div>
+              <label
+                htmlFor="gender"
+                className="block text-sm font-semibold text-gray-700 mb-2"
+              >
+                {t('google.completeProfile.genderLabel')}
+              </label>
+              <div className="relative">
+                <select
+                  id="gender"
+                  name="gender"
+                  value={formData.gender}
+                  onChange={handleChange}
+                  className="w-full py-3 px-4 rounded-lg border-2 border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none text-gray-900 bg-white disabled:bg-gray-50 disabled:cursor-not-allowed appearance-none pr-10"
+                  disabled={isSaving}
+                >
+                  <option value="">
+                    {t('google.completeProfile.genderPlaceholder')}
+                  </option>
+                  <option value={Gender.MALE}>
+                    {t('google.completeProfile.genderOptions.MALE')}
+                  </option>
+                  <option value={Gender.FEMALE}>
+                    {t('google.completeProfile.genderOptions.FEMALE')}
+                  </option>
+                </select>
+                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                  <svg
+                    className="w-5 h-5 text-gray-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 9l-7 7-7-7"
+                    />
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            {/* Handicap */}
+            <div>
+              <label
+                htmlFor="handicap"
+                className="block text-sm font-semibold text-gray-700 mb-2"
+              >
+                {t('google.completeProfile.handicapLabel')}
+              </label>
+              <CampoDeHandicap
+                id="handicap"
+                name="handicap"
+                value={formData.handicap}
+                onChange={(valor) =>
+                  handleChange({ target: { name: 'handicap', value: valor } })
+                }
+                placeholder={t('google.completeProfile.handicapPlaceholder')}
+                className="w-full px-4 py-3 rounded-lg border-2 border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none text-gray-900 placeholder:text-gray-400"
+                disabled={isSaving}
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                {t('google.completeProfile.handicapHint')}
+              </p>
+            </div>
+
+            {/* Términos y edad mínima; la privacidad, solo informada */}
+            {terminosPendientes && (
+              <AceptacionDeTerminos
+                id="acceptTerms"
+                checked={acceptedTerms}
+                onChange={handleAcceptTermsChange}
+                error={termsError}
+                disabled={isSaving}
+              />
+            )}
+
+            {acceptError && (
+              <p role="alert" className="text-red-600 text-sm">
+                {acceptError}
+              </p>
+            )}
+
+            {/* Save Button */}
+            <motion.button
+              type="submit"
+              disabled={isSaving}
+              whileHover={{ scale: isSaving ? 1 : 1.02 }}
+              whileTap={{ scale: isSaving ? 1 : 0.98 }}
+              className={BOTON_PRINCIPAL}
+            >
+              {isSaving
+                ? t('google.completeProfile.saving')
+                : t('google.completeProfile.saveButton')}
+            </motion.button>
+
+            {/* Skip Button */}
+            <button
+              type="button"
+              onClick={handleSkip}
+              disabled={isSaving}
+              className={`w-full py-3 rounded-lg font-semibold text-gray-600 disabled:opacity-50 ${AL_PASAR}`}
+            >
+              {t('google.completeProfile.skipButton')}
+            </button>
+          </form>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+export default CompleteProfile;

@@ -1,0 +1,586 @@
+import { BOLA_ENCENDIDA, CARRIL_ENCENDIDO } from '../ui/clasesDeComportamiento';
+import { Fragment, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import GolfFigure from './GolfFigure';
+import StablefordCalculator from '../../domain/services/StablefordCalculator';
+import NombreConHandicap from './NombreConHandicap';
+import CarruselDeTarjetas from './CarruselDeTarjetas';
+import TarjetaVertical from './TarjetaVertical';
+import ColumnasDeLaVuelta, { CLASE_DE_LA_TABLA } from './ColumnasDeLaVuelta';
+import NombreQueCabe from './NombreQueCabe';
+import { useEsMovil } from '../../hooks/useEsMovil';
+import {
+  conLaMiaPrimero,
+  conMiNombrePrimero,
+} from '../../utils/ordenDeLasTarjetas';
+import { nombreDelEquipo } from '../../utils/lecturaDelPartido';
+import {
+  MatchFormat,
+  isTeamMatchFormat,
+} from '../../domain/value_objects/MatchFormat';
+
+import { Team } from '../../domain/value_objects/Team';
+import { Winner } from '../../domain/value_objects/Winner';
+import { CLASE_DE_MEJOR_BOLA } from './claseDeMejorBola';
+
+/**
+ * La coincidencia entre los dos anotadores no se marca aquí. Es un dato de la
+ * anotación —dice si hay que hablar con el otro anotador ANTES de seguir— y
+ * vive donde se actúa sobre él: la cabecera de `HoleInput` y el color de cada
+ * hoyo en `HoleSelector`. Repetirlo en cada celda de la tarjeta llenaba la
+ * rejilla de iconos y competía con el propio resultado, que es lo que se viene
+ * a leer aquí.
+ */
+const ScorecardTable = ({
+  holes = [],
+  scores = [],
+  players = [],
+  currentUserId,
+  teamAName,
+  teamBName,
+  matchFormat,
+  retirados = [],
+}) => {
+  const { t } = useTranslation('scoring');
+  const [showNet, setShowNet] = useState(false);
+  const esMovil = useEsMovil();
+
+  // El par es de la barra de cada jugador —el backend lo manda resuelto por
+  // jugador desde BE #213— y esta rejilla lo comparte entre todas las
+  // filas. Las filas Par y SI son comunes por diseño: con jugadores en barras
+  // distintas no hay un par que enseñar ahí, así que se quedan con la del
+  // campo. La FIGURA de cada casilla sí es de quien juega esa bola: ahí no hay
+  // nada compartido que decidir, y era donde un jugador de otra barra veía su
+  // 4 pintado como birdie contra un par que no era el suyo. Ver
+  // FE #417.
+  const cardOf = (userId) =>
+    players.find((p) => p.userId === userId)?.holeCard ?? [];
+
+  // Se resuelve por FILA, no por jugador: en foursomes la fila es el bando
+  // entero, y leer el par del primero le pinta al otro un par que no juega.
+  // Con los dos en barras de distinto par —o si a alguno le falta la tarjeta—
+  // se usa la del campo: no es la de ninguno de los dos, que es justo lo que la
+  // hace preferible a la de uno.
+  const parFor = (playerIds, holeNumber, fallbackPar) => {
+    const pars = playerIds.map(
+      (id) => cardOf(id).find((h) => h.holeNumber === holeNumber)?.par,
+    );
+    const [first] = pars;
+    if (first == null) return fallbackPar;
+    return pars.every((par) => par === first) ? first : fallbackPar;
+  };
+
+  const outHoles = holes.filter((h) => h.holeNumber <= 9);
+  const inHoles = holes.filter((h) => h.holeNumber > 9);
+
+  const isTeamFormat = isTeamMatchFormat(matchFormat);
+
+  // El bando de foursomes ocupa UNA fila, así que subirla no basta para que
+  // quien mira se lea a sí mismo primero: el nombre propio va delante dentro de
+  // la etiqueta. Se ordenan los nombres, no `teamA` / `teamB`: de esos arrays
+  // salen los `playerIds` con los que se busca el golpe del bando.
+  const enOrdenDeLectura = (miembros) =>
+    conMiNombrePrimero(miembros, (p) => p.userId === currentUserId);
+  const nombreDelBando = (miembros) =>
+    enOrdenDeLectura(miembros)
+      .map((p) => p.userName)
+      .join(' / ');
+
+  // FE #414 · cada jugador con su hándicap de juego, como en la partida rápida.
+  // Va en la línea de su nombre y no en una propia: con otra línea la tarjeta
+  // crecía. En el móvil, si no cabe, se corta el nombre y el valor se queda.
+  // En foursomes cada miembro lleva el suyo, no el del bando.
+  const jugadorConHandicap = (p, cortaElNombre) => (
+    <>
+      <NombreConHandicap
+        testId={`jugador-${p.userId}`}
+        userId={p.userId}
+        nombre={p.userName}
+        playingHandicap={p.playingHandicap}
+        className={
+          cortaElNombre
+            ? 'inline-flex min-w-0 max-w-full items-baseline align-bottom'
+            : undefined
+        }
+        nombreClassName={cortaElNombre ? 'min-w-0 truncate' : undefined}
+      >
+        {/* Fourball: retirado (BE #665, F4) */}
+        {retirados.includes(p.userId) && (
+          <span
+            data-testid={`etiqueta-retirado-${p.userId}`}
+            className="ml-1 shrink-0 whitespace-nowrap rounded bg-error-suave px-1 text-[10px] font-medium text-error"
+          >
+            {t('withdraw.badge')}
+          </span>
+        )}
+      </NombreConHandicap>
+    </>
+  );
+
+  const nombresConHandicap = (row, cortaElNombre = false) =>
+    row.miembros.map((p, i) => (
+      <Fragment key={p.userId}>
+        {i > 0 &&
+          (cortaElNombre ? <span className="mx-1 shrink-0">/</span> : ' / ')}
+        {jugadorConHandicap(p, cortaElNombre)}
+      </Fragment>
+    ));
+
+  // Build display rows based on match format
+  const displayRows = (() => {
+    if (matchFormat === MatchFormat.FOURSOMES) {
+      const teamA = players.filter((p) => p.team === Team.A);
+      const teamB = players.filter((p) => p.team === Team.B);
+      const rows = [];
+      if (teamA.length > 0) {
+        rows.push({
+          id: 'team-a',
+          label: nombreDelBando(teamA),
+          miembros: enOrdenDeLectura(teamA),
+          team: Team.A,
+          playerIds: teamA.map((p) => p.userId),
+          isCurrentUser: teamA.some((p) => p.userId === currentUserId),
+        });
+      }
+      if (teamB.length > 0) {
+        rows.push({
+          id: 'team-b',
+          label: nombreDelBando(teamB),
+          miembros: enOrdenDeLectura(teamB),
+          team: Team.B,
+          playerIds: teamB.map((p) => p.userId),
+          isCurrentUser: teamB.some((p) => p.userId === currentUserId),
+        });
+      }
+      return rows;
+    }
+    return players.map((p) => ({
+      id: p.userId,
+      label: p.userName,
+      miembros: [p],
+      team: p.team,
+      playerIds: [p.userId],
+      isCurrentUser: p.userId === currentUserId,
+    }));
+  })();
+
+  // La fila de quien mira, delante; detrás la de su compañero, que en fourball
+  // es otra fila y en foursomes viaja ya dentro de la suya. Se ordena la lista
+  // PINTADA y no `players`: la etiqueta del equipo se resuelve por `row.team`,
+  // así que viaja con su fila, y el reparto de golpes sigue leyendo el array
+  // original. Mirando una partida que no se juega, esto no cambia nada.
+  const filasOrdenadas = conLaMiaPrimero(displayRows, {
+    esMia: (row) => row.isCurrentUser,
+    equipoDe: (row) => row.team,
+  });
+
+  const getPlayerScore = (holeNumber, userId) => {
+    const holeData = scores.find((s) => s.holeNumber === holeNumber);
+    if (!holeData) return null;
+    return holeData.playerScores?.find((ps) => ps.userId === userId) || null;
+  };
+
+  // Lo anotado en un hoyo de la fila: primero lo enviado (con número, y si no
+  // la raya), luego un número sin enviar y si no, cualquier fila. Sin conexión
+  // solo se reescribe la fila de quien anota, y la del compañero sin enviar
+  // tapaba su raya
+  const getRowScore = (holeNumber, row) => {
+    const anotados = row.playerIds.map((userId) =>
+      getPlayerScore(holeNumber, userId),
+    );
+    return (
+      anotados.find((ps) => ps?.ownSubmitted && ps.ownScore != null) ??
+      anotados.find((ps) => ps?.ownSubmitted) ??
+      anotados.find((ps) => ps?.ownScore != null) ??
+      anotados.find(Boolean) ??
+      null
+    );
+  };
+
+  const getHoleResult = (holeNumber) => {
+    const holeData = scores.find((s) => s.holeNumber === holeNumber);
+    return holeData?.holeResult || null;
+  };
+
+  // Lo que suma un hoyo de la fila. La raya (anotada y sin número) vale su
+  // doble bogey neto, `par + 2 + golpes recibidos` en el partido, y `par + 2`
+  // en neto (Agustín, 23 oct 2026: «siempre una raya es par + golpes
+  // recibidos + 2»). Antes se quedaba fuera del total.
+  const valorDelHoyo = (h, row) => {
+    const ps = getRowScore(h.holeNumber, row);
+    if (ps?.ownSubmitted && ps.ownScore == null) {
+      const par = parFor(row.playerIds, h.holeNumber, h.par);
+      return StablefordCalculator.netDoubleBogey(
+        par,
+        showNet ? 0 : (ps.strokesReceivedThisHole ?? 0),
+      );
+    }
+    return showNet ? (ps?.netScore ?? ps?.ownScore) : ps?.ownScore;
+  };
+
+  const sumRowScores = (holeRange, row) => {
+    return holeRange.reduce((sum, h) => {
+      const val = valorDelHoyo(h, row);
+      return val !== null && val !== undefined ? sum + val : sum;
+    }, 0);
+  };
+
+  const hasAnyStrokes = players.some((p) => p.strokesReceived?.length > 0);
+
+  const getTeamBorderClass = (team) => {
+    if (!isTeamFormat) return '';
+    return team === Team.A
+      ? 'border-l-4 border-l-team-a'
+      : 'border-l-4 border-l-team-b';
+  };
+
+  // Solo en fourball: si la bola de esta fila fue la que contó en el hoyo. En
+  // foursomes la bola es del bando entero, y en individuales cada hoyo es «la
+  // mejor bola» del único jugador de su bando: la tabla entera salía resaltada
+  // (Agustín, 25 nov 2026)
+  const esMejorBola = (holeNumber, row) => {
+    if (matchFormat !== MatchFormat.FOURBALL) return false;
+    const result = getHoleResult(holeNumber);
+    return Boolean(
+      (row.team === Team.A &&
+        result?.bestBallPlayerA?.includes(row.playerIds[0])) ||
+      (row.team === Team.B &&
+        result?.bestBallPlayerB?.includes(row.playerIds[0])),
+    );
+  };
+
+  // Lo que se pinta en la casilla de un hoyo: la figura con los golpes (bruto o
+  // neto) y los puntitos de los golpes recibidos. La comparten la tarjeta
+  // horizontal y la vertical del móvil
+  const casillaDeGolpes = (h, row) => {
+    const ps = getRowScore(h.holeNumber, row);
+    if (!ps) {
+      // Sin anotación: hueco. Un guion aquí se confundía con la raya, que
+      // significa lo contrario.
+      return <span className="inline-flex w-7 h-7" />;
+    }
+    const displayScore = showNet
+      ? (ps?.netScore ?? ps?.ownScore)
+      : ps?.ownScore;
+    // La raya: hoyo anotado (`ownSubmitted`) y sin número porque el jugador
+    // recogió. No es lo mismo que un hoyo pendiente, aunque los dos lleguen
+    // aquí sin golpes, y con el mismo guion gris para ambos no había forma de
+    // saber cuál era cuál.
+    const isPickedUp = Boolean(ps?.ownSubmitted) && ps?.ownScore == null;
+    const strokeCount = ps?.strokesReceivedThisHole ?? 0;
+    return (
+      <div className="flex flex-col items-center">
+        {showNet && strokeCount > 0 && (
+          <div className="flex gap-px justify-center">
+            {Array.from({ length: strokeCount }).map((_, i) => (
+              <span
+                key={i}
+                className="block w-1.5 h-1.5 bg-tinta rounded-full"
+              />
+            ))}
+          </div>
+        )}
+        <GolfFigure
+          score={isPickedUp ? null : displayScore}
+          par={parFor(row.playerIds, h.holeNumber, h.par)}
+          pickedUp={isPickedUp}
+        />
+      </div>
+    );
+  };
+
+  // Quién se llevó el hoyo, visto desde esta tarjeta
+  const resultadoPara = (holeNumber, row) => {
+    const result = getHoleResult(holeNumber);
+    if (!result) return { texto: '', clase: '' };
+    if (result.winner === Winner.HALVED)
+      return { texto: t('scorecard.halved'), clase: 'text-tinta-suave' };
+    return result.winner === row.team
+      ? { texto: t('scorecard.holeWon'), clase: 'bg-exito-suave text-exito' }
+      : { texto: t('scorecard.holeLost'), clase: 'bg-error-suave text-error' };
+  };
+
+  // FE #739 · en el móvil, una tarjeta por participante con los hoyos de arriba
+  // abajo: la horizontal no cabía a 360 px y se desplazaba de lado
+  const tarjetaVertical = (row) => {
+    const nombreDelEquipo =
+      row.team === Team.A ? teamAName : row.team === Team.B ? teamBName : null;
+    return (
+      <TarjetaVertical
+        clave={row.id}
+        testId={`tarjeta-vertical-${row.id}`}
+        equipo={row.team}
+        conResultado
+        cabecera={
+          <>
+            {/* Una sola línea aunque sea la pareja de foursomes: se cortan los
+                nombres, no se parte la cabecera (la tarjeta crecía) */}
+            <p className="flex min-w-0 flex-nowrap items-baseline whitespace-nowrap text-sm font-bold text-tinta">
+              {nombresConHandicap(row, true)}
+            </p>
+            {nombreDelEquipo && (
+              <p className="text-[11px] text-tinta-suave">{nombreDelEquipo}</p>
+            )}
+          </>
+        }
+        hoyos={holes.map((h) => ({
+          holeNumber: h.holeNumber,
+          par: parFor(row.playerIds, h.holeNumber, h.par),
+          strokeIndex: h.strokeIndex,
+          casilla: casillaDeGolpes(h, row),
+          resultado: resultadoPara(h.holeNumber, row),
+          mejorBola: esMejorBola(h.holeNumber, row),
+        }))}
+        sumas={{
+          ida: inHoles.length > 0 ? sumRowScores(outHoles, row) : undefined,
+          vuelta: inHoles.length > 0 ? sumRowScores(inHoles, row) : undefined,
+          total: sumRowScores(holes, row),
+        }}
+      />
+    );
+  };
+
+  // `conTotal`: el último tramo acaba en TOTAL, como la tarjeta de papel; el
+  // otro deja su hueco para que las columnas cuadren (FE #938)
+  const renderSection = (sectionHoles, label, conTotal) => (
+    <div data-testid="vuelta-horizontal" className="overflow-x-auto">
+      <table className={CLASE_DE_LA_TABLA}>
+        <ColumnasDeLaVuelta
+          hoyos={sectionHoles}
+          anchoPrimera={
+            matchFormat === MatchFormat.FOURSOMES ? 'w-[120px]' : 'w-24'
+          }
+        />
+        <thead>
+          <tr className="bg-tarjeta">
+            <th className="px-2 py-1 text-left font-medium text-tinta-suave">
+              {t('scorecard.hole')}
+            </th>
+            {sectionHoles.map((h) => (
+              <th
+                key={h.holeNumber}
+                className="px-2 py-1 text-center font-medium text-tinta-suave"
+              >
+                {h.holeNumber}
+              </th>
+            ))}
+            <th className="px-2 py-1 text-center font-bold text-tinta">
+              {label}
+            </th>
+            {conTotal ? (
+              <th className="px-2 py-1 text-center font-bold text-tinta">
+                {t('scorecard.total')}
+              </th>
+            ) : (
+              <td />
+            )}
+          </tr>
+          <tr className="bg-tarjeta">
+            <th
+              scope="row"
+              className="px-2 py-1 text-left text-tinta-suave font-normal"
+            >
+              {t('scorecard.par')}
+            </th>
+            {sectionHoles.map((h) => (
+              <th
+                key={h.holeNumber}
+                scope="col"
+                className="px-2 py-1 text-center text-tinta-suave font-normal"
+              >
+                {h.par}
+              </th>
+            ))}
+            <th
+              scope="col"
+              className="px-2 py-1 text-center font-medium text-tinta-suave"
+            >
+              {sectionHoles.reduce((s, h) => s + h.par, 0)}
+            </th>
+            {conTotal ? (
+              <th
+                scope="col"
+                data-testid="scorecard-total-par"
+                className="px-2 py-1 text-center font-medium text-tinta-suave"
+              >
+                {holes.reduce((s, h) => s + h.par, 0)}
+              </th>
+            ) : (
+              <td />
+            )}
+          </tr>
+          <tr className="bg-tarjeta">
+            <th
+              scope="row"
+              className="px-2 py-1 text-left text-tinta-suave font-normal"
+            >
+              {t('scorecard.si')}
+            </th>
+            {sectionHoles.map((h) => (
+              <th
+                key={h.holeNumber}
+                scope="col"
+                className="px-2 py-1 text-center text-tinta-suave font-normal"
+              >
+                {h.strokeIndex}
+              </th>
+            ))}
+            <th scope="col" className="px-2 py-1"></th>
+            <td />
+          </tr>
+        </thead>
+        <tbody>
+          {filasOrdenadas.map((row) => {
+            const borderClass = getTeamBorderClass(row.team);
+            return (
+              <tr key={row.id} className={row.isCurrentUser ? 'bg-realce' : ''}>
+                {/* El nombre se parte en líneas y no se corta: con « / » la
+                    pareja se leía «Nacho Noche / …», sin saber con quién (#727) */}
+                <td
+                  className={`px-2 py-1.5 text-left font-medium text-tinta whitespace-normal break-words leading-tight ${borderClass}`}
+                >
+                  {isTeamFormat && (
+                    <span className="block text-[10px] text-tinta-suave leading-tight">
+                      {row.team === Team.A ? teamAName : teamBName}
+                    </span>
+                  )}
+                  {nombresConHandicap(row)}
+                </td>
+                {sectionHoles.map((h) => (
+                  <td
+                    key={h.holeNumber}
+                    className={`px-1 py-1 text-center ${esMejorBola(h.holeNumber, row) ? CLASE_DE_MEJOR_BOLA : ''}`}
+                  >
+                    {casillaDeGolpes(h, row)}
+                  </td>
+                ))}
+                <td className="px-2 py-1 text-center font-bold">
+                  {sumRowScores(sectionHoles, row) || '-'}
+                </td>
+                {conTotal ? (
+                  <td
+                    data-testid={`scorecard-total-${row.id}`}
+                    className="px-2 py-1 text-center font-bold"
+                  >
+                    {sumRowScores(holes, row) || '-'}
+                  </td>
+                ) : (
+                  <td />
+                )}
+              </tr>
+            );
+          })}
+          <tr className="border-t">
+            <td className="px-2 py-1 text-left text-tinta-suave">
+              {t('scorecard.result')}
+            </td>
+            {sectionHoles.map((h) => {
+              const result = getHoleResult(h.holeNumber);
+              const bestBallIds =
+                result?.winner === Winner.A
+                  ? result.bestBallPlayerA
+                  : result?.winner === Winner.B
+                    ? result.bestBallPlayerB
+                    : [];
+              const bestNames = (bestBallIds ?? [])
+                .map((id) => {
+                  const parts =
+                    players
+                      .find((p) => p.userId === id)
+                      ?.userName?.split(' ') ?? [];
+                  const name = parts[0]
+                    ? parts[1]
+                      ? `${parts[0]} ${parts[1][0]}.`
+                      : parts[0]
+                    : null;
+                  return name ? { id, name } : null;
+                })
+                .filter(Boolean);
+              const fallbackLabel =
+                nombreDelEquipo(result?.winner, teamAName, teamBName) ?? null;
+              const winnerColor =
+                result?.winner === Winner.A
+                  ? 'bg-team-a-suave text-team-a font-bold'
+                  : result?.winner === Winner.B
+                    ? 'bg-team-b-suave text-team-b font-bold'
+                    : '';
+              const winnerContent = !result ? (
+                ''
+              ) : result.winner === Winner.HALVED ? (
+                t('scorecard.halved')
+              ) : bestNames.length > 0 ? (
+                <span className="flex flex-col leading-tight">
+                  {bestNames.map((entry, i) => (
+                    <span key={entry.id} className="block">
+                      {i > 0 && (
+                        <span className="block text-tinta-suave font-normal">
+                          {t('scorecard.and')}
+                        </span>
+                      )}
+                      <NombreQueCabe nombre={entry.name} />
+                    </span>
+                  ))}
+                </span>
+              ) : (
+                fallbackLabel
+              );
+              return (
+                <td
+                  key={h.holeNumber}
+                  className={`px-1 py-1 text-center text-xs ${winnerColor}`}
+                >
+                  {winnerContent}
+                </td>
+              );
+            })}
+            <td className="px-2 py-1"></td>
+            <td />
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return (
+    <div data-testid="scorecard-table" className="space-y-4">
+      {hasAnyStrokes && (
+        <div className="flex items-center justify-end gap-2 mb-2">
+          <span className="text-xs text-tinta-suave">
+            {t('scorecard.gross')}
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={showNet}
+            aria-label={t('scorecard.grossNet')}
+            onClick={() => setShowNet(!showNet)}
+            className={`relative w-10 h-5 rounded-full transition-colors ${showNet ? CARRIL_ENCENDIDO : 'bg-borde'}`}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full transition-transform ${showNet ? `translate-x-5 ${BOLA_ENCENDIDA}` : 'bg-fondo'}`}
+            />
+          </button>
+          <span className="text-xs text-tinta-suave">{t('scorecard.net')}</span>
+        </div>
+      )}
+      {esMovil ? (
+        <CarruselDeTarjetas
+          tarjetas={filasOrdenadas.map((row) => ({
+            clave: row.id,
+            nombre: row.label,
+            equipo: row.team,
+            contenido: tarjetaVertical(row),
+          }))}
+        />
+      ) : (
+        <>
+          {renderSection(outHoles, t('scorecard.out'), inHoles.length === 0)}
+          {inHoles.length > 0 &&
+            renderSection(inHoles, t('scorecard.in'), true)}
+        </>
+      )}
+    </div>
+  );
+};
+
+export default ScorecardTable;

@@ -1,0 +1,147 @@
+/**
+ * Qué se hace con una anotación que no llegó al servidor (FE #521).
+ *
+ * Vivía repetida en cada pantalla que anota, con tres formas distintas y por
+ * tanto tres respuestas distintas a la misma pregunta: qué le pasa a tu golpe
+ * dependía de dónde estuvieras mirando. Aquí hay una sola.
+ *
+ * Los dos únicos desenlaces posibles:
+ *
+ * - **Se guarda** para enviarlo más tarde. La cola vive en el móvil, así que
+ *   el golpe sigue ahí cuando su dueño vuelva a entrar.
+ * - **Se descarta**, porque el servidor ha dicho que esa anotación no entra y
+ *   no va a entrar. Reintentarla en cada reconexión no la va a salvar. Ojo al
+ *   matiz: «no entra AHORA» no es «no va a entrar» —la anotación que aún no ha
+ *   abierto se arregla esperando—, y por eso esa se guarda.
+ *
+ * Nunca hay un tercer desenlace en el que el golpe desaparece sin más.
+ */
+
+import { TERMINOS_NO_ACEPTADOS } from '../domain/services/aceptacionDeTerminos';
+
+// Los 4xx que NO son culpa de la anotación: se arreglan solos con el tiempo.
+//
+// El 401 es la sesión —lo normal al abrir la aplicación días después con
+// golpes guardados—, y el 408 y el 429 son el momento, no el golpe. Descartar
+// por cualquiera de ellos borra una anotación perfectamente buena.
+const SE_ARREGLA_SOLO = new Set([401, 408, 429]);
+
+const PRIMER_ERROR_DEL_CLIENTE = 400;
+const PRIMER_ERROR_DEL_SERVIDOR = 500;
+
+// El rechazo que se arregla ESPERANDO: la anotación de ese partido abre a una
+// hora y todavía no ha llegado (BE #305). Llega como 409 —el golpe no entra
+// AHORA—, pero entrará, así que descartarlo pierde una vuelta que el servidor
+// iba a aceptar. Pasa con el reloj del móvil adelantado, y con lo anotado sin
+// cobertura antes de la hora. El servidor lo manda en la RAÍZ del cuerpo, no
+// dentro de `detail`, precisamente para que se pueda leer aquí
+const CODIGOS_QUE_SE_ARREGLAN_ESPERANDO = new Set(['SCORING_NOT_OPEN_YET']);
+
+// El 403 de Términos sin aceptar (F4): no es culpa del golpe, sino de la
+// sesión, y se arregla en cuanto se aceptan. Descartarlo como un 403 cualquiera
+// borraba anotaciones buenas
+const CODIGOS_DE_TODA_LA_SESION = new Set([TERMINOS_NO_ACEPTADOS]);
+
+/** El código HTTP de un error, mire donde mire quien lo lanzó. */
+const codigoDe = (error) => error?.status ?? error?.response?.status;
+
+/** El código propio del servidor, que dice de qué rechazo se trata. */
+const codigoPropioDe = (error) =>
+  error?.errorCode ?? error?.response?.data?.error_code;
+
+/**
+ * Si esta anotación hay que guardarla para intentarlo más tarde.
+ *
+ * Sin código es que no llegó respuesta —sin cobertura, o el fallo de CSRF que
+ * `api.js` lanza como un Error pelado—: se guarda. No se ha podido preguntar,
+ * que no es lo mismo que una negativa.
+ */
+export const seGuardaParaDespues = (error) => {
+  const codigo = codigoDe(error);
+  if (codigo === undefined) return true;
+  if (CODIGOS_DE_TODA_LA_SESION.has(codigoPropioDe(error))) return true;
+  if (SE_ARREGLA_SOLO.has(codigo)) return true;
+  if (CODIGOS_QUE_SE_ARREGLAN_ESPERANDO.has(codigoPropioDe(error))) return true;
+  // El resto del rango 4xx es la petición en sí: reintentarla no cambia nada
+  return !(
+    codigo >= PRIMER_ERROR_DEL_CLIENTE && codigo < PRIMER_ERROR_DEL_SERVIDOR
+  );
+};
+
+/**
+ * Si el servidor ha rechazado esta anotación de forma definitiva.
+ *
+ * Es exactamente lo contrario de guardarla, y se expone aparte para que quien
+ * vacía la cola no tenga que negar una condición y equivocarse al hacerlo.
+ */
+export const esRechazoDefinitivo = (error) => !seGuardaParaDespues(error);
+
+/**
+ * Si el servidor la rechazó solo porque su partido aún no abre (BE #305): esa
+ * entrará con esperar a la hora, al contrario que una que el propio móvil no
+ * puede mandar. Quien vacía en el sondeo lo necesita para no darla por
+ * imposible (FE #625).
+ */
+export const esperaASuHora = (error) =>
+  CODIGOS_QUE_SE_ARREGLAN_ESPERANDO.has(codigoPropioDe(error));
+
+/**
+ * Si el fallo no es de ESTA anotación, sino de la sesión o del servidor
+ * entero: mientras siga así, cualquier otra fallaría igual.
+ *
+ * Sirve para decidir si se para el vaciado o se sigue con la siguiente. Sin
+ * esto, un 403 de CSRF —que `api.js` responde cerrando la sesión y redirigiendo
+ * a la fuerza— se repetía una vez por golpe guardado: doce peticiones
+ * condenadas y doce cierres de sesión antes de que la navegación llegara a
+ * ocurrir. Y un 503 durante un despliegue reintentaba la cola entera en cada
+ * vuelta a la aplicación, sin espera de ningún tipo.
+ *
+ * Un `Error` pelado que NO sea el de CSRF es lo contrario: lo lanza el caso de
+ * uso al validar, antes de enviar, y habla solo de esa anotación. Ese no puede
+ * parar la cola, o una entrada mala a la cabeza dejaría sin enviar los golpes
+ * de todas las demás partidas para siempre.
+ */
+export const esFalloDeTodaLaSesion = (error) => {
+  if (error?.errorCode === 'CSRF_VALIDATION_FAILED') return true;
+  if (CODIGOS_DE_TODA_LA_SESION.has(codigoPropioDe(error))) return true;
+  const codigo = codigoDe(error);
+  if (codigo === undefined) return false;
+  // «Aún no ha abierto» se guarda, pero es de ESA anotación y de ninguna otra:
+  // el partido de la tarde no ha abierto, el de la mañana sí. Tomarlo por un
+  // fallo de sesión paraba el vaciado ENTERO, y los golpes de la mañana se
+  // quedaban sin salir en cada reconexión hasta que llegara la hora de la tarde
+  if (CODIGOS_QUE_SE_ARREGLAN_ESPERANDO.has(codigoPropioDe(error)))
+    return false;
+  return seGuardaParaDespues(error);
+};
+
+/**
+ * Si la petición no llegó a tener respuesta del servidor.
+ *
+ * Sirve para decidir si se sigue vaciando la cola: sin red no tiene sentido
+ * intentar la siguiente. **No es lo mismo que `sinCobertura.esFalloDeRed`**, y
+ * por eso no se reutiliza: aquella responde «qué le enseño al usuario» y
+ * cuenta `navigator.onLine === false` como motivo suficiente; esta responde
+ * «paro el bucle», donde ese dato no vale —el navegador puede decir que hay
+ * red mientras la petición muere igual— y donde equivocarse cuesta golpes.
+ *
+ * El patrón de mensajes es corto a propósito. Con `/red/` dentro, un «Marked
+ * player ID is required» se leía como caída de red —por «requi-RED»— y paraba
+ * el vaciado de toda la cola.
+ */
+export const noLlegoAlServidor = (error) => {
+  if (codigoDe(error)) return false;
+  if (error?.errorCode === 'CSRF_VALIDATION_FAILED') return false;
+  if (error instanceof TypeError) return true;
+  // La petición abortada cuenta: es lo que lanza el refresco del token al
+  // vencer su tope de 15 s. No es un TypeError sino un DOMException, y su
+  // mensaje no se parece a ninguno de los de abajo, así que se colaba entre
+  // las tres categorías y el bucle seguía con la siguiente: doce golpes
+  // guardados eran tres minutos de peticiones condenadas, en cada arranque y
+  // en cada vuelta a la aplicación
+  if (error?.name === 'AbortError' || error?.name === 'TimeoutError')
+    return true;
+  return /failed to fetch|networkerror|network error|load failed/i.test(
+    error?.message ?? '',
+  );
+};

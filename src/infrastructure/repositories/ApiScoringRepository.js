@@ -1,0 +1,126 @@
+// src/infrastructure/repositories/ApiScoringRepository.js
+
+import apiRequest from '../http/api.js';
+import { TOPE_DE_ANOTAR_MS } from './topeDeAnotar';
+import IScoringRepository from '../../domain/repositories/IScoringRepository.js';
+import ScoringMapper from '../mappers/ScoringMapper';
+import { segmento } from '../http/api';
+
+/**
+ * REST implementation of IScoringRepository.
+ * Consumes the 4 new endpoints + 1 existing endpoint (concede action)
+ * from Sprint 4.
+ */
+class ApiScoringRepository extends IScoringRepository {
+  /**
+   * GET /api/v1/competitions/matches/{matchId}/scoring-view
+   */
+  async getScoringView(matchId) {
+    const data = await apiRequest(
+      `/api/v1/competitions/matches/${segmento(matchId)}/scoring-view`,
+      {
+        topeMs: TOPE_DE_ANOTAR_MS,
+      },
+    );
+    return ScoringMapper.toScoringViewDTO(data);
+  }
+
+  /**
+   * POST /api/v1/competitions/matches/{matchId}/scores/holes/{holeNumber}
+   */
+  async submitHoleScore(matchId, holeNumber, scoreData) {
+    // Un golpe que no viene NO llega al servidor, y eso importa: alli omitirlo
+    // deja esa anotacion como estaba, mientras que `null` es una raya —conceder
+    // el hoyo— (#609, BE #301). Lo consigue `JSON.stringify`, que tira
+    // las claves con valor `undefined`; es un mecanismo invisible al leer, asi
+    // que queda dicho. Quien decide que se manda es el caso de uso
+    const data = await apiRequest(
+      `/api/v1/competitions/matches/${segmento(matchId)}/scores/holes/${segmento(holeNumber)}`,
+      {
+        topeMs: TOPE_DE_ANOTAR_MS,
+        method: 'POST',
+        body: JSON.stringify({
+          own_score: scoreData.ownScore,
+          marked_player_id: scoreData.markedPlayerId,
+          marked_score: scoreData.markedScore,
+        }),
+      },
+    );
+    return ScoringMapper.toScoringViewDTO(data);
+  }
+
+  /**
+   * POST /api/v1/competitions/matches/{matchId}/scorecard/submit
+   */
+  async submitScorecard(matchId) {
+    const data = await apiRequest(
+      `/api/v1/competitions/matches/${segmento(matchId)}/scorecard/submit`,
+      {
+        topeMs: TOPE_DE_ANOTAR_MS,
+        method: 'POST',
+        body: JSON.stringify({}),
+      },
+    );
+    return ScoringMapper.toMatchSummaryDTO(data);
+  }
+
+  /**
+   * GET /api/v1/competitions/{competitionId}/leaderboard
+   */
+  async getLeaderboard(competitionId) {
+    const data = await apiRequest(
+      `/api/v1/competitions/${segmento(competitionId)}/leaderboard`,
+    );
+    return ScoringMapper.toLeaderboardDTO(data);
+  }
+
+  /**
+   * PUT /api/v1/competitions/matches/{matchId}/concede
+   */
+  async concedeMatch(matchId, concedingTeam, reason) {
+    const body = {
+      conceding_team: concedingTeam,
+    };
+    if (reason) {
+      body.reason = reason;
+    }
+    const data = await apiRequest(
+      `/api/v1/competitions/matches/${segmento(matchId)}/concede`,
+      {
+        topeMs: TOPE_DE_ANOTAR_MS,
+        method: 'PUT',
+        body: JSON.stringify(body),
+      },
+    );
+    return data;
+  }
+
+  /**
+   * POST /api/v1/competitions/matches/{matchId}/players/{playerId}/withdraw
+   * Fourball: retira al jugador (BE #665)
+   */
+  async withdrawPlayer(matchId, playerId) {
+    return this.#retirada(matchId, playerId, 'withdraw');
+  }
+
+  /**
+   * POST /api/v1/competitions/matches/{matchId}/players/{playerId}/reinstate
+   */
+  async reinstatePlayer(matchId, playerId) {
+    return this.#retirada(matchId, playerId, 'reinstate');
+  }
+
+  async #retirada(matchId, playerId, accion) {
+    const data = await apiRequest(
+      `/api/v1/competitions/matches/${segmento(matchId)}/players/${segmento(playerId)}/${segmento(accion)}`,
+      { topeMs: TOPE_DE_ANOTAR_MS, method: 'POST' },
+    );
+    return {
+      matchId: data.match_id,
+      withdrawnPlayerIds: data.withdrawn_player_ids ?? [],
+      decidedResult: data.decided_result ?? null,
+    };
+  }
+}
+
+export default ApiScoringRepository;

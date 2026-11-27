@@ -1,0 +1,732 @@
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
+import PendingActionsCard from './PendingActionsCard';
+import { olvidaTodo } from '../../services/loUltimoConocido';
+import { CompetitionStatus } from '../../domain/value_objects/CompetitionStatus';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key, params) => {
+      if (params?.count !== undefined && params?.name)
+        return `${key}_${params.count}_${params.name}`;
+      if (params?.count !== undefined) return `${key}_${params.count}`;
+      return key;
+    },
+    i18n: { language: 'en' },
+  }),
+}));
+
+vi.mock('framer-motion', () => ({
+  motion: {
+    div: ({
+      children,
+      initial,
+      animate,
+      transition,
+      whileHover,
+      whileTap,
+      ...rest
+    }) => {
+      void initial;
+      void animate;
+      void transition;
+      void whileHover;
+      void whileTap;
+      return <div {...rest}>{children}</div>;
+    },
+  },
+}));
+
+const mockNavigate = vi.fn();
+vi.mock('react-router', async () => {
+  const actual = await vi.importActual('react-router');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
+
+const mockListMyInvitations = vi.fn();
+const mockListEnrollments = vi.fn();
+const mockGetSchedule = vi.fn();
+const mockListPendingFriendRequests = vi.fn();
+const mockListMyQuickMatches = vi.fn();
+const mockListMyPendingEnvelopes = vi.fn();
+const mockListMySessionsWithoutMatches = vi.fn().mockResolvedValue([]);
+
+vi.mock('../../composition', () => ({
+  listMyInvitationsUseCase: {
+    execute: (...args) => mockListMyInvitations(...args),
+  },
+  listEnrollmentsUseCase: {
+    execute: (...args) => mockListEnrollments(...args),
+  },
+  getScheduleUseCase: { execute: (...args) => mockGetSchedule(...args) },
+  listPendingFriendRequestsUseCase: {
+    execute: (...args) => mockListPendingFriendRequests(...args),
+  },
+  listMyQuickMatchesUseCase: {
+    execute: (...args) => mockListMyQuickMatches(...args),
+  },
+  listMyPendingEnvelopesUseCase: {
+    execute: (...args) => mockListMyPendingEnvelopes(...args),
+  },
+  listMySessionsWithoutMatchesUseCase: {
+    execute: (...args) => mockListMySessionsWithoutMatches(...args),
+  },
+}));
+
+const baseUser = {
+  id: 'user-1',
+  first_name: 'Test',
+  last_name: 'User',
+  roles: [{ name: 'PLAYER' }],
+};
+
+const creatorUser = {
+  ...baseUser,
+  roles: [{ name: 'CREATOR' }],
+};
+
+const renderCard = (
+  user = baseUser,
+  competitions = [],
+  upcomingMatches = 0,
+) => {
+  return render(
+    <MemoryRouter>
+      <PendingActionsCard
+        user={user}
+        competitions={competitions}
+        upcomingMatches={upcomingMatches}
+      />
+    </MemoryRouter>,
+  );
+};
+
+describe('PendingActionsCard', () => {
+  beforeEach(async () => {
+    // La memoria de lo ultimo enseñado vive en un modulo y se colaba de un test
+    // al siguiente: uno pasaba solo porque el anterior dejaba ceros puestos
+    const { olvidaLasAccionesPendientes } =
+      await import('../../services/accionesPendientes');
+    olvidaLasAccionesPendientes();
+    // Y lo guardado en el móvil: si no, lo de un test lo pinta el siguiente
+    olvidaTodo();
+    vi.clearAllMocks();
+    mockListMyInvitations.mockResolvedValue({ invitations: [], totalCount: 0 });
+    mockListEnrollments.mockResolvedValue([]);
+    mockGetSchedule.mockResolvedValue({ rounds: [] });
+    mockListPendingFriendRequests.mockResolvedValue({
+      friendships: [],
+      totalCount: 0,
+    });
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [],
+      totalCount: 0,
+      page: 1,
+      limit: 20,
+    });
+    // Un doble de una función async devuelve lo que devuelve la de verdad: una
+    // lista. Con `undefined` revienta quien haga `.length`
+    mockListMyPendingEnvelopes.mockResolvedValue([]);
+    mockListMySessionsWithoutMatches.mockResolvedValue([]);
+  });
+
+  it('should show active quick matches and navigate to their scoring page', async () => {
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [
+        { id: 'qm-1', matchFormat: 'SINGLES', status: 'IN_PROGRESS' },
+      ],
+      totalCount: 1,
+      page: 1,
+      limit: 20,
+    });
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('active-quick-match-qm-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('active-quick-match-qm-1'));
+    expect(mockNavigate).toHaveBeenCalledWith('/quick-matches/qm-1/scoring');
+  });
+
+  it('should show the quick match name instead of the format when it has one', async () => {
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [
+        {
+          id: 'qm-1',
+          matchFormat: 'SINGLES',
+          status: 'IN_PROGRESS',
+          name: 'Viernes con Rafa',
+        },
+      ],
+      totalCount: 1,
+      page: 1,
+      limit: 20,
+    });
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Viernes con Rafa')).toBeInTheDocument();
+    });
+  });
+
+  it('should not render when there are no pending items', async () => {
+    renderCard();
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('pending-actions-card'),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('should render pending invitations section', async () => {
+    mockListMyInvitations.mockResolvedValue({
+      invitations: [
+        { id: 'inv-1', competitionId: 'comp-1', status: 'PENDING' },
+        { id: 'inv-2', competitionId: 'comp-2', status: 'PENDING' },
+      ],
+      totalCount: 2,
+    });
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pending-actions-card')).toBeInTheDocument();
+    });
+    expect(
+      screen.getByTestId('pending-invitations-action'),
+    ).toBeInTheDocument();
+  });
+
+  it('should navigate to invitations page when clicking pending invitations', async () => {
+    mockListMyInvitations.mockResolvedValue({
+      invitations: [
+        { id: 'inv-1', competitionId: 'comp-1', status: 'PENDING' },
+      ],
+      totalCount: 1,
+    });
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('pending-invitations-action'),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('pending-invitations-action'));
+    expect(mockNavigate).toHaveBeenCalledWith('/player/invitations');
+  });
+
+  it('should show enrollment requests for creator users', async () => {
+    const competitions = [
+      { id: 'comp-1', name: 'Summer Cup', status: 'ACTIVE' },
+    ];
+
+    mockListEnrollments.mockResolvedValue([
+      { id: 'enr-1', status: 'REQUESTED' },
+      { id: 'enr-2', status: 'REQUESTED' },
+    ]);
+
+    renderCard(creatorUser, competitions);
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('pending-enrollments-action'),
+      ).toBeInTheDocument();
+    });
+  });
+
+  // Re-auditoría Q-FE-02: la tarjeta preguntaba también por un estado ENROLLING
+  // que no existe ni aquí ni en el backend. Las competiciones llegan por el
+  // mapper, que construye un CompetitionStatus y lo rechaza
+  it('asks for requests only in ACTIVE competitions (ENROLLING never reached it)', async () => {
+    expect(() => new CompetitionStatus('ENROLLING')).toThrow();
+    const competitions = [
+      { id: 'c-draft', name: 'A', status: 'DRAFT' },
+      { id: 'c-active', name: 'B', status: 'ACTIVE' },
+      { id: 'c-closed', name: 'C', status: 'CLOSED' },
+      { id: 'c-progress', name: 'D', status: 'IN_PROGRESS' },
+    ];
+
+    renderCard(creatorUser, competitions);
+
+    await waitFor(() => expect(mockListEnrollments).toHaveBeenCalled());
+    expect(mockListEnrollments).toHaveBeenCalledTimes(1);
+    expect(mockListEnrollments).toHaveBeenCalledWith('c-active', {
+      status: 'REQUESTED',
+    });
+  });
+
+  it('should not show enrollment requests for non-creator users', async () => {
+    const competitions = [
+      { id: 'comp-1', name: 'Summer Cup', status: 'ACTIVE' },
+    ];
+
+    renderCard(baseUser, competitions);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('pending-actions-card'),
+      ).not.toBeInTheDocument();
+    });
+    expect(mockListEnrollments).not.toHaveBeenCalled();
+  });
+
+  it('should navigate to competition detail when clicking enrollment action', async () => {
+    const competitions = [
+      { id: 'comp-1', name: 'Summer Cup', status: 'ACTIVE' },
+    ];
+
+    mockListEnrollments.mockResolvedValue([
+      { id: 'enr-1', status: 'REQUESTED' },
+    ]);
+
+    renderCard(creatorUser, competitions);
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('pending-enrollments-action'),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('pending-enrollments-action'));
+    expect(mockNavigate).toHaveBeenCalledWith('/competitions/comp-1');
+  });
+
+  it('should show upcoming matches when the dashboard passes some', async () => {
+    /**
+     * La tarjeta ya no calcula los partidos: los recibe. El banner de proximo
+     * partido mira exactamente los mismos, y cargarlos por separado duplicaba
+     * las llamadas al calendario de cada competicion (FE #306).
+     */
+    renderCard(
+      baseUser,
+      [{ id: 'comp-1', name: 'Cup', status: 'IN_PROGRESS' }],
+      2,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('upcoming-matches-action')).toBeInTheDocument();
+    });
+  });
+
+  it('should not show upcoming matches when there are none', async () => {
+    renderCard(
+      baseUser,
+      [{ id: 'comp-1', name: 'Cup', status: 'IN_PROGRESS' }],
+      0,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('upcoming-matches-action'),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('should handle API errors gracefully', async () => {
+    mockListMyInvitations.mockRejectedValue(new Error('Network error'));
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('pending-actions-card'),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('should not render when user is null', () => {
+    const { container } = renderCard(null);
+    expect(container).toBeEmptyDOMElement();
+  });
+  it('avisa al capitán del sobre que le falta por entregar', async () => {
+    // Sin esto solo se entera entrando sesión por sesión en la agenda de cada
+    // competición, y el plazo le vence sin saberlo
+    mockListMyPendingEnvelopes.mockResolvedValue([
+      {
+        roundId: 'ronda-1',
+        competitionId: 'comp-1',
+        competitionName: 'Ryder de los amigos',
+        roundDate: '2026-06-01',
+        sessionType: 'MORNING',
+        team: 'A',
+      },
+    ]);
+
+    renderCard();
+
+    expect(
+      await screen.findByTestId('sobre-pendiente-ronda-1'),
+    ).toBeInTheDocument();
+  });
+
+  it('y al tocarlo lleva a su sobre', async () => {
+    mockListMyPendingEnvelopes.mockResolvedValue([
+      {
+        roundId: 'ronda-1',
+        competitionId: 'comp-1',
+        competitionName: 'Ryder de los amigos',
+        roundDate: '2026-06-01',
+        sessionType: 'MORNING',
+        team: 'A',
+      },
+    ]);
+
+    renderCard();
+    fireEvent.click(await screen.findByTestId('sobre-pendiente-ronda-1'));
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      '/competitions/comp-1/rounds/ronda-1/envelope',
+    );
+  });
+
+  it('cada sobre dice de qué sesión es: seis iguales no se distinguen', async () => {
+    // Un Ryder de tres días son seis sesiones, y sin esto salen seis botones
+    // idénticos que llevan a sitios distintos
+    mockListMyPendingEnvelopes.mockResolvedValue([
+      {
+        roundId: 'ronda-1',
+        competitionId: 'comp-1',
+        competitionName: 'Ryder de los amigos',
+        roundDate: '2026-06-01',
+        sessionType: 'MORNING',
+        team: 'A',
+      },
+    ]);
+
+    renderCard();
+
+    const fila = await screen.findByTestId('sobre-pendiente-ronda-1');
+    expect(fila).toHaveTextContent('nextMatch.session.MORNING');
+    expect(fila.textContent).toMatch(/2026|jun|Jun/);
+  });
+
+  it('sin sobres pendientes no pinta nada de sobres', async () => {
+    renderCard();
+
+    await waitFor(() => expect(mockListMyPendingEnvelopes).toHaveBeenCalled());
+    expect(
+      screen.queryByTestId('sobre-pendiente-ronda-1'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('si falla lo de los sobres, el resto de la tarjeta sigue en pie', async () => {
+    // `allSettled`: una petición que casca no puede vaciar los demás avisos
+    mockListMyPendingEnvelopes.mockRejectedValue(new Error('Boom'));
+    mockListMyInvitations.mockResolvedValue({
+      invitations: [{ id: 'inv-1' }],
+      totalCount: 1,
+    });
+
+    renderCard();
+
+    expect(
+      await screen.findByTestId('pending-actions-card'),
+    ).toBeInTheDocument();
+  });
+});
+
+/**
+ * Volver a Inicio desde la barra inferior remonta el panel entero, así que sin
+ * memoria esta tarjeta empezaba de cero en cada vuelta y pintaba su esqueleto
+ * amarillo. Antes quedaba escondido detrás de la espera a pantalla completa del
+ * panel; al quitarla (FE #495) se quedó a la vista (FE #502).
+ */
+describe('PendingActionsCard al volver al panel', () => {
+  const memoria = () => import('../../services/accionesPendientes');
+
+  beforeEach(async () => {
+    const { olvidaLasAccionesPendientes } = await memoria();
+    olvidaLasAccionesPendientes();
+    // Y lo guardado en el móvil: si no, lo de un test lo pinta el siguiente
+    olvidaTodo();
+  });
+
+  it('la primera vez sí enseña que está cargando', async () => {
+    mockListMyQuickMatches.mockReturnValue(new Promise(() => {}));
+
+    const { container } = renderCard();
+
+    // El dibujo compartido, no un recuadro amarillo propio (FE #495)
+    expect(container.querySelector('.espera-anillo')).not.toBeNull();
+  });
+
+  it('una respuesta que llega tras irse no escribe en la memoria', async () => {
+    // Antes solo tocaba el estado de un componente muerto; ahora deja memoria
+    // que pinta el SIGUIENTE montaje: aceptar unas solicitudes y volver a Inicio
+    // enseñaba las de antes, ya atendidas
+    const { loQueSeEnseñoAntes } = await memoria();
+    let soltar;
+    mockListMyQuickMatches.mockReturnValue(
+      new Promise((r) => {
+        soltar = () => r({ quickMatches: [{ id: 'fantasma' }] });
+      }),
+    );
+
+    const { unmount } = renderCard();
+    unmount();
+    soltar();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(
+      loQueSeEnseñoAntes(),
+      'no puede quedar memoria de una pantalla que ya no esta',
+    ).toBeNull();
+  });
+
+  it('al volver enseña lo de antes, sin esqueleto', async () => {
+    const { recuerdaLasAccionesPendientes } = await memoria();
+    recuerdaLasAccionesPendientes(
+      {
+        pendingInvitations: 0,
+        pendingEnrollments: [],
+        pendingFriendRequests: 0,
+        activeQuickMatches: [{ id: 'q1', name: 'Partida en curso' }],
+        // La memoria es de una cuenta: la de quien pinta la tarjeta (14 nov 2026)
+      },
+      baseUser.id,
+    );
+    // La recarga se queda en vuelo: lo que se vea viene de la memoria
+    mockListMyQuickMatches.mockReturnValue(new Promise(() => {}));
+
+    const { container } = renderCard();
+
+    expect(
+      container.querySelector('.espera-anillo'),
+      'no debe verse la espera',
+    ).toBeNull();
+  });
+
+  // Al abrir la app de cero, lo que enseñó la última vez sale del móvil
+  // (Agustín, 14 nov 2026): sin esto, la tarjeta pintaba su espera
+  it('P-d: al abrir de cero enseña lo de la última vez, sin espera', async () => {
+    const enElMovil = new Map();
+    vi.stubGlobal('localStorage', {
+      getItem: (k) => (enElMovil.has(k) ? enElMovil.get(k) : null),
+      setItem: (k, v) => enElMovil.set(k, String(v)),
+      removeItem: (k) => enElMovil.delete(k),
+    });
+    onTestFinished(() => vi.unstubAllGlobals());
+    const { olvidaTodo } = await import('../../services/loUltimoConocido');
+    olvidaTodo();
+    const { recuerdaLasAccionesPendientes, olvidaLasAccionesPendientes } =
+      await memoria();
+    recuerdaLasAccionesPendientes(
+      {
+        pendingInvitations: 2,
+        pendingEnrollments: [],
+        pendingFriendRequests: 0,
+        activeQuickMatches: [],
+        sobresPendientes: [],
+        sesionesSinPartidos: [],
+        plazasAsignadas: [],
+      },
+      baseUser.id,
+    );
+    // La recarga de la página se lleva la memoria del módulo; el móvil, no
+    olvidaLasAccionesPendientes();
+    mockListMyInvitations.mockReturnValue(new Promise(() => {}));
+
+    const { container } = renderCard();
+
+    expect(container.querySelector('.espera-anillo')).toBeNull();
+    expect(
+      screen.getByTestId('pending-invitations-action'),
+    ).toBeInTheDocument();
+  });
+
+  it('P-e: lo que llega queda guardado en el móvil, para esa cuenta', async () => {
+    const enElMovil = new Map();
+    vi.stubGlobal('localStorage', {
+      getItem: (k) => (enElMovil.has(k) ? enElMovil.get(k) : null),
+      setItem: (k, v) => enElMovil.set(k, String(v)),
+      removeItem: (k) => enElMovil.delete(k),
+    });
+    onTestFinished(() => vi.unstubAllGlobals());
+    const { olvidaTodo: borraElMovil, lasPendientesGuardadas } =
+      await import('../../services/loUltimoConocido');
+    borraElMovil();
+    mockListMyInvitations.mockResolvedValue({
+      invitations: [{ id: 'i-1' }, { id: 'i-2' }],
+      totalCount: 2,
+    });
+    // Sus propias respuestas, no las que dejó otro test de este bloque en vuelo
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [],
+      totalCount: 0,
+      page: 1,
+      limit: 20,
+    });
+
+    renderCard();
+
+    await waitFor(() =>
+      expect(lasPendientesGuardadas(baseUser.id)?.pendingInvitations).toBe(2),
+    );
+    expect(lasPendientesGuardadas('otra')).toBeNull();
+  });
+
+  // Revisor (14 nov 2026): con la tarjeta montada, otra cuenta a la que le falla
+  // una petición no puede quedarse, ni guardar en el móvil, lo aplicado a la anterior
+  it('P-f: al cambiar de cuenta no se guarda nada de la anterior bajo la nueva', async () => {
+    const enElMovil = new Map();
+    vi.stubGlobal('localStorage', {
+      getItem: (k) => (enElMovil.has(k) ? enElMovil.get(k) : null),
+      setItem: (k, v) => enElMovil.set(k, String(v)),
+      removeItem: (k) => enElMovil.delete(k),
+    });
+    onTestFinished(() => vi.unstubAllGlobals());
+    const { olvidaTodo: borraElMovil, lasPendientesGuardadas } =
+      await import('../../services/loUltimoConocido');
+    borraElMovil();
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [],
+      totalCount: 0,
+      page: 1,
+      limit: 20,
+    });
+    mockListMyInvitations.mockResolvedValue({
+      invitations: [{ id: 'i-1' }, { id: 'i-2' }],
+      totalCount: 2,
+    });
+    mockListPendingFriendRequests.mockResolvedValue({
+      friendships: [],
+      totalCount: 4,
+    });
+    const otra = { ...baseUser, id: 'user-2' };
+    const pinta = (user) => (
+      <MemoryRouter>
+        <PendingActionsCard user={user} competitions={[]} upcomingMatches={0} />
+      </MemoryRouter>
+    );
+    const { rerender } = render(pinta(baseUser));
+    await waitFor(() =>
+      expect(lasPendientesGuardadas(baseUser.id)?.pendingInvitations).toBe(2),
+    );
+
+    // A la otra cuenta le fallan las dos que la primera sí tenía
+    mockListMyInvitations.mockRejectedValue(new Error('500'));
+    mockListPendingFriendRequests.mockRejectedValue(new Error('500'));
+    rerender(pinta(otra));
+
+    await waitFor(() => expect(lasPendientesGuardadas(otra.id)).not.toBeNull());
+    expect(lasPendientesGuardadas(otra.id).pendingInvitations).toBe(0);
+    expect(lasPendientesGuardadas(otra.id).pendingFriendRequests).toBe(0);
+  });
+
+  it('P-g: al cambiar de cuenta se ve al momento lo que la nueva tiene guardado', async () => {
+    const enElMovil = new Map();
+    vi.stubGlobal('localStorage', {
+      getItem: (k) => (enElMovil.has(k) ? enElMovil.get(k) : null),
+      setItem: (k, v) => enElMovil.set(k, String(v)),
+      removeItem: (k) => enElMovil.delete(k),
+    });
+    onTestFinished(() => vi.unstubAllGlobals());
+    const { olvidaTodo: borraElMovil, recuerdaElPanel } =
+      await import('../../services/loUltimoConocido');
+    borraElMovil();
+    const otra = { ...baseUser, id: 'user-2' };
+    recuerdaElPanel(otra.id, {
+      pendientes: {
+        pendingInvitations: 3,
+        pendingEnrollments: [],
+        pendingFriendRequests: 0,
+        activeQuickMatches: [],
+        sobresPendientes: [],
+        sesionesSinPartidos: [],
+        plazasAsignadas: [],
+      },
+    });
+    // Todo se queda en vuelo: lo que se vea viene de lo guardado
+    mockListMyInvitations.mockReturnValue(new Promise(() => {}));
+    const pinta = (user) => (
+      <MemoryRouter>
+        <PendingActionsCard user={user} competitions={[]} upcomingMatches={0} />
+      </MemoryRouter>
+    );
+    const { rerender } = render(pinta(baseUser));
+
+    rerender(pinta(otra));
+
+    expect(
+      screen.getByTestId('pending-invitations-action'),
+    ).toBeInTheDocument();
+  });
+
+  // El panel pinta primero la lista guardada y luego la que llega (Agustín, 14 nov
+  // 2026): sin esto, la tarjeta pedía todo dos veces por la misma lista
+  describe('a new list object with the same competitions', () => {
+    // Cuentan llamadas: los contadores, a cero aquí y no por el orden (CodeRabbit)
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    const lista = () => [
+      { id: 'c-1', name: 'Liga', status: 'ACTIVE' },
+      { id: 'c-2', name: 'Copa', status: 'COMPLETED' },
+    ];
+    const pinta = (competitions) => (
+      <MemoryRouter>
+        <PendingActionsCard
+          user={creatorUser}
+          competitions={competitions}
+          upcomingMatches={0}
+        />
+      </MemoryRouter>
+    );
+
+    it('P-a: the same ids and statuses do not ask again', async () => {
+      const { rerender } = render(pinta(lista()));
+      await waitFor(() =>
+        expect(mockListMyInvitations).toHaveBeenCalledTimes(1),
+      );
+
+      rerender(pinta(lista()));
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockListMyInvitations).toHaveBeenCalledTimes(1);
+      expect(mockListEnrollments).toHaveBeenCalledTimes(1);
+    });
+
+    it('P-b: a status change asks again', async () => {
+      const { rerender } = render(pinta(lista()));
+      await waitFor(() =>
+        expect(mockListMyInvitations).toHaveBeenCalledTimes(1),
+      );
+
+      rerender(
+        pinta([lista()[0], { id: 'c-2', name: 'Copa', status: 'ACTIVE' }]),
+      );
+
+      await waitFor(() =>
+        expect(mockListMyInvitations).toHaveBeenCalledTimes(2),
+      );
+      expect(mockListEnrollments).toHaveBeenCalledWith('c-2', {
+        status: 'REQUESTED',
+      });
+    });
+
+    it('P-c: one more competition asks again', async () => {
+      const { rerender } = render(pinta(lista()));
+      await waitFor(() =>
+        expect(mockListMyInvitations).toHaveBeenCalledTimes(1),
+      );
+
+      rerender(
+        pinta([...lista(), { id: 'c-3', name: 'Nueva', status: 'ACTIVE' }]),
+      );
+
+      await waitFor(() =>
+        expect(mockListMyInvitations).toHaveBeenCalledTimes(2),
+      );
+    });
+  });
+});

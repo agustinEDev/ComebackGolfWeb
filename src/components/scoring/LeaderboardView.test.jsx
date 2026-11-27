@@ -1,0 +1,476 @@
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import LeaderboardView from './LeaderboardView';
+import scheduleEs from '../../i18n/locales/es/schedule.json';
+import scheduleEn from '../../i18n/locales/en/schedule.json';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key, opts) => (opts ? `${key} ${JSON.stringify(opts)}` : key),
+    i18n: { language: 'en' },
+  }),
+}));
+
+const mockLeaderboard = {
+  teamAName: 'Team Red',
+  teamBName: 'Team Blue',
+  teamAPoints: 4.5,
+  teamBPoints: 3.5,
+  matches: [
+    {
+      matchId: 'm-1',
+      matchNumber: 1,
+      matchFormat: 'SINGLES',
+      status: 'IN_PROGRESS',
+      currentHole: 12,
+      standing: '2UP',
+      leadingTeam: 'A',
+      teamAPlayers: [{ userId: 'u1', userName: 'Player A' }],
+      teamBPlayers: [{ userId: 'u2', userName: 'Player B' }],
+      result: null,
+    },
+    {
+      matchId: 'm-2',
+      matchNumber: 2,
+      matchFormat: 'FOURBALL',
+      status: 'COMPLETED',
+      currentHole: 18,
+      standing: null,
+      leadingTeam: null,
+      teamAPlayers: [{ userId: 'u3', userName: 'Player C' }],
+      teamBPlayers: [{ userId: 'u4', userName: 'Player D' }],
+      result: { winner: 'B', score: '2&1' },
+    },
+  ],
+};
+
+describe('LeaderboardView — los partidos de un jugador (release social 2, /code-review)', () => {
+  it('con ?jugador=, se destacan los suyos, en cualquiera de los dos equipos', () => {
+    render(<LeaderboardView leaderboard={mockLeaderboard} jugador="u4" />);
+
+    expect(screen.getByTestId('leaderboard-match-m-2')).toHaveAttribute(
+      'data-destacado',
+      'true',
+    );
+    expect(screen.getByTestId('leaderboard-match-m-1')).not.toHaveAttribute(
+      'data-destacado',
+    );
+  });
+
+  it('el primero de los suyos se centra en pantalla', () => {
+    const centrar = vi.fn();
+    globalThis.Element.prototype.scrollIntoView = centrar;
+
+    render(<LeaderboardView leaderboard={mockLeaderboard} jugador="u1" />);
+
+    expect(centrar).toHaveBeenCalledTimes(1);
+    expect(centrar.mock.contexts[0]).toBe(
+      screen.getByTestId('leaderboard-match-m-1'),
+    );
+  });
+
+  it('con uno acabado y otro en juego, se centra el de en juego, que se pinta primero', () => {
+    const centrar = vi.fn();
+    globalThis.Element.prototype.scrollIntoView = centrar;
+    const conLosDos = {
+      ...mockLeaderboard,
+      matches: [
+        {
+          ...mockLeaderboard.matches[1],
+          teamAPlayers: [{ userId: 'u9', userName: 'Nueve' }],
+        },
+        {
+          ...mockLeaderboard.matches[0],
+          teamBPlayers: [{ userId: 'u9', userName: 'Nueve' }],
+        },
+      ],
+    };
+
+    render(<LeaderboardView leaderboard={conLosDos} jugador="u9" />);
+
+    expect(centrar.mock.contexts[0]).toBe(
+      screen.getByTestId('leaderboard-match-m-1'),
+    );
+  });
+
+  it('sin jugador, ninguno', () => {
+    render(<LeaderboardView leaderboard={mockLeaderboard} />);
+
+    expect(document.querySelectorAll('[data-destacado]')).toHaveLength(0);
+  });
+});
+
+describe('LeaderboardView', () => {
+  it.each([
+    [
+      'es',
+      scheduleEs,
+      { SINGLES: 'Individuales', FOURBALL: 'Fourball', FOURSOMES: 'Foursomes' },
+    ],
+    [
+      'en',
+      scheduleEn,
+      { SINGLES: 'Singles', FOURBALL: 'Fourball', FOURSOMES: 'Foursomes' },
+    ],
+  ])(
+    'los formatos que pinta tienen texto en %s (no solo la clave; CodeRabbit)',
+    (_, schedule, esperados) => {
+      expect(schedule.formats).toMatchObject(esperados);
+    },
+  );
+
+  it('el formato de cada partido sale traducido, como en el resto de la competición', () => {
+    render(<LeaderboardView leaderboard={mockLeaderboard} />);
+
+    expect(
+      screen.getAllByText(/formats\.SINGLES \{"ns":"schedule"/).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/formats\.FOURBALL \{"ns":"schedule"/).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText(/- FOURBALL$/)).not.toBeInTheDocument();
+  });
+
+  it('should return null when leaderboard is null', () => {
+    const { container } = render(<LeaderboardView leaderboard={null} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('should render the leaderboard', () => {
+    render(<LeaderboardView leaderboard={mockLeaderboard} />);
+    expect(screen.getByTestId('leaderboard-view')).toBeInTheDocument();
+  });
+
+  it('should display team standings header', () => {
+    render(<LeaderboardView leaderboard={mockLeaderboard} />);
+    expect(screen.getByTestId('team-standings-header')).toBeInTheDocument();
+  });
+
+  it('should show in progress section', () => {
+    render(<LeaderboardView leaderboard={mockLeaderboard} />);
+    expect(screen.getByTestId('leaderboard-view')).toHaveTextContent(
+      'leaderboard.inProgress',
+    );
+  });
+
+  it('should show completed section', () => {
+    render(<LeaderboardView leaderboard={mockLeaderboard} />);
+    expect(screen.getByTestId('leaderboard-view')).toHaveTextContent(
+      'leaderboard.completed',
+    );
+  });
+
+  it('should display match details', () => {
+    render(<LeaderboardView leaderboard={mockLeaderboard} />);
+    expect(screen.getByTestId('leaderboard-match-m-1')).toBeInTheDocument();
+    expect(screen.getByTestId('leaderboard-match-m-2')).toBeInTheDocument();
+  });
+
+  it('should show player names', () => {
+    render(<LeaderboardView leaderboard={mockLeaderboard} />);
+    expect(screen.getByTestId('leaderboard-view')).toHaveTextContent(
+      'Player A',
+    );
+    expect(screen.getByTestId('leaderboard-view')).toHaveTextContent(
+      'Player B',
+    );
+  });
+
+  it('should show match standing without team name', () => {
+    render(<LeaderboardView leaderboard={mockLeaderboard} />);
+    const matchCard = screen.getByTestId('leaderboard-match-m-1');
+    expect(matchCard).toHaveTextContent('2UP');
+    // Ryder Cup format: standing alone, no team name appended
+    expect(matchCard).not.toHaveTextContent('2UP Team Red');
+  });
+
+  it('should show completed match result with winner', () => {
+    render(<LeaderboardView leaderboard={mockLeaderboard} />);
+    const matchCard = screen.getByTestId('leaderboard-match-m-2');
+    // Result includes team name and score via i18n: "leaderboard.wins {team: Team Blue, score: 2&1}"
+    expect(matchCard).toHaveTextContent('Team Blue');
+    expect(matchCard).toHaveTextContent('2&1');
+  });
+
+  it('should highlight leading team player name', () => {
+    render(<LeaderboardView leaderboard={mockLeaderboard} />);
+    const matchCard = screen.getByTestId('leaderboard-match-m-1');
+    // Team A is leading (2UP) — Player A should be bold
+    const playerAText = matchCard.querySelector('.font-bold.text-tinta');
+    expect(playerAText).toHaveTextContent('Player A');
+  });
+
+  it('should highlight winner player name in completed match', () => {
+    render(<LeaderboardView leaderboard={mockLeaderboard} />);
+    const matchCard = screen.getByTestId('leaderboard-match-m-2');
+    // Team B won — Player D should be bold
+    const boldElements = matchCard.querySelectorAll('.font-bold.text-tinta');
+    const boldTexts = Array.from(boldElements).map((el) => el.textContent);
+    expect(boldTexts).toContain('Player D');
+  });
+
+  it('should display players vertically with standing between them', () => {
+    render(<LeaderboardView leaderboard={mockLeaderboard} />);
+    const matchCard = screen.getByTestId('leaderboard-match-m-1');
+    // Vertical layout: both player names and standing should all be within the card
+    expect(matchCard).toHaveTextContent('Player A');
+    expect(matchCard).toHaveTextContent('Player B');
+    expect(matchCard).toHaveTextContent('2UP');
+  });
+
+  it('should convert 5UP to 5&4 format when match ended before hole 18', () => {
+    const decidedEarly = {
+      ...mockLeaderboard,
+      matches: [
+        {
+          matchId: 'm-3',
+          matchNumber: 3,
+          matchFormat: 'SINGLES',
+          status: 'COMPLETED',
+          currentHole: 14,
+          standing: null,
+          leadingTeam: null,
+          teamAPlayers: [{ userId: 'u5', userName: 'Player E' }],
+          teamBPlayers: [{ userId: 'u6', userName: 'Player F' }],
+          result: { winner: 'A', score: '5UP' },
+        },
+      ],
+    };
+    render(<LeaderboardView leaderboard={decidedEarly} />);
+    const matchCard = screen.getByTestId('leaderboard-match-m-3');
+    // 5UP at hole 14 → 5&4 (5 up with 4 to play)
+    expect(matchCard).toHaveTextContent('5&4');
+    expect(matchCard).not.toHaveTextContent('5UP');
+  });
+
+  it('should keep UP format when match ended on hole 18', () => {
+    const decidedAt18 = {
+      ...mockLeaderboard,
+      matches: [
+        {
+          matchId: 'm-4',
+          matchNumber: 4,
+          matchFormat: 'SINGLES',
+          status: 'COMPLETED',
+          currentHole: 18,
+          standing: null,
+          leadingTeam: null,
+          teamAPlayers: [{ userId: 'u7', userName: 'Player G' }],
+          teamBPlayers: [{ userId: 'u8', userName: 'Player H' }],
+          result: { winner: 'B', score: '2UP' },
+        },
+      ],
+    };
+    render(<LeaderboardView leaderboard={decidedAt18} />);
+    const matchCard = screen.getByTestId('leaderboard-match-m-4');
+    expect(matchCard).toHaveTextContent('2UP');
+  });
+
+  it('should show conceded match with conceded label instead of wins', () => {
+    const conceded = {
+      ...mockLeaderboard,
+      matches: [
+        {
+          matchId: 'm-5',
+          matchNumber: 5,
+          matchFormat: 'FOURBALL',
+          status: 'CONCEDED',
+          currentHole: null,
+          standing: null,
+          leadingTeam: null,
+          teamAPlayers: [{ userId: 'u9', userName: 'Player I' }],
+          teamBPlayers: [{ userId: 'u10', userName: 'Player J' }],
+          result: { winner: 'A', score: 'CONCEDED' },
+        },
+      ],
+    };
+    render(<LeaderboardView leaderboard={conceded} />);
+    const matchCard = screen.getByTestId('leaderboard-match-m-5');
+    // Uses conceded template, not wins template
+    expect(matchCard).toHaveTextContent('leaderboard.conceded');
+    expect(matchCard).toHaveTextContent('Team Red');
+    expect(matchCard).not.toHaveTextContent('leaderboard.wins');
+  });
+
+  // E1-8: el backend manda el walkover con el tanteo «W/O»; lo reconoce el estado
+  it('should show a walkover from its status, with the W/O score the backend sends', () => {
+    const walkover = {
+      ...mockLeaderboard,
+      matches: [
+        {
+          matchId: 'm-7',
+          matchNumber: 7,
+          matchFormat: 'SINGLES',
+          status: 'WALKOVER',
+          currentHole: null,
+          standing: null,
+          leadingTeam: null,
+          teamAPlayers: [{ userId: 'u11', userName: 'Player K' }],
+          teamBPlayers: [{ userId: 'u12', userName: 'Player L' }],
+          result: { winner: 'A', score: 'W/O' },
+        },
+      ],
+    };
+    render(<LeaderboardView leaderboard={walkover} />);
+    const matchCard = screen.getByTestId('leaderboard-match-m-7');
+    expect(matchCard).toHaveTextContent('leaderboard.walkover');
+    expect(matchCard).toHaveTextContent('Team Red');
+    expect(matchCard).not.toHaveTextContent('leaderboard.wins');
+  });
+
+  // E1-8: walkover y concedido los dice el estado, no el tanteo
+  it.each(['CONCEDED', 'W/O', 'WALKOVER'])(
+    'should not show a completed match as conceded or walkover because of a %s score',
+    (score) => {
+      const completado = {
+        ...mockLeaderboard,
+        matches: [
+          {
+            matchId: 'm-8',
+            matchNumber: 8,
+            matchFormat: 'SINGLES',
+            status: 'COMPLETED',
+            currentHole: null,
+            standing: null,
+            leadingTeam: null,
+            teamAPlayers: [{ userId: 'u13', userName: 'Player M' }],
+            teamBPlayers: [{ userId: 'u14', userName: 'Player N' }],
+            result: { winner: 'A', score },
+          },
+        ],
+      };
+      render(<LeaderboardView leaderboard={completado} />);
+      const matchCard = screen.getByTestId('leaderboard-match-m-8');
+      expect(matchCard).toHaveTextContent('leaderboard.wins');
+      expect(matchCard).not.toHaveTextContent('leaderboard.conceded');
+      expect(matchCard).not.toHaveTextContent('leaderboard.walkover');
+    },
+  );
+
+  it('should show allSquare label for a completed halved match, not wins template', () => {
+    const halved = {
+      ...mockLeaderboard,
+      matches: [
+        {
+          matchId: 'm-6',
+          matchNumber: 6,
+          matchFormat: 'SINGLES',
+          status: 'COMPLETED',
+          currentHole: 18,
+          standing: null,
+          leadingTeam: null,
+          teamAPlayers: [{ userId: 'u11', userName: 'Player K' }],
+          teamBPlayers: [{ userId: 'u12', userName: 'Player L' }],
+          result: { winner: 'HALVED', score: 'AS' },
+        },
+      ],
+    };
+    render(<LeaderboardView leaderboard={halved} />);
+    const matchCard = screen.getByTestId('leaderboard-match-m-6');
+    expect(matchCard).toHaveTextContent('leaderboard.allSquare');
+    expect(matchCard).not.toHaveTextContent('leaderboard.wins');
+    expect(matchCard).not.toHaveTextContent('Team Red');
+    expect(matchCard).not.toHaveTextContent('Team Blue');
+  });
+
+  it('should show no matches message when empty', () => {
+    const empty = { ...mockLeaderboard, matches: [] };
+    render(<LeaderboardView leaderboard={empty} />);
+    expect(screen.getByTestId('leaderboard-view')).toHaveTextContent(
+      'leaderboard.noMatches',
+    );
+  });
+
+  // FE #738 · con varias sesiones salían dos «#2 - SINGLES» seguidos (sábado
+  // por la mañana en juego, viernes por la mañana completado) sin distinguirlos
+  describe('de qué sesión es cada partido (#738)', () => {
+    const partido = (id, extra) => ({
+      matchId: id,
+      matchNumber: 2,
+      matchFormat: 'SINGLES',
+      status: 'COMPLETED',
+      currentHole: 18,
+      standing: null,
+      leadingTeam: null,
+      teamAPlayers: [{ userId: 'a', userName: 'Óscar' }],
+      teamBPlayers: [{ userId: 'b', userName: 'Agustín' }],
+      result: { winner: 'A', score: '10&8' },
+      ...extra,
+    });
+
+    it('L2 y L3: cada partido dice su fecha y su franja', () => {
+      render(
+        <LeaderboardView
+          leaderboard={{
+            ...mockLeaderboard,
+            matches: [
+              partido('viernes', {
+                roundDate: '2026-09-25',
+                sessionType: 'MORNING',
+              }),
+              partido('sabado', {
+                roundDate: '2026-09-26',
+                sessionType: 'AFTERNOON',
+              }),
+            ],
+          }}
+        />,
+      );
+
+      const viernes = screen.getByTestId('sesion-viernes');
+      expect(viernes).toHaveTextContent('Fri, Sep 25');
+      expect(viernes).toHaveTextContent('sessions.MORNING');
+      const sabado = screen.getByTestId('sesion-sabado');
+      expect(sabado).toHaveTextContent('Sat, Sep 26');
+      expect(sabado).toHaveTextContent('sessions.AFTERNOON');
+    });
+
+    it('L4: sin sesión, como antes: ni «undefined» ni separadores sueltos', () => {
+      render(
+        <LeaderboardView
+          leaderboard={{
+            ...mockLeaderboard,
+            matches: [partido('viejo', { roundDate: null, sessionType: null })],
+          }}
+        />,
+      );
+
+      expect(screen.queryByTestId('sesion-viejo')).not.toBeInTheDocument();
+      const tarjeta = screen.getByTestId('leaderboard-match-viejo');
+      expect(tarjeta).toHaveTextContent(
+        '#2 - formats.SINGLES {"ns":"schedule","defaultValue":"SINGLES"}',
+      );
+      expect(tarjeta).not.toHaveTextContent('undefined');
+    });
+
+    it('L6: un formato sin traducción sale tal cual, no «formats.X» (`/code-review`)', () => {
+      render(
+        <LeaderboardView
+          leaderboard={{
+            ...mockLeaderboard,
+            matches: [partido('raro', { matchFormat: 'GREENSOME' })],
+          }}
+        />,
+      );
+
+      expect(screen.getByTestId('leaderboard-match-raro')).toHaveTextContent(
+        '"defaultValue":"GREENSOME"',
+      );
+    });
+
+    it('L5: un partido sin formato no pinta «formats.undefined» (revisor)', () => {
+      render(
+        <LeaderboardView
+          leaderboard={{
+            ...mockLeaderboard,
+            matches: [partido('sin', { matchFormat: null })],
+          }}
+        />,
+      );
+
+      const tarjeta = screen.getByTestId('leaderboard-match-sin');
+      expect(tarjeta).not.toHaveTextContent('formats.');
+      expect(tarjeta).toHaveTextContent('#2');
+    });
+  });
+});

@@ -1,0 +1,468 @@
+import { AL_PASAR } from '../components/ui/clasesDeComportamiento';
+import { useNavigate } from 'react-router';
+import { useTranslation } from 'react-i18next';
+import { useRef, useEffect, useState } from 'react';
+import HeaderAuth from '../components/layout/HeaderAuth';
+import ConfirmModal from '../components/modals/ConfirmModal';
+import { useDeviceManagement } from '../hooks/useDeviceManagement';
+import { useAuth } from '../hooks/useAuth';
+import { useLogout } from '../hooks/useLogout';
+import { useTerminosPendientes } from '../hooks/useTerminosPendientes';
+import { laPantallaEstaLista } from '../utils/cortinaDeArranque';
+import { Laptop, Smartphone, Tablet, HelpCircle } from 'lucide-react';
+import { instanteEnTexto } from '../utils/instanteDeLaApi';
+import { marcaLaRevocacionPropia } from '../composition/http';
+import { toBaseLanguage } from '../services/countries';
+import {
+  iconoDelDispositivo,
+  nombreDelDispositivo,
+  paisDelDispositivo,
+} from '../utils/descripcionDelDispositivo';
+import BlockLoader from '../components/ui/BlockLoader';
+import { PANTALLA_MENOS_BARRA_INFERIOR } from '../utils/barraInferior';
+
+// En la zona horaria de quien mira y en el idioma de la app (FE #1046). La API
+// manda la hora en UTC: el formateador de antes la leía como hora local, y salía una hora
+// menos en España (dos en verano)
+const FORMATO_DE_FECHA = {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+};
+
+const ICONOS = { phone: Smartphone, tablet: Tablet, computer: Laptop };
+
+/** El icono de cada tipo de dispositivo: móvil, tablet u ordenador. */
+const IconoDelDispositivo = ({ tipo }) => {
+  const Icono = ICONOS[tipo] ?? HelpCircle;
+  return (
+    <Icono
+      className="w-5 h-5 text-tinta-suave flex-shrink-0"
+      aria-hidden="true"
+      data-testid={`icono-${tipo}`}
+    />
+  );
+};
+
+const DeviceManagement = () => {
+  const { t, i18n } = useTranslation('devices');
+  // «es_ES» y similares, al idioma base: Intl no los entiende y caería al del navegador
+  const idioma = toBaseLanguage(i18n?.language) || undefined;
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const timeoutRef = useRef(null);
+  const { logout } = useLogout();
+  const terminosPendientes = useTerminosPendientes();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Con los Términos pendientes se llega aquí desde la pantalla de aceptarlos,
+  // que es donde acaba el arranque: se avisa a la cortina, como ella
+  useEffect(() => {
+    if (terminosPendientes) laPantallaEstaLista();
+  }, [terminosPendientes]);
+  const [deviceToRevoke, setDeviceToRevoke] = useState(null);
+
+  const {
+    devices,
+    isLoading,
+    revokingDeviceIds,
+    deviceErrors,
+    revokeDevice,
+    clearDeviceError,
+  } = useDeviceManagement();
+
+  const handleRevokeClick = (device) => {
+    setDeviceToRevoke(device);
+    setIsModalOpen(true);
+  };
+
+  const handleConfirmRevoke = async () => {
+    if (!deviceToRevoke) return;
+
+    // Clear any existing logout timer BEFORE starting revoke operation
+    // This prevents race conditions when revoking multiple devices
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+
+    // Backend now tells us if this is the current device (100% accurate via device_id in token)
+    const isCurrent = deviceToRevoke.isCurrentDevice;
+
+    const success = await revokeDevice(deviceToRevoke.id);
+
+    // Close modal
+    setIsModalOpen(false);
+    setDeviceToRevoke(null);
+
+    // If current device was revoked, logout after showing toast
+    // Backend already invalidated tokens during revocation, so we skip backend logout call
+    // 2500ms delay allows user to read the success toast
+    if (success && isCurrent) {
+      // Marca «propia»: sale a propósito. Si en estos 2,5 s llega un 401 «Dispositivo
+      // revocado» (el interceptor, FE #1046), o se sale de la página antes, el cierre
+      // va por el camino C3: limpia la cuenta y va a /login sin toast ni página
+      // guardada. Se borra al confirmarse la sesión siguiente (sesionCompartida)
+      marcaLaRevocacionPropia();
+
+      timeoutRef.current = setTimeout(() => {
+        // Skip backend call because device is already revoked (tokens already invalidated):
+        // the call would only get a 401
+        logout({ skipBackendCall: true });
+      }, 2500);
+    }
+  };
+
+  const handleCancelRevoke = () => {
+    setIsModalOpen(false);
+    setDeviceToRevoke(null);
+  };
+
+  // Cleanup timeout on component unmount
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
+  return (
+    <div
+      className={`relative flex h-auto ${PANTALLA_MENOS_BARRA_INFERIOR} w-full flex-col bg-fondo`}
+    >
+      <div className="layout-container flex h-full grow flex-col">
+        <HeaderAuth user={user} />
+
+        <div className="px-4 md:px-40 flex flex-1 justify-center py-5">
+          <div className="layout-content-container flex flex-col max-w-[960px] flex-1">
+            {/* Header */}
+            <div className="flex flex-wrap justify-between gap-3 p-4 items-center">
+              <div>
+                <p className="hidden md:block text-tinta tracking-tight text-3xl md:text-[32px] font-bold leading-tight">
+                  {t('title')}
+                </p>
+                <p className="text-tinta-suave text-sm mt-2">{t('subtitle')}</p>
+              </div>
+              <button
+                onClick={() => navigate('/profile')}
+                className={`hidden md:flex items-center gap-2 px-4 py-2 border-[1.5px] border-tinta bg-fondo text-tinta rounded-boton text-sm font-medium ${AL_PASAR}`}
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M10 19l-7-7m0 0l7-7m-7 7h18"
+                  />
+                </svg>
+                {t('actions.backToProfile')}
+              </button>
+            </div>
+
+            {/* Info Alert */}
+            <div className="mx-4 mb-6 p-4 bg-realce border border-contorno rounded-lg">
+              <div className="flex gap-3">
+                <svg
+                  className="w-5 h-5 text-tinta flex-shrink-0 mt-0.5"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                  aria-hidden="true"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                <div className="text-sm text-tinta">
+                  <p className="font-medium mb-1">{t('info.title')}</p>
+                  <p>{t('info.description')}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Devices List */}
+            <div className="px-4">
+              {/* El dibujo compartido, no tres tarjetas fantasma: la aplicacion
+                  espera siempre con la misma imagen (FE #495) */}
+              {isLoading ? (
+                <BlockLoader />
+              ) : devices.length === 0 ? (
+                <div className="text-center py-12 border border-linea rounded-lg">
+                  <svg
+                    className="w-16 h-16 text-tinta-suave mx-auto mb-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"
+                    />
+                  </svg>
+                  <p className="text-tinta-suave font-medium">
+                    {t('empty.title')}
+                  </p>
+                  <p className="text-tinta-suave text-sm mt-1">
+                    {t('empty.description')}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {devices.map((device) => {
+                    const isCurrent = device.isCurrentDevice;
+
+                    return (
+                      <div
+                        key={device.id}
+                        className={`border rounded-lg p-4 md:p-5 transition-colors ${
+                          isCurrent
+                            ? 'border-exito bg-exito-suave'
+                            : 'border-linea'
+                        }`}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                          {/* Device Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                              <IconoDelDispositivo
+                                tipo={iconoDelDispositivo(device)}
+                              />
+                              <h3 className="text-base font-semibold text-tinta break-words">
+                                {nombreDelDispositivo(device, t)}
+                              </h3>
+                              {isCurrent && (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border border-current text-exito whitespace-nowrap">
+                                  {t('device.current')}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="space-y-1 text-sm text-tinta-suave">
+                              <div className="flex items-center gap-2">
+                                <svg
+                                  className="w-4 h-4 text-tinta-suave flex-shrink-0"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                  aria-hidden="true"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
+                                  />
+                                </svg>
+                                <span className="break-words">
+                                  {[
+                                    device.ipAddress &&
+                                      `${t('device.ip')}: ${device.ipAddress}`,
+                                    paisDelDispositivo(
+                                      device.countryCode,
+                                      idioma,
+                                    ),
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' · ') || t('device.noIp')}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <svg
+                                  className="w-4 h-4 text-tinta-suave flex-shrink-0"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                  aria-hidden="true"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                                  />
+                                </svg>
+                                <span className="break-words">
+                                  {t('device.lastUsed')}:{' '}
+                                  {instanteEnTexto(
+                                    device.lastUsedAt,
+                                    idioma,
+                                    FORMATO_DE_FECHA,
+                                  ) ?? t('device.never')}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <svg
+                                  className="w-4 h-4 text-tinta-suave flex-shrink-0"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                  aria-hidden="true"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                                  />
+                                </svg>
+                                <span className="break-words">
+                                  {t('device.firstSeen')}:{' '}
+                                  {instanteEnTexto(
+                                    device.createdAt,
+                                    idioma,
+                                    FORMATO_DE_FECHA,
+                                  ) ?? t('device.never')}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Revoke Button */}
+                          <button
+                            onClick={() => handleRevokeClick(device)}
+                            disabled={revokingDeviceIds.has(device.id)}
+                            className="flex items-center justify-center gap-2 min-h-11 px-4 py-2 border border-error bg-fondo text-error rounded-boton text-sm font-medium hover:brightness-95 transition-[filter] disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 w-full sm:w-auto"
+                          >
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                              aria-hidden="true"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                              />
+                            </svg>
+                            {t('actions.revoke')}
+                          </button>
+                        </div>
+
+                        {/* Inline Error Display (v1.14.0) */}
+                        {deviceErrors.has(device.id) && (
+                          <div className="mt-3 p-3 bg-error-suave border border-error rounded-lg">
+                            <div className="flex items-start gap-2">
+                              <svg
+                                className="w-5 h-5 text-error flex-shrink-0 mt-0.5"
+                                fill="currentColor"
+                                viewBox="0 0 20 20"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  fillRule="evenodd"
+                                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                                  clipRule="evenodd"
+                                />
+                              </svg>
+                              <div className="flex-1">
+                                <p className="text-sm text-error font-medium">
+                                  {deviceErrors.get(device.id)}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => clearDeviceError(device.id)}
+                                className="text-error transition-colors"
+                                aria-label={t('aria.closeErrorMessage')}
+                              >
+                                <svg
+                                  className="w-4 h-4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                  aria-hidden="true"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M6 18L18 6M6 6l12 12"
+                                  />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Security Note */}
+            {devices.length > 0 && (
+              <div className="mx-4 mt-6 p-4 bg-aviso-suave border border-aviso rounded-lg">
+                <div className="flex gap-3">
+                  <svg
+                    className="w-5 h-5 text-aviso flex-shrink-0 mt-0.5"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                    aria-hidden="true"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  <div className="text-sm text-aviso">
+                    <p className="font-medium mb-1">{t('security.title')}</p>
+                    <p>
+                      {t('security.description')}{' '}
+                      <button
+                        onClick={() => navigate('/profile/edit')}
+                        className="underline font-medium"
+                      >
+                        {t('security.profileSettings')}
+                      </button>
+                      .
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Confirm Revoke Modal */}
+      <ConfirmModal
+        isOpen={isModalOpen}
+        title={
+          deviceToRevoke?.isCurrentDevice
+            ? t('modals.revokeCurrentTitle')
+            : t('modals.revokeOtherTitle')
+        }
+        message={
+          deviceToRevoke?.isCurrentDevice
+            ? t('confirmations.revokeCurrent')
+            : t('confirmations.revokeOther')
+        }
+        onConfirm={handleConfirmRevoke}
+        onCancel={handleCancelRevoke}
+        isDestructive={true}
+        isLoading={
+          deviceToRevoke ? revokingDeviceIds.has(deviceToRevoke.id) : false
+        }
+      />
+    </div>
+  );
+};
+
+export default DeviceManagement;

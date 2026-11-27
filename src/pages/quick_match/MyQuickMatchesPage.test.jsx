@@ -1,0 +1,1774 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router';
+import MyQuickMatchesPage from './MyQuickMatchesPage';
+import customToast from '../../utils/toast';
+import { loQueSeSupo, recuerda } from '../../services/loUltimoConocido';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    // Solo se interpola `value`, que es lo unico que se afirma por su numero
+    t: (key, opts) =>
+      opts?.value !== undefined ? `${key} ${opts.value}` : key,
+    i18n: { language: 'en' },
+  }),
+}));
+
+// El valor se define fuera para que su identidad sea estable entre renders,
+// igual que en la app (viene de AuthContext). Si se crea un objeto nuevo en
+// cada render, el efecto que depende de [user] recarga la lista sin parar.
+const mockAuthValue = {
+  user: { id: 'user-1', first_name: 'Test', last_name: 'User' },
+  loading: false,
+};
+
+vi.mock('../../hooks/useAuth', () => ({
+  useAuth: () => mockAuthValue,
+}));
+
+// Repetir tiene sus propias pruebas: aquí solo importa en qué tarjetas sale
+vi.mock('../../components/quick_match/RepetirPartida', () => ({
+  default: ({ partida }) => (
+    <button type="button" data-testid={`repetir-${partida.id}`}>
+      repetir
+    </button>
+  ),
+}));
+
+vi.mock('../../components/layout/HeaderAuth', () => ({
+  default: () => <div data-testid="header-auth">Header</div>,
+}));
+
+const mockListMyQuickMatches = vi.fn();
+const mockGetQuickMatch = vi.fn();
+const mockGetGolfCourse = vi.fn();
+const mockHideQuickMatch = vi.fn();
+const mockExcludeFromStats = vi.fn();
+const mockIncludeInStats = vi.fn();
+
+vi.mock('../../composition', () => ({
+  listMyQuickMatchesUseCase: {
+    execute: (...args) => mockListMyQuickMatches(...args),
+  },
+  getQuickMatchUseCase: { execute: (...args) => mockGetQuickMatch(...args) },
+  getGolfCourseUseCase: { execute: (...args) => mockGetGolfCourse(...args) },
+  hideQuickMatchUseCase: { execute: (...args) => mockHideQuickMatch(...args) },
+  excludeQuickMatchFromStatsUseCase: {
+    execute: (...args) => mockExcludeFromStats(...args),
+  },
+  includeQuickMatchInStatsUseCase: {
+    execute: (...args) => mockIncludeInStats(...args),
+  },
+}));
+
+vi.mock('../../utils/toast', () => ({
+  default: { success: vi.fn(), error: vi.fn() },
+}));
+
+const mockNavigate = vi.fn();
+vi.mock('react-router', async () => {
+  const actual = await vi.importActual('react-router');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
+
+const renderPage = () => {
+  return render(
+    <MemoryRouter initialEntries={['/quick-matches']}>
+      <Routes>
+        <Route path="/quick-matches" element={<MyQuickMatchesPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+};
+
+const matches = (overrides = {}) => ({
+  quickMatches: [
+    {
+      id: 'qm-1',
+      matchFormat: 'SINGLES',
+      status: 'COMPLETED',
+      createdAt: '2026-07-27T10:00:00Z',
+      excludedFromStats: false,
+      ...overrides,
+    },
+  ],
+  totalCount: 1,
+  page: 1,
+  limit: 50,
+});
+
+describe('MyQuickMatchesPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetQuickMatch.mockResolvedValue({
+      participants: [],
+      holeScores: [],
+      effectiveAllowance: 100,
+    });
+    mockGetGolfCourse.mockResolvedValue({ holes: [], tees: [] });
+  });
+
+  it('should show an empty state when the user has no quick matches', async () => {
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [],
+      totalCount: 0,
+      page: 1,
+      limit: 50,
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('history.empty')).toBeInTheDocument();
+    });
+    // Vacía: su dibujo en lugar del icono, y sin la marca de agua de detrás
+    // para no tener dos dibujos (Agustín, 27 nov 2026)
+    expect(document.querySelector('[data-dibujo="bola"]')).not.toBeNull();
+    expect(document.querySelector('.marca-de-agua')).toBeNull();
+  });
+
+  it('should list quick matches and navigate to the scoring page on click', async () => {
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [
+        {
+          id: 'qm-1',
+          matchFormat: 'SINGLES',
+          status: 'IN_PROGRESS',
+          createdAt: '2026-07-27T10:00:00Z',
+        },
+        {
+          id: 'qm-2',
+          matchFormat: 'FOURBALL',
+          status: 'COMPLETED',
+          createdAt: '2026-07-20T10:00:00Z',
+        },
+      ],
+      totalCount: 2,
+      page: 1,
+      limit: 50,
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('quick-match-history-item-qm-1'),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByTestId('quick-match-history-item-qm-2'),
+    ).toBeInTheDocument();
+    // Con partidas, la marca de agua de la pantalla y ningún dibujo de vacío
+    expect(document.querySelector('.agua-bola-tee')).not.toBeNull();
+    expect(document.querySelector('[data-dibujo]')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('quick-match-history-item-qm-1'));
+    expect(mockNavigate).toHaveBeenCalledWith('/quick-matches/qm-1/scoring');
+  });
+
+  it('R2/R3 (FE #1021): repetir sale en las terminadas y canceladas, no en juego ni pendientes', async () => {
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [
+        {
+          id: 'qm-1',
+          matchFormat: 'SINGLES',
+          status: 'IN_PROGRESS',
+          createdAt: '2026-07-27T10:00:00Z',
+        },
+        {
+          id: 'qm-2',
+          matchFormat: 'SINGLES',
+          status: 'COMPLETED',
+          createdAt: '2026-07-20T10:00:00Z',
+        },
+        {
+          id: 'qm-3',
+          matchFormat: 'SINGLES',
+          status: 'CANCELLED',
+          createdAt: '2026-07-19T10:00:00Z',
+        },
+        {
+          id: 'qm-4',
+          matchFormat: 'SINGLES',
+          status: 'PENDING',
+          createdAt: '2026-07-18T10:00:00Z',
+        },
+      ],
+      totalCount: 4,
+      page: 1,
+      limit: 50,
+    });
+
+    renderPage();
+
+    await screen.findByTestId('quick-match-history-item-qm-1');
+    expect(screen.queryByTestId('repetir-qm-1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('repetir-qm-2')).toBeInTheDocument();
+    expect(screen.getByTestId('repetir-qm-3')).toBeInTheDocument();
+    expect(screen.queryByTestId('repetir-qm-4')).not.toBeInTheDocument();
+  });
+
+  // El control de navegar es una capa que cubre la tarjeta y ya no contiene el
+  // texto, asi que sin `aria-label` propio se quedaria sin nombre accesible:
+  // un lector de pantalla anunciaria «boton» a secas en cada partida.
+  it('should give the row link an accessible name even though it holds no text', async () => {
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [
+        {
+          id: 'qm-1',
+          name: 'Sábado en Meis',
+          matchFormat: 'SINGLES',
+          status: 'IN_PROGRESS',
+          createdAt: '2026-07-27T10:00:00Z',
+        },
+        {
+          id: 'qm-2',
+          matchFormat: 'FOURBALL',
+          status: 'COMPLETED',
+          createdAt: '2026-07-20T10:00:00Z',
+        },
+      ],
+      totalCount: 2,
+      page: 1,
+      limit: 50,
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('quick-match-history-item-qm-1'),
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('quick-match-history-item-qm-1')).toHaveAttribute(
+      'aria-label',
+      'Sábado en Meis',
+    );
+    // Sin nombre propio, el de la modalidad: el mismo texto que se ve.
+    expect(screen.getByTestId('quick-match-history-item-qm-2')).toHaveAttribute(
+      'aria-label',
+      'history.format.FOURBALL',
+    );
+  });
+
+  it('should show the custom name instead of the format when the match has one', async () => {
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [
+        {
+          id: 'qm-1',
+          matchFormat: 'SINGLES',
+          status: 'IN_PROGRESS',
+          createdAt: '2026-07-27T10:00:00Z',
+          name: 'Viernes con Rafa',
+        },
+      ],
+      totalCount: 1,
+      page: 1,
+      limit: 50,
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Viernes con Rafa')).toBeInTheDocument();
+    });
+  });
+
+  it("should show the current user's own to-par result and gross strokes on a completed match's card", async () => {
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [
+        {
+          id: 'qm-2',
+          golfCourseId: 'course-1',
+          matchFormat: 'FOURBALL',
+          status: 'COMPLETED',
+          createdAt: '2026-07-20T10:00:00Z',
+        },
+      ],
+      totalCount: 1,
+      page: 1,
+      limit: 50,
+    });
+    mockGetQuickMatch.mockResolvedValue({
+      participants: [
+        {
+          participantId: 'user-1',
+          userId: 'user-1',
+          name: 'Test User',
+          handicap: 0,
+        },
+      ],
+      holeScores: [
+        { holeNumber: 1, participantId: 'user-1', score: 4 },
+        { holeNumber: 2, participantId: 'user-1', score: 2 },
+      ],
+      effectiveAllowance: 100,
+    });
+    mockGetGolfCourse.mockResolvedValue({
+      holes: [
+        { holeNumber: 1, par: 4, strokeIndex: 5 },
+        { holeNumber: 2, par: 3, strokeIndex: 15 },
+      ],
+      tees: [],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('quick-match-result-qm-2')).toBeInTheDocument();
+    });
+    // Net strokes 6 (0 handicap, no strokes received) vs par played 7 -> 1 under par.
+    expect(screen.getByText('-1')).toBeInTheDocument();
+    expect(screen.getByText('history.grossStrokes')).toBeInTheDocument();
+  });
+
+  /**
+   * El resultado de esta tarjeta es NETO y personal: se descuentan los golpes
+   * que le tocan al jugador por SU hándicap de juego. La llamada al calculador
+   * se había quedado con la firma vieja —le pasaba las salidas donde va el
+   * reparto—, y como sin entrada para el participante se puntúa a bruto, la
+   * lista contaba la vuelta contra el par del campo.
+   */
+  it("should subtract the player's own strokes from the to-par result", async () => {
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [
+        {
+          id: 'qm-3',
+          golfCourseId: 'course-1',
+          matchFormat: 'SINGLES',
+          status: 'COMPLETED',
+          createdAt: '2026-07-20T10:00:00Z',
+        },
+      ],
+      totalCount: 1,
+      page: 1,
+      limit: 50,
+    });
+    mockGetQuickMatch.mockResolvedValue({
+      participants: [
+        {
+          participantId: 'user-1',
+          userId: 'user-1',
+          name: 'Test User',
+          handicap: 2,
+        },
+      ],
+      holeScores: [
+        { holeNumber: 1, participantId: 'user-1', score: 4 },
+        { holeNumber: 2, participantId: 'user-1', score: 2 },
+      ],
+      // Su hándicap de juego en la partida, el que manda el backend
+      participantStrokes: [
+        { participantId: 'user-1', playingHandicap: 2, strokesByHole: {} },
+      ],
+      effectiveAllowance: 100,
+      playMode: 'HANDICAP',
+    });
+    mockGetGolfCourse.mockResolvedValue({
+      holes: [
+        { holeNumber: 1, par: 4, strokeIndex: 5 },
+        { holeNumber: 2, par: 3, strokeIndex: 15 },
+      ],
+      tees: [],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('quick-match-result-qm-3')).toBeInTheDocument();
+    });
+    // Hándicap 2 sobre dos hoyos: un golpe en cada uno. Netos 3 + 1 = 4 sobre
+    // un par jugado de 7, o sea tres bajo par. A bruto serían -1.
+    expect(screen.getByText('-3')).toBeInTheDocument();
+  });
+
+  /**
+   * En match play los golpes se dan por DIFERENCIA, así que el backend manda
+   * cero para el jugador de hándicap más bajo. «Tu vuelta» va con su hándicap
+   * de juego en la partida, no con esa diferencia: si no, la misma vuelta
+   * contaría distinto según con quién se jugó (24 oct 2026).
+   */
+  it("should ignore the match allocation and use the player's own handicap", async () => {
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [
+        {
+          id: 'qm-4',
+          golfCourseId: 'course-1',
+          matchFormat: 'SINGLES',
+          status: 'COMPLETED',
+          createdAt: '2026-07-20T10:00:00Z',
+        },
+      ],
+      totalCount: 1,
+      page: 1,
+      limit: 50,
+    });
+    mockGetQuickMatch.mockResolvedValue({
+      participants: [
+        {
+          participantId: 'user-1',
+          userId: 'user-1',
+          name: 'Test User',
+          handicap: 2,
+        },
+        {
+          participantId: 'user-2',
+          userId: 'user-2',
+          name: 'Rival',
+          handicap: 12,
+        },
+      ],
+      holeScores: [
+        { holeNumber: 1, participantId: 'user-1', score: 4 },
+        { holeNumber: 2, participantId: 'user-1', score: 2 },
+      ],
+      // El reparto del partido: el de hándicap bajo no recibe ninguno
+      participantStrokes: [
+        { participantId: 'user-1', playingHandicap: 2, strokesByHole: {} },
+        {
+          participantId: 'user-2',
+          playingHandicap: 12,
+          strokesByHole: { 1: 1, 2: 1 },
+        },
+      ],
+      effectiveAllowance: 100,
+      playMode: 'HANDICAP',
+    });
+    mockGetGolfCourse.mockResolvedValue({
+      holes: [
+        { holeNumber: 1, par: 4, strokeIndex: 5 },
+        { holeNumber: 2, par: 3, strokeIndex: 15 },
+      ],
+      tees: [],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('quick-match-result-qm-4')).toBeInTheDocument();
+    });
+    // Su hándicap de juego en la partida, 2: -3. Con la diferencia saldría -1.
+    expect(screen.getByText('-3')).toBeInTheDocument();
+  });
+
+  /**
+   * «Tu vuelta» en el historial es la de la partida, la misma que al anotar:
+   * su hándicap de juego en ella, con el allowance que aplicó el backend, por
+   * los índices de su barra. Ni el 100 % ni los golpes del reparto, y una sola
+   * cifra (Agustín, 24 oct 2026).
+   */
+  it('«Tu vuelta» es la de la partida: su hándicap de juego con el allowance (Agustín, 24 oct)', async () => {
+    // Un campo de 18 hoyos, como exige el backend: el reparto va por posición
+    // sobre 18. Los dos jugados son los de índice 11 y 12
+    const indices = [
+      11, 12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16, 17, 18,
+    ];
+    const dieciochoHoyos = indices.map((strokeIndex, i) => ({
+      holeNumber: i + 1,
+      par: i === 1 ? 3 : 4,
+      strokeIndex,
+    }));
+    const golpesEnLosIndices = (ph) =>
+      Object.fromEntries(
+        dieciochoHoyos
+          .filter((h) => h.strokeIndex <= ph)
+          .map((h) => [h.holeNumber, 1]),
+      );
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [
+        {
+          id: 'qm-6',
+          golfCourseId: 'course-1',
+          scoringFormat: 'MEDAL',
+          status: 'COMPLETED',
+          createdAt: '2026-07-21T10:00:00Z',
+        },
+      ],
+      totalCount: 1,
+      page: 1,
+      limit: 50,
+    });
+    mockGetQuickMatch.mockResolvedValue({
+      participants: [
+        {
+          participantId: 'user-1',
+          userId: 'user-1',
+          name: 'Test User',
+          handicap: 12,
+        },
+      ],
+      holeScores: [
+        { holeNumber: 1, participantId: 'user-1', score: 10 },
+        { holeNumber: 2, participantId: 'user-1', score: 10 },
+      ],
+      // Su hándicap de juego en la partida: 11, el 95 % de su índice 12 que ya
+      // aplicó el backend; al 100 % serían 12
+      participantStrokes: [
+        {
+          participantId: 'user-1',
+          playingHandicap: 11,
+          strokesByHole: golpesEnLosIndices(11),
+        },
+      ],
+      effectiveAllowance: 95,
+      playMode: 'HANDICAP',
+    });
+    mockGetGolfCourse.mockResolvedValue({ holes: dieciochoHoyos, tees: [] });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('quick-match-result-qm-6')).toBeInTheDocument();
+    });
+    // 11 de juego por los índices de su barra: golpe en el hoyo 1 (índice 11)
+    // y no en el 2 (índice 12) -> netos 9 y 10 sobre un par de 7 -> +12. Al
+    // 100 % (12) también en el 2: +11
+    expect(screen.getByTestId('quick-match-result-qm-6')).toHaveTextContent(
+      '+12',
+    );
+    // Una sola cifra: ya es la de la partida
+    expect(
+      screen.queryByTestId('quick-match-result-in-match-qm-6'),
+    ).not.toBeInTheDocument();
+  });
+
+  /**
+   * En foursomes la pareja juega una sola bola a golpes alternos: lo anotado es
+   * del equipo, no la vuelta de nadie. Los golpes brutos sí son del equipo y la
+   * tarjeta los enseñaba antes de esto: saltarse la partida entera la dejaba en
+   * blanco, que es peor que no tocarla.
+   */
+  it('should show only the team gross strokes, and no to-par, for a foursomes match', async () => {
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [
+        {
+          id: 'qm-5',
+          golfCourseId: 'course-1',
+          matchFormat: 'FOURSOMES',
+          status: 'COMPLETED',
+          createdAt: '2026-07-20T10:00:00Z',
+        },
+      ],
+      totalCount: 1,
+      page: 1,
+      limit: 50,
+    });
+    mockGetQuickMatch.mockResolvedValue({
+      participants: [
+        {
+          participantId: 'user-1',
+          userId: 'user-1',
+          name: 'Test User',
+          handicap: 0,
+        },
+      ],
+      holeScores: [
+        { holeNumber: 1, participantId: 'user-1', score: 4 },
+        { holeNumber: 2, participantId: 'user-1', score: 2 },
+      ],
+      effectiveAllowance: 50,
+    });
+    mockGetGolfCourse.mockResolvedValue({
+      holes: [
+        { holeNumber: 1, par: 4, strokeIndex: 5 },
+        { holeNumber: 2, par: 3, strokeIndex: 15 },
+      ],
+      tees: [],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('quick-match-result-qm-5')).toBeInTheDocument();
+    });
+    expect(screen.getByText('history.grossStrokes')).toBeInTheDocument();
+    // Etiquetados como del equipo: sin eso la tarjeta se queda en una línea
+    // suelta de 10px y parece a medio pintar
+    expect(screen.getByText('history.teamTotal')).toBeInTheDocument();
+    // Ni la lectura personal ni la del partido: en foursomes no son de nadie
+    expect(screen.queryByText('-1')).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-result-in-match-qm-5'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('should not fetch or show a result for matches that are not completed', async () => {
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [
+        {
+          id: 'qm-1',
+          golfCourseId: 'course-1',
+          matchFormat: 'SINGLES',
+          status: 'IN_PROGRESS',
+          createdAt: '2026-07-27T10:00:00Z',
+        },
+      ],
+      totalCount: 1,
+      page: 1,
+      limit: 50,
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('quick-match-history-item-qm-1'),
+      ).toBeInTheDocument();
+    });
+    expect(mockGetQuickMatch).not.toHaveBeenCalled();
+    expect(
+      screen.queryByTestId('quick-match-result-qm-1'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('un fallo del servidor se enseña con el texto de la app (Q-FE-06)', async () => {
+    mockListMyQuickMatches.mockRejectedValue(
+      Object.assign(new Error('Server error'), { status: 500 }),
+    );
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('scoring.errors.generic')).toBeInTheDocument();
+    });
+    // No se ha podido preguntar: ni «no tienes ninguna» ni su dibujo, y la
+    // marca de agua sigue (revisión, 27 nov 2026)
+    expect(screen.queryByText('history.empty')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-dibujo]')).toBeNull();
+    expect(document.querySelector('.agua-bola-tee')).not.toBeNull();
+  });
+
+  it('un fallo de red se dice como falta de señal, no como error', async () => {
+    // Antes salía el mensaje crudo del fallo en rojo. Ahora puede haber además
+    // partidas en pantalla, las últimas que se vieron: llamarlo error sobre
+    // una lista que se está usando es contradecirse
+    mockListMyQuickMatches.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('quick-matches-sin-conexion'),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Failed to fetch')).not.toBeInTheDocument();
+    expect(screen.queryByText('history.empty')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-dibujo]')).toBeNull();
+  });
+
+  it('un fallo del código NO se disfraza de falta de señal', async () => {
+    // Un mapeador que revienta con un dato inesperado también llega sin
+    // estado. Decir «sin conexión» ahí esconde un defecto de verdad, y quien
+    // lo reporte contará algo que no pasó. Sale el aviso genérico, no el texto crudo
+    mockListMyQuickMatches.mockRejectedValue(
+      new Error('cannot read x of undefined'),
+    );
+
+    renderPage();
+
+    expect(
+      await screen.findByText('scoring.errors.generic'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('cannot read x of undefined'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-matches-sin-conexion'),
+    ).not.toBeInTheDocument();
+  });
+
+  describe('leaving a match out of the statistics', () => {
+    it('shows an open eye on a match that counts', async () => {
+      mockListMyQuickMatches.mockResolvedValue(matches());
+
+      renderPage();
+
+      const eye = await screen.findByTestId('quick-match-stats-toggle-qm-1');
+      expect(eye).toHaveAttribute('aria-pressed', 'false');
+      // El estado se anuncia con palabras, no solo con el icono ni con el color
+      expect(eye).toHaveAttribute('aria-label', 'history.countsInStats');
+      expect(
+        screen.queryByTestId('quick-match-excluded-badge-qm-1'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('marks the row and the eye when the match does not count', async () => {
+      mockListMyQuickMatches.mockResolvedValue(
+        matches({ excludedFromStats: true }),
+      );
+
+      renderPage();
+
+      const eye = await screen.findByTestId('quick-match-stats-toggle-qm-1');
+      expect(eye).toHaveAttribute('aria-pressed', 'true');
+      expect(eye).toHaveAttribute('aria-label', 'history.excludedFromStats');
+      // La etiqueta es lo que lo dice de verdad: el fondo no lo lee nadie
+      expect(
+        screen.getByTestId('quick-match-excluded-badge-qm-1'),
+      ).toBeInTheDocument();
+    });
+
+    it('does not label a cancelled match as not counting', async () => {
+      // La migracion dejo la marca puesta en partidas canceladas, que no
+      // puntuan nunca: ahi la etiqueta no dice nada y, sin ojo, tampoco se
+      // podia quitar.
+      mockListMyQuickMatches.mockResolvedValue(
+        matches({ status: 'CANCELLED', excludedFromStats: true }),
+      );
+
+      renderPage();
+
+      await screen.findByTestId('quick-match-history-item-qm-1');
+      expect(
+        screen.queryByTestId('quick-match-excluded-badge-qm-1'),
+      ).not.toBeInTheDocument();
+      // Ni la etiqueta ni el gris: una tarjeta apagada sin nada que lo
+      // explique es peor que no marcarla
+      expect(
+        screen.getByTestId('quick-match-row-qm-1').className,
+      ).not.toContain('bg-gray-50');
+    });
+
+    it('does label a match still in play that will not count', async () => {
+      // La migracion pudo dejar la marca puesta en una partida sin terminar, y
+      // ahi si significa algo: cuando la vuelta acabe, no contara. El ojo para
+      // quitarla no aparece hasta que termine, pero enterarse entonces —al
+      // recargar el historial y ver la etiqueta salir de la nada— es peor.
+      mockListMyQuickMatches.mockResolvedValue(
+        matches({ status: 'IN_PROGRESS', excludedFromStats: true }),
+      );
+
+      renderPage();
+
+      await screen.findByTestId('quick-match-history-item-qm-1');
+      expect(
+        screen.getByTestId('quick-match-excluded-badge-qm-1'),
+      ).toBeInTheDocument();
+      // El borde izquierdo marcado viaja con la etiqueta, nunca por su cuenta
+      expect(screen.getByTestId('quick-match-row-qm-1').className).toContain(
+        'border-l-borde',
+      );
+    });
+
+    it('does not offer the eye on a match still being played', async () => {
+      // Todavia no cuenta en ninguna estadistica: el control no diria nada, y
+      // el servidor lo rechaza con un 409
+      mockListMyQuickMatches.mockResolvedValue(
+        matches({ status: 'IN_PROGRESS' }),
+      );
+
+      renderPage();
+
+      await screen.findByTestId('quick-match-history-item-qm-1');
+      expect(
+        screen.queryByTestId('quick-match-stats-toggle-qm-1'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('leaves it out of the stats and repaints the row without reloading', async () => {
+      mockListMyQuickMatches.mockResolvedValue(matches());
+      mockExcludeFromStats.mockResolvedValue({
+        id: 'qm-1',
+        excludedFromStats: true,
+      });
+
+      renderPage();
+
+      fireEvent.click(
+        await screen.findByTestId('quick-match-stats-toggle-qm-1'),
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId('quick-match-excluded-badge-qm-1'),
+        ).toBeInTheDocument();
+      });
+      expect(mockExcludeFromStats).toHaveBeenCalledWith('qm-1');
+      // La partida NO se va de la lista: eso es la papelera, no el ojo
+      expect(
+        screen.getByTestId('quick-match-history-item-qm-1'),
+      ).toBeInTheDocument();
+    });
+
+    it('brings it back into the stats when pressed again', async () => {
+      mockListMyQuickMatches.mockResolvedValue(
+        matches({ excludedFromStats: true }),
+      );
+      mockIncludeInStats.mockResolvedValue({
+        id: 'qm-1',
+        excludedFromStats: false,
+      });
+
+      renderPage();
+
+      fireEvent.click(
+        await screen.findByTestId('quick-match-stats-toggle-qm-1'),
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId('quick-match-excluded-badge-qm-1'),
+        ).not.toBeInTheDocument();
+      });
+      expect(mockIncludeInStats).toHaveBeenCalledWith('qm-1');
+    });
+
+    it('keeps the previous state when the request fails', async () => {
+      mockListMyQuickMatches.mockResolvedValue(matches());
+      mockExcludeFromStats.mockRejectedValue(new Error('boom'));
+
+      renderPage();
+
+      fireEvent.click(
+        await screen.findByTestId('quick-match-stats-toggle-qm-1'),
+      );
+
+      await waitFor(() => {
+        expect(mockExcludeFromStats).toHaveBeenCalled();
+      });
+      expect(
+        screen.queryByTestId('quick-match-excluded-badge-qm-1'),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId('quick-match-stats-toggle-qm-1'),
+      ).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('does not navigate to scoring when the eye is pressed', async () => {
+      mockListMyQuickMatches.mockResolvedValue(matches());
+      mockExcludeFromStats.mockResolvedValue({
+        id: 'qm-1',
+        excludedFromStats: true,
+      });
+
+      renderPage();
+
+      fireEvent.click(
+        await screen.findByTestId('quick-match-stats-toggle-qm-1'),
+      );
+
+      await waitFor(() => {
+        expect(mockExcludeFromStats).toHaveBeenCalled();
+      });
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('hiding a match from the history', () => {
+    const twoMatches = {
+      quickMatches: [
+        {
+          id: 'qm-1',
+          matchFormat: 'SINGLES',
+          status: 'COMPLETED',
+          createdAt: '2026-07-27T10:00:00Z',
+        },
+        {
+          id: 'qm-2',
+          matchFormat: 'FOURBALL',
+          status: 'COMPLETED',
+          createdAt: '2026-07-20T10:00:00Z',
+        },
+      ],
+      totalCount: 2,
+      page: 1,
+      limit: 50,
+    };
+
+    it('should show a hide button on every card', async () => {
+      mockListMyQuickMatches.mockResolvedValue(twoMatches);
+
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-match-hide-qm-1')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('quick-match-hide-qm-2')).toBeInTheDocument();
+    });
+
+    // La papelera ya no oculta directamente: abre un aviso, porque no se puede
+    // deshacer desde la aplicación. Pulsarla y aceptar es ahora el gesto.
+    const confirmarQuitar = async (id) => {
+      fireEvent.click(screen.getByTestId(`quick-match-hide-${id}`));
+      const confirmar = await screen.findByRole('button', {
+        name: 'history.deleteConfirm',
+      });
+      fireEvent.click(confirmar);
+    };
+
+    /**
+     * La papelera puede ser el borrado DEFINITIVO (BE #939, 26 nov 2026): cuando
+     * la han tirado todos, la partida se borra de verdad. Por eso solo se tira
+     * lo que ya ha acabado, y el servidor responde 409 a lo demás.
+     *
+     *   caso | la partida            | papelera
+     *   -----|-----------------------|---------
+     *   P1   | terminada             | sí
+     *   P2   | cancelada             | sí
+     *   P3   | en juego              | no
+     *   P4   | sin empezar           | no
+     *   P5   | de estado desconocido | no
+     *
+     *   caso | al confirmar          | qué pasa
+     *   -----|-----------------------|-------------------------------------
+     *   E1   | 409: no ha terminado  | lo dice, y la tarjeta se queda
+     *   E2   | 404: ya no existe     | sale de la lista, como si fuera bien
+     *   E3   | otro fallo            | el aviso de siempre, y se queda
+     *   E4   | 404 que no es la API  | fallo: el aviso de siempre
+     *   G1   | sale de la lista      | su copia guardada se olvida
+     */
+    it.each([
+      ['P1', 'COMPLETED'],
+      ['P2', 'CANCELLED'],
+    ])('%s offers the bin on a %s match', async (_caso, status) => {
+      mockListMyQuickMatches.mockResolvedValue(matches({ status }));
+
+      renderPage();
+
+      expect(
+        await screen.findByTestId('quick-match-hide-qm-1'),
+      ).toBeInTheDocument();
+    });
+
+    it.each([
+      ['P3', 'IN_PROGRESS'],
+      ['P4', 'PENDING'],
+    ])(
+      '%s has no bin on a %s match: it is still alive',
+      async (_caso, status) => {
+        // Su creador la cancela desde dentro; los demás esperan a que se
+        // cierre sola (BE #652) y entonces sale la papelera
+        mockListMyQuickMatches.mockResolvedValue(matches({ status }));
+
+        renderPage();
+
+        await screen.findByTestId('quick-match-history-item-qm-1');
+        expect(
+          screen.queryByTestId('quick-match-hide-qm-1'),
+        ).not.toBeInTheDocument();
+      },
+    );
+
+    it('E1 says the match has not finished when the server refuses (409)', async () => {
+      // No debería llegarse: la papelera solo sale en las acabadas. Pero si
+      // el servidor la da por viva, el 409 no es «no se pudo»: es «todavía no»
+      mockListMyQuickMatches.mockResolvedValue(twoMatches);
+      mockHideQuickMatch.mockRejectedValue(
+        Object.assign(new Error('HTTP 409: Conflict'), { status: 409 }),
+      );
+
+      renderPage();
+      await screen.findByTestId('quick-match-hide-qm-1');
+      await confirmarQuitar('qm-1');
+
+      await waitFor(() => {
+        expect(customToast.error).toHaveBeenCalledWith(
+          'history.hideNotFinished',
+        );
+      });
+      expect(
+        screen.getByTestId('quick-match-history-item-qm-1'),
+      ).toBeInTheDocument();
+    });
+
+    it('E2 drops the card when the match no longer exists (404)', async () => {
+      // La borró de verdad el último que la tiró, desde otro móvil: decir «no
+      // se pudo quitar» de algo que ya no está sería dejarla ahí para siempre
+      mockListMyQuickMatches.mockResolvedValue(twoMatches);
+      mockHideQuickMatch.mockRejectedValue(
+        Object.assign(new Error('Quick match not found: qm-1'), {
+          status: 404,
+          mensajeTecnico: false,
+        }),
+      );
+
+      renderPage();
+      await screen.findByTestId('quick-match-hide-qm-1');
+      await confirmarQuitar('qm-1');
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId('quick-match-history-item-qm-1'),
+        ).not.toBeInTheDocument();
+      });
+      expect(customToast.error).not.toHaveBeenCalled();
+      expect(
+        screen.getByTestId('quick-match-history-item-qm-2'),
+      ).toBeInTheDocument();
+    });
+
+    it.each([
+      ['sin cuerpo', { message: 'HTTP 404: Not Found', mensajeTecnico: true }],
+      // Un intermediario también puede mandar un cuerpo con su mensaje: no
+      // basta con que haya mensaje, tiene que ser el de la API (CodeRabbit,
+      // PR #1268)
+      [
+        'con el mensaje de otro',
+        { message: 'Not Found', mensajeTecnico: false },
+      ],
+    ])(
+      'E4 a 404 that is not the API speaking (%s) is a failure, not a success',
+      async (_caso, { message, mensajeTecnico }) => {
+        // Dar «partida quitada» de algo que anuncia ser para siempre, sin que
+        // el servidor lo haya dicho, sería mentir; y se llevaría su copia
+        const almacen = new Map();
+        vi.stubGlobal('localStorage', {
+          getItem: (k) => (almacen.has(k) ? almacen.get(k) : null),
+          setItem: (k, v) => almacen.set(k, String(v)),
+          removeItem: (k) => almacen.delete(k),
+        });
+        recuerda('qm-1', { partida: { id: 'qm-1' } });
+        mockListMyQuickMatches.mockResolvedValue(twoMatches);
+        mockHideQuickMatch.mockRejectedValue(
+          Object.assign(new Error(message), { status: 404, mensajeTecnico }),
+        );
+
+        renderPage();
+        await screen.findByTestId('quick-match-hide-qm-1');
+        await confirmarQuitar('qm-1');
+
+        await waitFor(() => {
+          expect(customToast.error).toHaveBeenCalledWith('history.hideError');
+        });
+        expect(
+          screen.getByTestId('quick-match-history-item-qm-1'),
+        ).toBeInTheDocument();
+        expect(loQueSeSupo('qm-1')).not.toBeNull();
+        vi.unstubAllGlobals();
+      },
+    );
+
+    it('P5 has no bin on a match whose status it does not know', async () => {
+      // La papelera puede ser definitiva: se ofrece a lo que se sabe acabado,
+      // no a todo lo que no se sabe vivo
+      mockListMyQuickMatches.mockResolvedValue(matches({ status: undefined }));
+
+      renderPage();
+
+      await screen.findByTestId('quick-match-history-item-qm-1');
+      expect(
+        screen.queryByTestId('quick-match-hide-qm-1'),
+      ).not.toBeInTheDocument();
+    });
+
+    it.each([
+      [
+        'al quitarla',
+        () => mockHideQuickMatch.mockResolvedValue({ id: 'qm-1' }),
+      ],
+      [
+        'si ya no existía',
+        () =>
+          mockHideQuickMatch.mockRejectedValue(
+            Object.assign(new Error('Quick match not found: qm-1'), {
+              status: 404,
+              mensajeTecnico: false,
+            }),
+          ),
+      ],
+    ])(
+      'G1 %s, su copia guardada en el dispositivo se va con ella',
+      async (_caso, prepara) => {
+        // «No se puede recuperar»: sin esto, abrir su enlace sin cobertura la
+        // seguía pintando desde la copia, con los nombres y golpes de todos
+        const almacen = new Map();
+        vi.stubGlobal('localStorage', {
+          getItem: (k) => (almacen.has(k) ? almacen.get(k) : null),
+          setItem: (k, v) => almacen.set(k, String(v)),
+          removeItem: (k) => almacen.delete(k),
+        });
+        recuerda('qm-1', { partida: { id: 'qm-1' } });
+        recuerda('qm-2', { partida: { id: 'qm-2' } });
+        mockListMyQuickMatches.mockResolvedValue(twoMatches);
+        prepara();
+
+        renderPage();
+        await screen.findByTestId('quick-match-hide-qm-1');
+        await confirmarQuitar('qm-1');
+
+        await waitFor(() => {
+          expect(loQueSeSupo('qm-1')).toBeNull();
+        });
+        expect(loQueSeSupo('qm-2')).not.toBeNull();
+        vi.unstubAllGlobals();
+      },
+    );
+
+    it.each(['es', 'en'])(
+      'the %s warning speaks of the list and the activity, and no longer of a match in play',
+      (idioma) => {
+        const textos = JSON.parse(
+          readFileSync(
+            resolve(
+              process.cwd(),
+              `src/i18n/locales/${idioma}/quickMatch.json`,
+            ),
+            'utf8',
+          ),
+        ).history;
+
+        expect(textos).not.toHaveProperty('deleteBodyInPlay');
+        expect(textos).toHaveProperty('hideNotFinished');
+        const palabra = { es: 'Actividad', en: 'Activity' }[idioma];
+        const lista = { es: 'tu lista', en: 'your list' }[idioma];
+        for (const clave of ['deleteBody', 'deleteBodyPlain']) {
+          expect(textos[clave]).toContain(palabra);
+          expect(textos[clave]).toContain(lista);
+        }
+      },
+    );
+
+    it('warns plainly on a cancelled match, which is over and never counted', async () => {
+      // Ninguna de las dos existe ahi: no cuenta en ninguna estadistica y no
+      // hay ojo. Y una cancelada SI esta terminada, asi que tampoco vale
+      // decirle que no lo esta.
+      mockListMyQuickMatches.mockResolvedValue(
+        matches({ status: 'CANCELLED' }),
+      );
+
+      renderPage();
+      fireEvent.click(await screen.findByTestId('quick-match-hide-qm-1'));
+
+      expect(screen.getByText(/history.deleteBodyPlain/)).toBeInTheDocument();
+      expect(screen.queryByText(/history.deleteHint/)).not.toBeInTheDocument();
+    });
+
+    it('does not repeat the eye advice to someone who already used it', async () => {
+      // Ya la dejo fuera de sus estadisticas: decirle que al quitarla «tambien
+      // dejara de contar», y mandarle a usar el ojo, es contarle como novedad
+      // lo que acaba de hacer.
+      mockListMyQuickMatches.mockResolvedValue(
+        matches({ status: 'COMPLETED', excludedFromStats: true }),
+      );
+
+      renderPage();
+      fireEvent.click(await screen.findByTestId('quick-match-hide-qm-1'));
+
+      expect(screen.queryByText(/history.deleteHint/)).not.toBeInTheDocument();
+      expect(screen.getByText(/history.deleteBodyPlain/)).toBeInTheDocument();
+    });
+
+    it('keeps the usual warning, with the eye, on a finished match', async () => {
+      // La otra rama del ternario: sin esto nadie prueba que una terminada
+      // sigue viendo el aviso de siempre. Se comprueba con `deleteHint`, que
+      // es la unica clave que no es prefijo de otra.
+      mockListMyQuickMatches.mockResolvedValue(
+        matches({ status: 'COMPLETED' }),
+      );
+
+      renderPage();
+      fireEvent.click(await screen.findByTestId('quick-match-hide-qm-1'));
+
+      expect(screen.getByText(/history.deleteHint/)).toBeInTheDocument();
+    });
+
+    it('should ask before removing, and do nothing if you cancel', async () => {
+      mockListMyQuickMatches.mockResolvedValue(twoMatches);
+
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-match-hide-qm-1')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId('quick-match-hide-qm-1'));
+
+      const cancelar = await screen.findByRole('button', {
+        name: 'history.deleteCancel',
+      });
+      fireEvent.click(cancelar);
+
+      expect(mockHideQuickMatch).not.toHaveBeenCalled();
+      expect(
+        screen.getByTestId('quick-match-history-item-qm-1'),
+      ).toBeInTheDocument();
+    });
+
+    it('should hide the match and remove only that card from the list', async () => {
+      mockListMyQuickMatches.mockResolvedValue(twoMatches);
+      mockHideQuickMatch.mockResolvedValue({ id: 'qm-1' });
+
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-match-hide-qm-1')).toBeInTheDocument();
+      });
+
+      await confirmarQuitar('qm-1');
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId('quick-match-history-item-qm-1'),
+        ).not.toBeInTheDocument();
+      });
+      expect(mockHideQuickMatch).toHaveBeenCalledWith('qm-1');
+      // La otra partida no se toca: ocultar es por usuario y por partida.
+      expect(
+        screen.getByTestId('quick-match-history-item-qm-2'),
+      ).toBeInTheDocument();
+    });
+
+    it('should not navigate to scoring when the hide button is clicked', async () => {
+      mockListMyQuickMatches.mockResolvedValue(twoMatches);
+      mockHideQuickMatch.mockResolvedValue({ id: 'qm-1' });
+
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-match-hide-qm-1')).toBeInTheDocument();
+      });
+
+      await confirmarQuitar('qm-1');
+
+      await waitFor(() => {
+        expect(mockHideQuickMatch).toHaveBeenCalled();
+      });
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    it('should keep the card when hiding fails', async () => {
+      mockListMyQuickMatches.mockResolvedValue(twoMatches);
+      mockHideQuickMatch.mockRejectedValue(new Error('Quick match not found'));
+
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-match-hide-qm-1')).toBeInTheDocument();
+      });
+
+      await confirmarQuitar('qm-1');
+
+      await waitFor(() => {
+        expect(mockHideQuickMatch).toHaveBeenCalledWith('qm-1');
+      });
+      expect(customToast.error).toHaveBeenCalledWith('history.hideError');
+      expect(
+        screen.getByTestId('quick-match-history-item-qm-1'),
+      ).toBeInTheDocument();
+    });
+
+    it('should disable the button while the request is in flight', async () => {
+      mockListMyQuickMatches.mockResolvedValue(twoMatches);
+      let resolveHide;
+      mockHideQuickMatch.mockReturnValue(
+        new Promise((resolve) => {
+          resolveHide = resolve;
+        }),
+      );
+
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-match-hide-qm-1')).toBeInTheDocument();
+      });
+
+      await confirmarQuitar('qm-1');
+
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-match-hide-qm-1')).toBeDisabled();
+      });
+      // El resto de tarjetas siguen accionables mientras una se oculta.
+      expect(screen.getByTestId('quick-match-hide-qm-2')).not.toBeDisabled();
+
+      resolveHide({ id: 'qm-1' });
+    });
+
+    it('should keep a still-pending card disabled when another hide request finishes first', async () => {
+      // Con un único hidingId, resolver qm-1 reactivaba el botón de qm-2 aunque
+      // su petición siguiera en vuelo, permitiendo un segundo envío duplicado.
+      mockListMyQuickMatches.mockResolvedValue(twoMatches);
+      const resolvers = {};
+      mockHideQuickMatch.mockImplementation(
+        (id) =>
+          new Promise((resolve) => {
+            resolvers[id] = resolve;
+          }),
+      );
+
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-match-hide-qm-1')).toBeInTheDocument();
+      });
+
+      await confirmarQuitar('qm-1');
+      await confirmarQuitar('qm-2');
+
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-match-hide-qm-2')).toBeDisabled();
+      });
+
+      resolvers['qm-1']({ id: 'qm-1' });
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId('quick-match-hide-qm-1'),
+        ).not.toBeInTheDocument();
+      });
+      expect(screen.getByTestId('quick-match-hide-qm-2')).toBeDisabled();
+      expect(mockHideQuickMatch).toHaveBeenCalledTimes(2);
+
+      resolvers['qm-2']({ id: 'qm-2' });
+    });
+  });
+});
+
+/**
+ * LA TABLA O — poder LLEGAR a la partida sin cobertura (FE #524).
+ *
+ * La pantalla de anotación ya sabe pintarse con lo último que se supo, pero si
+ * la lista no carga no hay por dónde entrar en ella. Es el último tramo del
+ * camino: abrir la aplicación → llegar a la partida → anotar.
+ *
+ *   caso                         | qué se ve
+ *   -----------------------------|--------------------------------------
+ *   carga bien                   | la lista, y se guarda
+ *   sin señal, con lista guardada| las últimas que se vieron, con aviso
+ *   sin señal, sin nada guardado | como antes
+ *   el servidor dice 401 o 403   | no se usa lo guardado
+ */
+describe('MyQuickMatchesPage · llegar a la partida sin cobertura (FE #524, tabla O)', () => {
+  const guardadas = [
+    {
+      id: 'qm-9',
+      name: 'Meis Foursomes',
+      status: 'IN_PROGRESS',
+      matchFormat: 'FOURSOMES',
+      golfCourseId: 'c-1',
+      playedAt: '2026-08-29T10:00:00Z',
+      excludedFromStats: false,
+    },
+  ];
+
+  beforeEach(() => {
+    const almacen = new Map();
+    vi.stubGlobal('localStorage', {
+      getItem: (k) => (almacen.has(k) ? almacen.get(k) : null),
+      setItem: (k, v) => almacen.set(k, String(v)),
+      removeItem: (k) => almacen.delete(k),
+    });
+    vi.clearAllMocks();
+  });
+
+  it('sin señal enseña las últimas partidas que se vieron', async () => {
+    localStorage.setItem(
+      'comebackgolf-ultima-lista',
+      JSON.stringify(guardadas),
+    );
+    mockListMyQuickMatches.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    renderPage();
+
+    expect(await screen.findByText('Meis Foursomes')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('quick-matches-sin-conexion'),
+    ).toBeInTheDocument();
+  });
+
+  it('al cargar bien, las guarda para la próxima vez', async () => {
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: guardadas,
+      total: 1,
+    });
+
+    renderPage();
+    await screen.findByText('Meis Foursomes');
+
+    expect(
+      JSON.parse(localStorage.getItem('comebackgolf-ultima-lista')),
+    ).toHaveLength(1);
+  });
+
+  it.each([[401], [403]])(
+    'un %i además BORRA lo guardado, no solo lo ignora',
+    async (status) => {
+      // No usarlo esta vez no basta: seguía ahí para el siguiente fallo de red,
+      // y entonces sí se pintaba
+      localStorage.setItem(
+        'comebackgolf-ultima-lista',
+        JSON.stringify(guardadas),
+      );
+      mockListMyQuickMatches.mockRejectedValue(
+        Object.assign(new Error('fuera'), { status }),
+      );
+
+      renderPage();
+      // Un 401 es la sesión: sale el texto de la app, no el suyo (Q-FE-06)
+      await screen.findByText(
+        status === 401 ? 'scoring.errors.generic' : 'fuera',
+      );
+
+      expect(localStorage.getItem('comebackgolf-ultima-lista')).toBeNull();
+    },
+  );
+
+  it('un 403 del REFRESCO no borra nada: no es la respuesta de la lista', async () => {
+    // Cuando el interceptor no consigue refrescar, propaga su propio error con
+    // `.response` puesta a la respuesta de `/auth/refresh-token`. Un 403 ahí es
+    // un caso en el que se decide a propósito NO tirar la sesión (FE #514), y
+    // borrar se llevaría la partida que se está jugando, sin vuelta atrás
+    localStorage.setItem(
+      'comebackgolf-ultima-lista',
+      JSON.stringify(guardadas),
+    );
+    mockListMyQuickMatches.mockRejectedValue(
+      Object.assign(new Error('Failed to refresh token'), {
+        response: { status: 403 },
+      }),
+    );
+
+    renderPage();
+    await waitFor(() => expect(mockListMyQuickMatches).toHaveBeenCalled());
+
+    expect(
+      JSON.parse(localStorage.getItem('comebackgolf-ultima-lista')),
+    ).toHaveLength(1);
+  });
+
+  it('una respuesta que llega tras cerrar sesión no vuelve a guardar nada', async () => {
+    // El cierre de sesión acaba de borrarlo; si esta respuesta lo repusiera,
+    // quedarían para la siguiente carga sin cobertura de OTRA cuenta
+    let contesta;
+    mockListMyQuickMatches.mockImplementation(
+      () =>
+        new Promise((r) => {
+          contesta = r;
+        }),
+    );
+
+    const { unmount } = renderPage();
+    unmount();
+    await act(async () => {
+      contesta({ quickMatches: guardadas, total: 1 });
+    });
+
+    expect(localStorage.getItem('comebackgolf-ultima-lista')).toBeNull();
+  });
+
+  it('con la sesión caducada no enseña lo guardado', async () => {
+    // Un 401 desmiente: enseñar sus partidas a quien la aplicación no sabe
+    // quién es no procede
+    localStorage.setItem(
+      'comebackgolf-ultima-lista',
+      JSON.stringify(guardadas),
+    );
+    mockListMyQuickMatches.mockRejectedValue(
+      Object.assign(new Error('fuera'), { status: 401 }),
+    );
+
+    renderPage();
+
+    // Se espera a que la pantalla haya reaccionado —el 401 sale con el texto
+    // de la app (Q-FE-06)— y solo entonces se mira la ausencia: si no, la
+    // comprobación gana la carrera y pasaría igual aunque la lista se pintara
+    // un instante después
+    expect(
+      await screen.findByText('scoring.errors.generic'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Meis Foursomes')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * LA TABLA — el resultado de cada partida terminada, de cinco en cinco (FE #418).
+ *
+ *   caso                                   | qué pasa
+ *   ---------------------------------------|---------------------------------
+ *   Q1 doce terminadas                     | nunca más de cinco detalles en
+ *                                          | vuelo; al acabar uno entra otro
+ *   Q2 responde una                        | su tarjeta ya enseña el resultado,
+ *                                          | sin esperar a las demás
+ *   Q3 se sale de la página                | no se piden las que faltaban
+ *   Q3 llega tarde la de una carga vieja   | no pisa la de la carga nueva
+ *   Q4 una falla                           | las demás siguen; esa se queda
+ *                                          | sin resultado, como hoy
+ *   Q4 falla en una recarga                | la que tenía resultado lo pierde,
+ *                                          | como hoy (no queda el viejo)
+ */
+describe('MyQuickMatchesPage · resultados de cinco en cinco (FE #418)', () => {
+  const terminadas = (n) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `qm-${i + 1}`,
+      golfCourseId: 'course-1',
+      matchFormat: 'SINGLES',
+      status: 'COMPLETED',
+      createdAt: '2026-07-20T10:00:00Z',
+    }));
+
+  // Un detalle con un solo hoyo de par 4: `golpes` 3 da -1, 5 da +1
+  const detalle = (golpes) => ({
+    participants: [
+      {
+        participantId: 'user-1',
+        userId: 'user-1',
+        name: 'Test User',
+        handicap: 0,
+      },
+    ],
+    holeScores: [{ holeNumber: 1, participantId: 'user-1', score: golpes }],
+    effectiveAllowance: 100,
+  });
+
+  let llamadas;
+  let enVuelo;
+  let maximo;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    llamadas = [];
+    enVuelo = 0;
+    maximo = 0;
+    mockGetGolfCourse.mockResolvedValue({
+      holes: [{ holeNumber: 1, par: 4, strokeIndex: 1 }],
+      tees: [],
+    });
+    mockGetQuickMatch.mockImplementation(
+      (id) =>
+        new Promise((resolve, reject) => {
+          enVuelo += 1;
+          maximo = Math.max(maximo, enVuelo);
+          llamadas.push({
+            id,
+            resolve: (v) => {
+              enVuelo -= 1;
+              resolve(v);
+            },
+            reject: (e) => {
+              enVuelo -= 1;
+              reject(e);
+            },
+          });
+        }),
+    );
+  });
+
+  const llamadasA = (n) => waitFor(() => expect(llamadas).toHaveLength(n));
+  const lista = (n) => ({
+    quickMatches: terminadas(n),
+    totalCount: n,
+    page: 1,
+    limit: 50,
+  });
+
+  it('Q1 nunca pide más de cinco detalles a la vez, y al acabar uno entra otro', async () => {
+    mockListMyQuickMatches.mockResolvedValue(lista(12));
+
+    renderPage();
+    await llamadasA(5);
+
+    // Se resuelven de una en una hasta acabar las doce
+    for (let i = 0; i < 12; i += 1) {
+      await act(async () => {
+        llamadas[i].resolve(detalle(4));
+      });
+      if (i < 7) await llamadasA(6 + i);
+    }
+
+    expect(llamadas).toHaveLength(12);
+    expect(new Set(llamadas.map((l) => l.id)).size).toBe(12);
+    expect(maximo).toBe(5);
+  });
+
+  it('Q2 cada tarjeta enseña su resultado en cuanto llega el suyo', async () => {
+    mockListMyQuickMatches.mockResolvedValue(lista(12));
+
+    renderPage();
+    await llamadasA(5);
+
+    await act(async () => {
+      llamadas[0].resolve(detalle(3));
+    });
+
+    expect(
+      await screen.findByTestId('quick-match-result-qm-1'),
+    ).toHaveTextContent('-1');
+    // Las demás siguen en vuelo y no hay nada que enseñar todavía
+    expect(
+      screen.queryByTestId('quick-match-result-qm-2'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('Q3 al salir de la página no se piden las que faltaban', async () => {
+    mockListMyQuickMatches.mockResolvedValue(lista(12));
+
+    const { unmount } = renderPage();
+    await llamadasA(5);
+    unmount();
+
+    await act(async () => {
+      for (const l of llamadas.slice(0, 5)) l.resolve(detalle(4));
+    });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(llamadas).toHaveLength(5);
+  });
+
+  it('Q3 el resultado tardío de una carga vieja no pisa el de la nueva', async () => {
+    mockListMyQuickMatches.mockResolvedValue(lista(3));
+    mockHideQuickMatch.mockResolvedValue({ id: 'qm-3' });
+
+    renderPage();
+    await llamadasA(3);
+    const viejaDeQm1 = llamadas[0];
+
+    // Quitar una cambia la lista y vuelve a cargar los resultados
+    fireEvent.click(screen.getByTestId('quick-match-hide-qm-3'));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'history.deleteConfirm' }),
+    );
+    await llamadasA(5);
+    const nuevaDeQm1 = llamadas.slice(3).find((l) => l.id === 'qm-1');
+
+    await act(async () => {
+      nuevaDeQm1.resolve(detalle(3));
+    });
+    expect(
+      await screen.findByTestId('quick-match-result-qm-1'),
+    ).toHaveTextContent('-1');
+
+    await act(async () => {
+      viejaDeQm1.resolve(detalle(5));
+    });
+    expect(screen.getByTestId('quick-match-result-qm-1')).toHaveTextContent(
+      '-1',
+    );
+    expect(screen.getByTestId('quick-match-result-qm-1')).not.toHaveTextContent(
+      '+1',
+    );
+  });
+
+  it('Q4 si una falla, las demás siguen y esa se queda sin resultado', async () => {
+    mockListMyQuickMatches.mockResolvedValue(lista(6));
+
+    renderPage();
+    await llamadasA(5);
+
+    await act(async () => {
+      llamadas[0].reject(new Error('caída'));
+    });
+    await llamadasA(6);
+    await act(async () => {
+      for (const l of llamadas.slice(1)) l.resolve(detalle(3));
+    });
+
+    expect(
+      await screen.findByTestId('quick-match-result-qm-6'),
+    ).toHaveTextContent('-1');
+    expect(screen.getByTestId('quick-match-result-qm-2')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('quick-match-result-qm-1'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('Q4 si falla en una recarga, la que tenía resultado lo pierde, como hoy', async () => {
+    mockListMyQuickMatches.mockResolvedValue(lista(3));
+    mockHideQuickMatch.mockResolvedValue({ id: 'qm-3' });
+
+    renderPage();
+    await llamadasA(3);
+    await act(async () => {
+      llamadas[0].resolve(detalle(3));
+    });
+    expect(
+      await screen.findByTestId('quick-match-result-qm-1'),
+    ).toHaveTextContent('-1');
+
+    // Quitar una vuelve a cargar; esta vez el detalle de qm-1 falla
+    fireEvent.click(screen.getByTestId('quick-match-hide-qm-3'));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'history.deleteConfirm' }),
+    );
+    await llamadasA(5);
+    const nuevaDeQm1 = llamadas.slice(3).find((l) => l.id === 'qm-1');
+    await act(async () => {
+      nuevaDeQm1.reject(new Error('caída'));
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId('quick-match-result-qm-1'),
+      ).not.toBeInTheDocument(),
+    );
+  });
+});
+
+// H5 (25 oct 2026): la fecha de cada fila es la de juego, no la de creación
+describe('MyQuickMatchesPage · la fecha de juego', () => {
+  it('H5: enseña cuando se jugó; sin ese dato (backend viejo), cuando se creó', async () => {
+    mockListMyQuickMatches.mockResolvedValue({
+      quickMatches: [
+        {
+          id: 'qm-1',
+          matchFormat: 'SINGLES',
+          status: 'COMPLETED',
+          createdAt: '2026-07-15T12:00:00Z',
+          playedAt: '2026-07-27T12:00:00.000Z',
+        },
+        {
+          id: 'qm-2',
+          matchFormat: 'SINGLES',
+          status: 'COMPLETED',
+          createdAt: '2026-07-10T12:00:00Z',
+          playedAt: null,
+        },
+      ],
+      totalCount: 2,
+      page: 1,
+      limit: 50,
+    });
+
+    renderPage();
+
+    expect(
+      await screen.findByText(
+        new RegExp(
+          new Date('2026-07-27T12:00:00Z')
+            .toLocaleString('en', {
+              day: 'numeric',
+              month: 'numeric',
+              year: 'numeric',
+            })
+            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+        ),
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        new RegExp(
+          new Date('2026-07-15T12:00:00Z')
+            .toLocaleString('en', {
+              day: 'numeric',
+              month: 'numeric',
+              year: 'numeric',
+            })
+            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+        ),
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        new RegExp(
+          new Date('2026-07-10T12:00:00Z')
+            .toLocaleString('en', {
+              day: 'numeric',
+              month: 'numeric',
+              year: 'numeric',
+            })
+            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+        ),
+      ),
+    ).toBeInTheDocument();
+  });
+});

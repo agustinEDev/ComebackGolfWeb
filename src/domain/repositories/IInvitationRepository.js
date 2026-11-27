@@ -1,0 +1,99 @@
+/** @typedef {import('../entities/Invitation').default} Invitation */
+/**
+ * La respuesta de la API en camelCase, tal cual llegó: lo que falta,
+ * undefined. `InvitationAssembler` lee de ella los nombres que la entidad no
+ * guarda (competitionName, inviterName, inviteeName).
+ * @typedef {Object<string, any>} InvitationExtras
+ */
+/** @typedef {{entity: Invitation, extras: InvitationExtras|null}} InvitationWithExtras */
+
+/**
+ * Interface: IInvitationRepository
+ *
+ * Defines the persistence contract for Invitations.
+ *
+ * Implementations:
+ * - ApiInvitationRepository (REST API)
+ * - MockInvitationRepository (for tests)
+ */
+class IInvitationRepository {
+  /**
+   * Send invitation to a user by their user ID
+   *
+   * @param {string} competitionId - UUID of the competition
+   * @param {string} inviteeUserId - UUID of the user to invite
+   * @param {string|null} personalMessage - Optional personal message (max 500 chars)
+   * @returns {Promise<InvitationWithExtras>} Created invitation and its join names
+   * @throws {Error} If operation fails
+   */
+  async sendInvitation(competitionId, inviteeUserId, personalMessage) {
+    throw new Error('Method sendInvitation() must be implemented');
+  }
+
+  /**
+   * Send invitation to a user by email address
+   *
+   * @param {string} competitionId - UUID of the competition
+   * @param {string} inviteeEmail - Email of the person to invite
+   * @param {string|null} personalMessage - Optional personal message (max 500 chars)
+   * @returns {Promise<InvitationWithExtras>} Created invitation and its join names
+   * @throws {Error} If operation fails
+   */
+  async sendInvitationByEmail(competitionId, inviteeEmail, personalMessage) {
+    throw new Error('Method sendInvitationByEmail() must be implemented');
+  }
+
+  /**
+   * Get invitations received by the current user
+   *
+   * @param {Object} [filters] - Optional filters
+   * @param {string} [filters.status] - Filter by status (PENDING, ACCEPTED, DECLINED, EXPIRED)
+   * @param {number} [filters.page] - Page number (1-indexed)
+   * @param {number} [filters.limit] - Items per page
+   * @returns {Promise<{invitations: InvitationWithExtras[], totalCount: number}>}
+   * @throws {Error} If operation fails
+   */
+  async getMyInvitations(filters = {}) {
+    throw new Error('Method getMyInvitations() must be implemented');
+  }
+
+  /**
+   * Respond to an invitation (accept or decline)
+   *
+   * @param {string} invitationId - UUID of the invitation
+   * @param {string} action - 'ACCEPT' or 'DECLINE'
+   * @returns {Promise<InvitationWithExtras>} Updated invitation and its join names
+   * @throws {Error} If operation fails
+   */
+  async respondToInvitation(invitationId, action) {
+    throw new Error('Method respondToInvitation() must be implemented');
+  }
+
+  /**
+   * Withdraw a pending invitation (creator, whoever sent it or admin)
+   *
+   * @param {string} invitationId - UUID of the invitation
+   * @returns {Promise<void>}
+   * @throws {Error} If operation fails
+   */
+  async cancelInvitation(invitationId) {
+    throw new Error('Method cancelInvitation() must be implemented');
+  }
+
+  /**
+   * Get invitations sent for a competition (creator view)
+   *
+   * @param {string} competitionId - UUID of the competition
+   * @param {Object} [filters] - Optional filters
+   * @param {string} [filters.status] - Filter by status
+   * @param {number} [filters.page] - Page number
+   * @param {number} [filters.limit] - Items per page
+   * @returns {Promise<{invitations: InvitationWithExtras[], totalCount: number}>}
+   * @throws {Error} If operation fails
+   */
+  async getCompetitionInvitations(competitionId, filters = {}) {
+    throw new Error('Method getCompetitionInvitations() must be implemented');
+  }
+}
+
+export default IInvitationRepository;

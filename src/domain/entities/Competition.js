@@ -1,0 +1,376 @@
+// src/domain/entities/Competition.js
+
+import { CompetitionStatus } from '../value_objects/CompetitionStatus';
+import { tieneEquipos, TournamentType } from '../value_objects/TournamentType';
+import { RyderCupSetup } from '../value_objects/RyderCupSetup';
+import { StrokePlaySetup } from '../value_objects/StrokePlaySetup';
+import { Visibility } from '../value_objects/Visibility';
+
+/** @typedef {import('../value_objects/CompetitionId').CompetitionId} CompetitionId */
+/** @typedef {import('../value_objects/CompetitionName').CompetitionName} CompetitionName */
+/** @typedef {import('../value_objects/DateRange').DateRange} DateRange */
+/** @typedef {import('../value_objects/Location').Location} Location */
+/** @typedef {import('../value_objects/HandicapSettings').HandicapSettings} HandicapSettings */
+/** @typedef {import('../value_objects/TeamAssignment').TeamAssignment} TeamAssignment */
+
+// Cuántos inscritos admite, el mismo rango que la API (`ge=2`, `le=200` desde
+// la BE #314: antes eran 100 por un límite oculto al leer inscripciones)
+export const MIN_PLAYERS = 2;
+export const MAX_PLAYERS = 200;
+
+const comprobarCupo = (maxPlayers) => {
+  // Entero: `typeof NaN` también es 'number', y 2,5 jugadores no es un cupo
+  if (
+    !Number.isInteger(maxPlayers) ||
+    maxPlayers < MIN_PLAYERS ||
+    maxPlayers > MAX_PLAYERS
+  ) {
+    throw new Error(
+      `maxPlayers must be a number between ${MIN_PLAYERS} and ${MAX_PLAYERS}.`,
+    );
+  }
+};
+
+/**
+ * Custom error for invalid state transitions in a Competition.
+ */
+export class CompetitionStateError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'CompetitionStateError';
+  }
+}
+
+export default class Competition {
+  #id;
+  #creatorId;
+  #name;
+  #dates;
+  #location;
+  #handicapSettings;
+  #maxPlayers;
+  #visibility;
+  #ryderCup;
+  #strokePlay;
+  #tournamentType;
+  #status;
+  #createdAt;
+  #updatedAt;
+
+  /**
+   * @param {Object} props
+   * @param {CompetitionId} props.id
+   * @param {string} props.creatorId
+   * @param {CompetitionName} props.name
+   * @param {DateRange} props.dates
+   * @param {Location} props.location
+   * @param {string} [props.team1Name] - Solo para construir la pieza de la Ryder
+   * @param {string} [props.team2Name] - Solo para construir la pieza de la Ryder
+   * @param {HandicapSettings} props.handicapSettings
+   * @param {number} [props.maxPlayers=24]
+   * @param {string} [props.visibility='PRIVATE'] - PRIVATE o PUBLIC
+   * @param {TeamAssignment} [props.teamAssignment] - Solo para construir la pieza de la Ryder
+   * @param {CompetitionStatus} [props.status=CompetitionStatus.DRAFT]
+   * @param {Date} [props.createdAt]
+   * @param {Date} [props.updatedAt]
+   * @param {string} [props.tournamentType='RYDER_CUP']
+   * @param {RyderCupSetup|null} [props.ryderCup] - La pieza ya hecha; sin ella se construye con team1Name, team2Name y teamAssignment
+   * @param {StrokePlaySetup|null} [props.strokePlay] - La pieza ya hecha; sin ella, la de por defecto en un stroke play
+   */
+  constructor({
+    id,
+    creatorId,
+    name,
+    dates,
+    location,
+    team1Name,
+    team2Name,
+    handicapSettings,
+    maxPlayers = 24,
+    visibility = Visibility.PRIVATE,
+    teamAssignment,
+    status = CompetitionStatus.DRAFT,
+    createdAt = new Date(),
+    updatedAt = new Date(),
+    tournamentType = TournamentType.RYDER_CUP,
+    ryderCup,
+    strokePlay,
+  }) {
+    // Lo que solo tiene una Ryder Cup vive en su pieza, como en el backend
+    // (FE #791, BE #471): un Stableford no la tiene. Se recibe hecha
+    // (al copiarse a sí misma) o se construye con sus campos
+    this.#tournamentType = tournamentType;
+    if (ryderCup !== undefined) {
+      Competition.#comprobarLaPieza(tournamentType, ryderCup);
+      this.#ryderCup = ryderCup;
+    } else {
+      this.#ryderCup = tieneEquipos(tournamentType)
+        ? new RyderCupSetup({ team1Name, team2Name, teamAssignment })
+        : null;
+    }
+    // Y lo que solo tiene un Stableford o un Medal, en la suya (FE #824)
+    this.#strokePlay = Competition.#piezaDeStrokePlay(
+      tournamentType,
+      strokePlay,
+    );
+
+    this.#id = id;
+    this.#creatorId = creatorId;
+    this.#name = name;
+    this.#dates = dates;
+    this.#location = location;
+    this.#handicapSettings = handicapSettings;
+    this.#maxPlayers = maxPlayers;
+    this.#visibility = visibility;
+    this.#status = status;
+    this.#createdAt = createdAt;
+    this.#updatedAt = updatedAt;
+
+    // Object.freeze(this);
+  }
+
+  static create({
+    id,
+    creatorId,
+    name,
+    dates,
+    location,
+    team1Name,
+    team2Name,
+    handicapSettings,
+    maxPlayers = 24,
+    teamAssignment,
+    tournamentType = TournamentType.RYDER_CUP,
+  }) {
+    // El cupo, en el rango de la API (BE #314)
+    comprobarCupo(maxPlayers);
+    return new Competition({
+      id,
+      creatorId,
+      name,
+      dates,
+      location,
+      team1Name,
+      team2Name,
+      handicapSettings,
+      maxPlayers,
+      teamAssignment,
+      tournamentType,
+      status: CompetitionStatus.DRAFT,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
+
+  /** Qué torneo es: RYDER_CUP, STABLEFORD o MEDAL (BE #251). */
+  get tournamentType() {
+    return this.#tournamentType;
+  }
+
+  /**
+   * El tipo y la pieza tienen que cuadrar: una Ryder tiene la suya y los
+   * demás no tienen ninguna. Un tipo que todavía no conocemos se admite, sin
+   * equipos: la ficha tiene que poder enseñar uno que el backend añada mañana.
+   */
+  static #comprobarLaPieza(tournamentType, ryderCup) {
+    if (ryderCup !== null && !(ryderCup instanceof RyderCupSetup)) {
+      throw new Error('ryderCup tiene que ser una RyderCupSetup o null');
+    }
+    if (tieneEquipos(tournamentType) && ryderCup === null) {
+      throw new Error('Una Ryder Cup tiene equipos');
+    }
+    if (!tieneEquipos(tournamentType) && ryderCup !== null) {
+      throw new Error(`Un ${tournamentType} no tiene equipos`);
+    }
+  }
+
+  /**
+   * Un stroke play tiene su pieza (la de por defecto si no llega ninguna) y una
+   * Ryder no tiene ninguna, igual que al revés con los equipos.
+   */
+  static #piezaDeStrokePlay(tournamentType, strokePlay) {
+    if (
+      strokePlay !== undefined &&
+      strokePlay !== null &&
+      !(strokePlay instanceof StrokePlaySetup)
+    ) {
+      throw new Error('strokePlay tiene que ser una StrokePlaySetup o null');
+    }
+    if (tieneEquipos(tournamentType)) {
+      if (strokePlay)
+        throw new Error('Una Ryder Cup no tiene ajustes de stroke play');
+      return null;
+    }
+    return strokePlay ?? new StrokePlaySetup({});
+  }
+
+  /** Categorías, jornadas por jugador y general, o null en una Ryder. */
+  get strokePlay() {
+    return this.#strokePlay;
+  }
+
+  /** Los equipos y su reparto, o null si el torneo no los tiene. */
+  get ryderCup() {
+    return this.#ryderCup;
+  }
+
+  /** Si se juega entre dos equipos: si tiene la pieza de la Ryder. */
+  get hasTeams() {
+    return this.#ryderCup !== null;
+  }
+
+  // --- GETTERS ---
+
+  get id() {
+    return this.#id;
+  }
+  get creatorId() {
+    return this.#creatorId;
+  }
+  get name() {
+    return this.#name;
+  }
+  get dates() {
+    return this.#dates;
+  }
+  get location() {
+    return this.#location;
+  }
+  get handicapSettings() {
+    return this.#handicapSettings;
+  }
+  /** Quién puede ver el torneo y pedir sitio: PRIVATE o PUBLIC (FE #664). */
+  get visibility() {
+    return this.#visibility;
+  }
+
+  get maxPlayers() {
+    return this.#maxPlayers;
+  }
+  get status() {
+    return this.#status;
+  }
+  get createdAt() {
+    return this.#createdAt;
+  }
+  get updatedAt() {
+    return this.#updatedAt;
+  }
+
+  // --- QUERY METHODS ---
+
+  isDraft = () => this.#status.equals(CompetitionStatus.DRAFT);
+  isActive = () => this.#status.equals(CompetitionStatus.ACTIVE);
+  isClosed = () => this.#status.equals(CompetitionStatus.CLOSED);
+  isInProgress = () => this.#status.equals(CompetitionStatus.IN_PROGRESS);
+  isCompleted = () => this.#status.equals(CompetitionStatus.COMPLETED);
+  isCancelled = () => this.#status.equals(CompetitionStatus.CANCELLED);
+
+  // La regla es del valor, como en el backend: DRAFT o ACTIVE (re-auditoría Q-FE-03)
+  allowsModifications = () => this.#status.allowsModifications();
+
+  // --- COMMAND METHODS ---
+
+  activate() {
+    if (!this.#status.canTransitionTo(CompetitionStatus.ACTIVE)) {
+      throw new CompetitionStateError(
+        `Cannot activate a competition in state ${this.#status.toString()}`,
+      );
+    }
+    return this._with({
+      status: CompetitionStatus.ACTIVE,
+      updatedAt: new Date(),
+    });
+  }
+
+  closeEnrollments() {
+    if (!this.#status.canTransitionTo(CompetitionStatus.CLOSED)) {
+      throw new CompetitionStateError(
+        `Cannot close enrollments in state ${this.#status.toString()}`,
+      );
+    }
+    return this._with({
+      status: CompetitionStatus.CLOSED,
+      updatedAt: new Date(),
+    });
+  }
+
+  start() {
+    if (!this.#status.canTransitionTo(CompetitionStatus.IN_PROGRESS)) {
+      throw new CompetitionStateError(
+        `Cannot start a competition in state ${this.#status.toString()}`,
+      );
+    }
+    return this._with({
+      status: CompetitionStatus.IN_PROGRESS,
+      updatedAt: new Date(),
+    });
+  }
+
+  complete() {
+    if (!this.#status.canTransitionTo(CompetitionStatus.COMPLETED)) {
+      throw new CompetitionStateError(
+        `Cannot complete a competition in state ${this.#status.toString()}`,
+      );
+    }
+    return this._with({
+      status: CompetitionStatus.COMPLETED,
+      updatedAt: new Date(),
+    });
+  }
+
+  cancel() {
+    if (this.#status.isFinal()) {
+      throw new CompetitionStateError(
+        `Cannot cancel a competition in a final state: ${this.#status.toString()}`,
+      );
+    }
+    if (!this.#status.canTransitionTo(CompetitionStatus.CANCELLED)) {
+      // This is defensive, as isFinal() should already catch COMPLETED and CANCELLED
+      throw new CompetitionStateError(
+        `Cannot cancel from state ${this.#status.toString()}`,
+      );
+    }
+    return this._with({
+      status: CompetitionStatus.CANCELLED,
+      updatedAt: new Date(),
+    });
+  }
+
+  // --- IMMUTABILITY HELPER ---
+
+  _with(newValues) {
+    const allProps = {
+      id: this.#id,
+      creatorId: this.#creatorId,
+      name: this.#name,
+      dates: this.#dates,
+      location: this.#location,
+      handicapSettings: this.#handicapSettings,
+      maxPlayers: this.#maxPlayers,
+      visibility: this.#visibility,
+      // El tipo y la pieza viajan con la copia: sin ellos, activar un Stableford
+      // lo convertía en una Ryder sin equipos y fallaba (FE #791)
+      tournamentType: this.#tournamentType,
+      ryderCup: this.#ryderCup,
+      strokePlay: this.#strokePlay,
+      status: this.#status,
+      createdAt: this.#createdAt,
+      updatedAt: this.#updatedAt,
+      ...newValues,
+    };
+    return new Competition(allProps);
+  }
+
+  // --- STANDARD METHODS ---
+
+  toString() {
+    return `${this.#name.toString()} (${this.#status.toString()})`;
+  }
+
+  equals(other) {
+    if (this === other) return true;
+    if (!(other instanceof Competition)) return false;
+    return this.#id.equals(other.#id);
+  }
+}

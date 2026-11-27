@@ -1,0 +1,201 @@
+import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import TeamStandingsHeader from './TeamStandingsHeader';
+import MatchStatus from '../../domain/value_objects/MatchStatus';
+import { Winner } from '../../domain/value_objects/Winner';
+import { Team } from '../../domain/value_objects/Team';
+
+// Converts "5UP" at hole 14 → "5&4" (5 up with 4 to play).
+// If match ended on hole 18, keeps "2UP" format.
+const formatMatchPlayResult = (score, currentHole) => {
+  const m = score?.match(/^(\d+)UP$/);
+  if (m && currentHole && currentHole < 18) {
+    return `${m[1]}&${18 - currentHole}`;
+  }
+  return score;
+};
+
+// «vie, 25 sept» en el idioma de la app. Un idioma que Intl no conozca no
+// puede tumbar la clasificación: se enseña la fecha tal cual
+const fechaCorta = (dia, idioma) => {
+  try {
+    return new Date(`${dia}T00:00:00`).toLocaleDateString(idioma, {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
+  } catch {
+    return dia;
+  }
+};
+
+const juegaEn = (match, jugador) =>
+  [...(match.teamAPlayers ?? []), ...(match.teamBPlayers ?? [])].some(
+    (p) => p.userId === jugador,
+  );
+
+const LeaderboardView = ({ leaderboard, jugador = null }) => {
+  const { t, i18n } = useTranslation(['scoring', 'schedule']);
+  // Con ?jugador= (la posición final de un amigo en Actividad), sus partidos
+  // destacados y el primero en pantalla (release social 2, /code-review)
+  const primeroSuyoRef = useRef(null);
+  const partidos = leaderboard?.matches ?? [];
+  const enJuego = partidos.filter((m) => m.status === MatchStatus.IN_PROGRESS);
+  const acabados = partidos.filter((m) => MatchStatus.isFinished(m.status));
+  // El primero suyo en el orden en que se pintan: en juego, luego acabados
+  const primeroSuyo = jugador
+    ? [...enJuego, ...acabados].find((m) => juegaEn(m, jugador))?.matchId
+    : undefined;
+  useEffect(() => {
+    if (primeroSuyo)
+      primeroSuyoRef.current?.scrollIntoView?.({ block: 'center' });
+  }, [primeroSuyo]);
+
+  if (!leaderboard) return null;
+
+  const inProgress = enJuego;
+  const completed = acabados;
+
+  const renderMatch = (match) => {
+    const teamANames = (match.teamAPlayers ?? [])
+      .map((p) => p.userName)
+      .join(' / ');
+    const teamBNames = (match.teamBPlayers ?? [])
+      .map((p) => p.userName)
+      .join(' / ');
+    const teamAWon = match.result?.winner === Winner.A;
+    const teamBWon = match.result?.winner === Winner.B;
+    const isTeamALeading = match.leadingTeam === Team.A;
+    const isTeamBLeading = match.leadingTeam === Team.B;
+    const teamAHighlighted = isTeamALeading || teamAWon;
+    const teamBHighlighted = isTeamBLeading || teamBWon;
+    const suyo = !!jugador && juegaEn(match, jugador);
+
+    return (
+      <div
+        key={match.matchId}
+        ref={match.matchId === primeroSuyo ? primeroSuyoRef : undefined}
+        data-testid={`leaderboard-match-${match.matchId}`}
+        data-destacado={suyo ? 'true' : undefined}
+        className={`bg-fondo rounded-lg border p-4 ${suyo ? 'border-tinta ring-2 ring-tinta/30' : 'border-linea'}`}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <span className="min-w-0 text-xs font-medium text-tinta-suave">
+            {/* Con varias sesiones el número se repite: dos «#2» seguidos no
+                decían cuál era cuál (FE #738) */}
+            {match.roundDate && match.sessionType && (
+              <span data-testid={`sesion-${match.matchId}`}>
+                {fechaCorta(match.roundDate, i18n.language)} ·{' '}
+                {t(`sessions.${match.sessionType}`, { ns: 'schedule' })} ·{' '}
+              </span>
+            )}
+            #{match.matchNumber}
+            {/* Uno sin traducir sale tal cual, no «formats.X» (`/code-review`) */}
+            {match.matchFormat &&
+              ` - ${t(`formats.${match.matchFormat}`, { ns: 'schedule', defaultValue: match.matchFormat })}`}
+          </span>
+          {match.status === MatchStatus.IN_PROGRESS && match.currentHole && (
+            <span className="text-xs text-tinta-suave">
+              {t('leaderboard.hole')} {match.currentHole}
+            </span>
+          )}
+        </div>
+        <div className="text-center space-y-1">
+          <p
+            className={`text-sm ${teamAHighlighted ? 'font-bold text-tinta' : 'text-tinta-suave'}`}
+          >
+            {teamANames}
+          </p>
+          <div className="py-1">
+            {match.standing ? (
+              <span className="text-lg font-bold text-tinta">
+                {match.standing === 'AS'
+                  ? t('leaderboard.allSquare')
+                  : match.standing}
+              </span>
+            ) : match.result ? (
+              <span className="text-lg font-bold text-tinta">
+                {/* Walkover y concedido se reconocen por el estado, no por el tanteo (E1-8) */}
+                {match.status === MatchStatus.WALKOVER
+                  ? t('leaderboard.walkover', {
+                      team:
+                        match.result.winner === Winner.A
+                          ? leaderboard.teamAName
+                          : leaderboard.teamBName,
+                    })
+                  : match.status === MatchStatus.CONCEDED
+                    ? t('leaderboard.conceded', {
+                        team:
+                          match.result.winner === Winner.A
+                            ? leaderboard.teamAName
+                            : leaderboard.teamBName,
+                      })
+                    : match.result.winner === Winner.HALVED
+                      ? t('leaderboard.allSquare')
+                      : match.result.winner
+                        ? t('leaderboard.wins', {
+                            team:
+                              match.result.winner === Winner.A
+                                ? leaderboard.teamAName
+                                : leaderboard.teamBName,
+                            score: formatMatchPlayResult(
+                              match.result.score,
+                              match.currentHole,
+                            ),
+                          })
+                        : formatMatchPlayResult(
+                            match.result.score,
+                            match.currentHole,
+                          )}
+              </span>
+            ) : (
+              <span className="text-sm text-tinta-suave">-</span>
+            )}
+          </div>
+          <p
+            className={`text-sm ${teamBHighlighted ? 'font-bold text-tinta' : 'text-tinta-suave'}`}
+          >
+            {teamBNames}
+          </p>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div data-testid="leaderboard-view" className="space-y-6">
+      <TeamStandingsHeader
+        teamAName={leaderboard.teamAName}
+        teamBName={leaderboard.teamBName}
+        teamAPoints={leaderboard.teamAPoints}
+        teamBPoints={leaderboard.teamBPoints}
+      />
+
+      {inProgress.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-tinta mb-2">
+            {t('leaderboard.inProgress')}
+          </h3>
+          <div className="space-y-2">{inProgress.map(renderMatch)}</div>
+        </div>
+      )}
+
+      {completed.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-tinta mb-2">
+            {t('leaderboard.completed')}
+          </h3>
+          <div className="space-y-2">{completed.map(renderMatch)}</div>
+        </div>
+      )}
+
+      {inProgress.length === 0 && completed.length === 0 && (
+        <p className="text-center text-tinta-suave py-4">
+          {t('leaderboard.noMatches')}
+        </p>
+      )}
+    </div>
+  );
+};
+
+export default LeaderboardView;

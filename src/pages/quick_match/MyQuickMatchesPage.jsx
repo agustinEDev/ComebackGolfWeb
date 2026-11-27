@@ -1,0 +1,610 @@
+import { AL_PASAR } from '../../components/ui/clasesDeComportamiento';
+import { useState, useEffect } from 'react';
+import { instanteEnTexto } from '../../utils/instanteDeLaApi';
+import { useNavigate } from 'react-router';
+import { Zap, Trash2, Eye, EyeOff } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import HeaderAuth from '../../components/layout/HeaderAuth';
+import { useAuth } from '../../hooks/useAuth';
+import RepetirPartida from '../../components/quick_match/RepetirPartida';
+import {
+  listMyQuickMatchesUseCase,
+  getQuickMatchUseCase,
+  getGolfCourseUseCase,
+  hideQuickMatchUseCase,
+  excludeQuickMatchFromStatsUseCase,
+  includeQuickMatchInStatsUseCase,
+} from '../../composition';
+import ConfirmModal from '../../components/modals/ConfirmModal';
+import PersonalRoundCalculator from '../../domain/services/PersonalRoundCalculator';
+import customToast from '../../utils/toast';
+import {
+  laUltimaLista,
+  olvida,
+  olvidaLoDeEstaCuenta,
+  recuerdaLaLista,
+} from '../../services/loUltimoConocido';
+
+import BlockLoader from '../../components/ui/BlockLoader';
+import { esFalloDeRed } from '../../utils/sinCobertura';
+import { recorreConTope } from '../../utils/recorreConTope';
+import { PANTALLA_MENOS_BARRA_INFERIOR } from '../../utils/barraInferior';
+import { mensajeDelError } from '../../utils/mensajeDelError';
+import QuickMatchStatus from '../../domain/value_objects/QuickMatchStatus';
+import { marcaDeAgua } from '../../utils/marcaDeAgua';
+import DibujoDeMarca from '../../components/ui/DibujoDeMarca';
+
+// Cuántos detalles de partida terminada se piden a la vez (FE #418)
+const DETALLES_A_LA_VEZ = 5;
+
+const STATUS_STYLES = {
+  [QuickMatchStatus.PENDING]: 'border border-current text-aviso',
+  [QuickMatchStatus.IN_PROGRESS]: 'border border-current text-exito',
+  [QuickMatchStatus.COMPLETED]: 'border border-current text-tinta',
+  [QuickMatchStatus.CANCELLED]: 'border border-current text-error',
+};
+
+const MyQuickMatchesPage = () => {
+  const navigate = useNavigate();
+  const { t, i18n } = useTranslation('quickMatch');
+  const { user, loading: isLoadingUser } = useAuth();
+
+  const [quickMatches, setQuickMatches] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  // Lo que falla SIN respuesta es falta de cobertura; un fallo del código
+  // —un mapeador que revienta con un dato inesperado— también llega sin
+  // estado, y decir «sin conexión» ahí esconde un defecto de verdad
+  const [sinCobertura, setSinCobertura] = useState(false);
+  const [resultsByMatchId, setResultsByMatchId] = useState({});
+  // Un Set y no un único id: si se ocultan dos partidas seguidas, la primera en
+  // responder no debe reactivar el botón de la que sigue en vuelo.
+  const [hidingIds, setHidingIds] = useState(() => new Set());
+  const [togglingIds, setTogglingIds] = useState(() => new Set());
+  // La marca de "no cuenta" se guarda APARTE de `quickMatches` a propósito. Si
+  // se actualizara dentro de la lista, cada pulsación del ojo crearía un array
+  // nuevo, y de ese array depende el efecto que carga el resultado de cada
+  // partida: un toque disparaba dos peticiones por cada partida terminada
+  // —justo el aluvión de la FE #418, pero provocado a mano—.
+  const [excludedIds, setExcludedIds] = useState(() => new Set());
+  // La papelera es irreversible desde la aplicación, así que pregunta antes.
+  // El ojo no: se deshace pulsándolo otra vez, y un modal ahí solo estorbaría.
+  const [matchPendingDeletion, setMatchPendingDeletion] = useState(null);
+
+  // Donde aplica el OJO: solo una partida terminada se puede marcar, el
+  // servidor rechaza el resto con un 409. Ojo con el nombre —no dice si la
+  // partida cuenta: una terminada y excluida es elegible y no cuenta—.
+  const esElegibleParaElOjo = (qm) => qm.status === QuickMatchStatus.COMPLETED;
+  // Lo que se puede tirar a la papelera: lo que se SABE acabado. La papelera
+  // puede ser definitiva, así que un estado que no se conoce no la lleva
+  const sePuedeTirar = (qm) =>
+    qm.status === QuickMatchStatus.COMPLETED ||
+    qm.status === QuickMatchStatus.CANCELLED;
+
+  // Y la marca de «no cuenta»: la etiqueta y el gris de la fila van SIEMPRE
+  // juntos —una tarjeta apagada sin nada que lo explique es lo peor de los dos
+  // mundos— asi que la regla vive en un solo sitio. Es mas amplia que la del
+  // ojo a proposito: una marca heredada sobre una partida a medias si dice
+  // algo, porque cuando termine no contara. En una cancelada no, que no contara
+  // nunca.
+  const llevaMarcaDeNoCuenta = (qm) =>
+    qm.status !== QuickMatchStatus.CANCELLED && excludedIds.has(qm.id);
+
+  // El ojo: la partida deja de contar en MIS estadísticas, pero sigue en la
+  // lista. Es lo que se puede deshacer; la papelera, no (y cuando la han
+  // tirado todos, la partida se borra de verdad: BE #939).
+  const handleToggleStats = async (quickMatchId) => {
+    const id = quickMatchId;
+    const estabaExcluida = excludedIds.has(id);
+    setTogglingIds((prev) => new Set(prev).add(id));
+    try {
+      const updated = estabaExcluida
+        ? await includeQuickMatchInStatsUseCase.execute(id)
+        : await excludeQuickMatchFromStatsUseCase.execute(id);
+      setExcludedIds((prev) => {
+        const next = new Set(prev);
+        if (updated.excludedFromStats) next.add(id);
+        else next.delete(id);
+        return next;
+      });
+      customToast.success(
+        updated.excludedFromStats
+          ? t('history.excluded')
+          : t('history.included'),
+      );
+    } catch {
+      customToast.error(t('history.statsToggleError'));
+    } finally {
+      setTogglingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  // Quitar la partida del historial y de la Actividad propios, sin vuelta
+  // atrás. Los demás la siguen viendo hasta que la tiren también; cuando la han
+  // tirado todos, el servidor la borra de verdad (BE #939).
+  const handleConfirmHide = async () => {
+    if (!matchPendingDeletion) return;
+    const quickMatchId = matchPendingDeletion.id;
+    // El aviso se cierra DESPUÉS, no antes: cerrarlo al confirmar dejaba la
+    // petición en vuelo sin nada en pantalla que lo dijera, y con la lista
+    // intacta. Con una red lenta parecía que el botón no había hecho nada.
+    await handleHide(quickMatchId);
+    setMatchPendingDeletion(null);
+  };
+
+  // Un 404 solo es «ya no existe» si lo dice la API con su mensaje. El de un
+  // intermediario, con cuerpo o sin él, es un fallo como otro: dar por quitada
+  // —y olvidar su copia— una partida que el servidor no ha tocado sería mentir
+  const laApiDiceQueYaNoExiste = (err) =>
+    err?.status === 404 &&
+    String(err.message ?? '').startsWith('Quick match not found');
+
+  const handleHide = async (quickMatchId) => {
+    setHidingIds((prev) => new Set(prev).add(quickMatchId));
+    const fueraDeLaLista = () => {
+      setQuickMatches((prev) => {
+        const quedan = prev.filter((qm) => qm.id !== quickMatchId);
+        // También de lo guardado: la papelera la quita de la lista «para
+        // siempre», y sin esto volvía a salir —y a poder pulsarse— la primera
+        // vez que se abriera la pantalla sin cobertura
+        recuerdaLaLista(quedan);
+        return quedan;
+      });
+      // Y su copia entera (nombres, hándicaps y golpes de todos): «no se puede
+      // recuperar» tampoco abriendo su enlace sin cobertura
+      olvida(quickMatchId);
+      customToast.success(t('history.hidden'));
+    };
+    try {
+      await hideQuickMatchUseCase.execute(quickMatchId);
+      fueraDeLaLista();
+    } catch (err) {
+      if (laApiDiceQueYaNoExiste(err)) {
+        // La borró de verdad el último que la tiró. Para quien la quita es
+        // lo mismo que haberla quitado
+        fueraDeLaLista();
+      } else if (err?.status === 409) {
+        customToast.error(t('history.hideNotFinished'));
+      } else {
+        customToast.error(t('history.hideError'));
+      }
+    } finally {
+      setHidingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(quickMatchId);
+        return next;
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (!user) return;
+
+    // La respuesta puede llegar DESPUÉS de cerrar sesión, y entonces volvería a
+    // guardar las partidas de la cuenta anterior —justo lo que el cierre acaba
+    // de borrar— dejándolas para la siguiente carga sin cobertura
+    let vigente = true;
+
+    listMyQuickMatchesUseCase
+      .execute({ page: 1, limit: 50 })
+      .then((result) => {
+        if (!vigente) return;
+        setQuickMatches(result.quickMatches);
+        setExcludedIds(
+          new Set(
+            result.quickMatches
+              .filter((qm) => qm.excludedFromStats)
+              .map((qm) => qm.id),
+          ),
+        );
+        // Para poder LLEGAR a una partida sin cobertura: la pantalla de
+        // anotación sabe pintarse sola, pero hay que poder pulsar en ella
+        recuerdaLaLista(result.quickMatches);
+        setSinCobertura(false);
+      })
+      .catch((err) => {
+        if (!vigente) return;
+        // El 401 y el 403 desmienten: no hemos entrado, o esto no es nuestro.
+        // Lo demás —sin respuesta, o el backend caído— no dice nada de la
+        // lista, y sin ella el jugador se queda sin puerta de entrada
+        const estado = err?.status ?? err?.response?.status;
+        // Y además se borra lo guardado: no usarlo esta vez no basta, porque
+        // seguía ahí para el siguiente fallo de red.
+        //
+        // Con `err.status` a secas, que es el de ESTA petición: cuando el
+        // interceptor no consigue refrescar, propaga su propio error con
+        // `.response` puesta a la respuesta de `/auth/refresh-token`. Un 403
+        // ahí —un proxy delante de la API— es un caso en el que el interceptor
+        // decide a propósito NO tirar la sesión (FE #514), y borrar aquí se
+        // llevaría por delante la partida que se está jugando, sin vuelta atrás
+        // y sin cobertura con la que recuperarla
+        if (err?.status === 401 || err?.status === 403) olvidaLoDeEstaCuenta();
+        const guardadas =
+          estado === 401 || estado === 403 ? null : laUltimaLista();
+        setSinCobertura(esFalloDeRed(err));
+        if (guardadas?.length) {
+          setQuickMatches(guardadas);
+          setExcludedIds(
+            new Set(
+              guardadas.filter((qm) => qm.excludedFromStats).map((qm) => qm.id),
+            ),
+          );
+        }
+        setError(err);
+      })
+      .finally(() => {
+        if (vigente) setIsLoading(false);
+      });
+
+    return () => {
+      vigente = false;
+    };
+  }, [user]);
+
+  // For each finished quick match, compute the current user's own result
+  // (net-to-par + gross strokes) shown on its card. The list endpoint doesn't
+  // carry hole scores, so this fetches match detail + course per finished
+  // match (course lookups deduplicated), same approach the scoring page uses.
+  useEffect(() => {
+    const completedMatches = quickMatches.filter(
+      (qm) => qm.status === QuickMatchStatus.COMPLETED,
+    );
+    if (!user || completedMatches.length === 0) return;
+
+    let cancelled = false;
+    const courseCache = new Map();
+    const loadCourse = (golfCourseId) => {
+      if (!courseCache.has(golfCourseId)) {
+        courseCache.set(
+          golfCourseId,
+          getGolfCourseUseCase.execute(golfCourseId),
+        );
+      }
+      return courseCache.get(golfCourseId);
+    };
+
+    const loadResult = async (qm) => {
+      try {
+        const [detail, course] = await Promise.all([
+          getQuickMatchUseCase.execute(qm.id),
+          loadCourse(qm.golfCourseId),
+        ]);
+        const myParticipant = detail.participants.find(
+          (p) => p.userId === user.id,
+        );
+        if (!myParticipant) return null;
+
+        // «Tu vuelta», la real de la partida: la misma que al anotar (Agustín,
+        // 24 oct 2026). La clasificación de la partida sigue con sus dos lecturas
+        return PersonalRoundCalculator.vueltaDelHistorial({
+          me: myParticipant,
+          participants: detail.participants ?? [],
+          holes: course.holes || [],
+          holeScores: detail.holeScores || [],
+          tees: course.tees || [],
+          participantStrokes: detail.participantStrokes ?? [],
+          matchFormat: qm.matchFormat,
+          allowancePercentage: detail.effectiveAllowance,
+          playMode: detail.playMode,
+        });
+      } catch {
+        return null;
+      }
+    };
+
+    // De cinco en cinco y no todas a la vez: con 30 terminadas salían 30
+    // detalles de golpe (FE #418). Cada tarjeta se pinta en cuanto llega el
+    // suyo, y al salir de la página no se piden las que faltaban
+    recorreConTope(
+      completedMatches,
+      DETALLES_A_LA_VEZ,
+      async (qm) => {
+        const result = await loadResult(qm);
+        if (cancelled) return;
+        // También el `null` de una que falla: si en una recarga falla la que
+        // ya tenía resultado, lo pierde, como antes; no se queda el viejo
+        setResultsByMatchId((prev) => ({ ...prev, [qm.id]: result }));
+      },
+      { sigue: () => !cancelled },
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [quickMatches, user]);
+
+  if (isLoadingUser || isLoading) {
+    // La cabecera se queda puesta durante la espera: aparecer de golpe al
+    // terminar es un salto, y de eso va justamente FE #495
+    return (
+      <div
+        className={`${PANTALLA_MENOS_BARRA_INFERIOR} bg-fondo ${marcaDeAgua('bola-tee')}`}
+      >
+        <HeaderAuth user={user} />
+        <BlockLoader />
+      </div>
+    );
+  }
+
+  // Sin ninguna: su dibujo y sin la marca de agua de detrás, para no tener dos
+  // dibujos (Agustín, 27 nov 2026). Vacía porque no se ha podido preguntar NO
+  // es «no tienes ninguna»: entonces ni dibujo ni se quita la marca (revisión)
+  const sinPartidas = quickMatches.length === 0 && !error && !sinCobertura;
+
+  return (
+    <div
+      className={`${PANTALLA_MENOS_BARRA_INFERIOR} bg-fondo ${marcaDeAgua(sinPartidas ? null : 'bola-tee')}`}
+    >
+      <HeaderAuth user={user} />
+
+      <div className="max-w-2xl mx-auto px-4 py-6">
+        <button
+          onClick={() => navigate('/dashboard')}
+          className="hidden md:inline-flex items-center gap-1 text-sm text-tinta-suave hover:text-tinta mb-3"
+        >
+          &larr; {t('scoring.backToDashboard')}
+        </button>
+
+        <h1 className="hidden md:block text-xl font-bold text-tinta mb-4">
+          {t('history.title')}
+        </h1>
+
+        {/* Quedarse sin cobertura no es un error, y aquí además puede haber
+            partidas en pantalla —las últimas que se vieron—: llamarlo error
+            sobre una lista que se está usando es contradecirse */}
+        {sinCobertura ? (
+          <p
+            className="text-sm text-aviso mb-4"
+            data-testid="quick-matches-sin-conexion"
+          >
+            {t('scoring.offline.noSeActualiza')}
+          </p>
+        ) : (
+          error && (
+            <p className="text-sm text-error mb-4">
+              {mensajeDelError(error, t('scoring.errors.generic'))}
+            </p>
+          )
+        )}
+
+        {/* Sin poder preguntar y nada guardado, solo el aviso de arriba */}
+        {sinPartidas ? (
+          <div className="py-10 text-center">
+            <DibujoDeMarca
+              nombre="bola"
+              className="mx-auto mb-3 h-32 w-32 text-tinta"
+            />
+            <p className="text-sm text-tinta-suave">{t('history.empty')}</p>
+          </div>
+        ) : quickMatches.length === 0 ? null : (
+          <ul className="space-y-2" data-testid="quick-match-history-list">
+            {quickMatches.map((qm) => (
+              // El botón de quitar es hermano del de navegar, no hijo: anidar
+              // botones es HTML inválido y rompe la navegación por teclado.
+              // Una partida que no cuenta NO se atenúa: esto se usa al sol, y
+              // el texto apagado baja del contraste legible justo donde peor se
+              // lee. Se distingue por el fondo, la franja de la izquierda y,
+              // sobre todo, por la etiqueta, que es lo único que también
+              // entiende un lector de pantalla.
+              <li
+                key={qm.id}
+                data-testid={`quick-match-row-${qm.id}`}
+                className={`relative border rounded-tarjeta ${
+                  llevaMarcaDeNoCuenta(qm)
+                    ? 'bg-fondo border-linea border-l-4 border-l-borde'
+                    : 'bg-tarjeta border-contorno'
+                }`}
+              >
+                {/* Capa clicable que cubre la tarjeta entera en vez de envolver
+                    el contenido: envolviendolo, los botones quedaban dentro de
+                    un boton —HTML invalido— o fuera de la zona pulsable. Lleva
+                    su propio nombre accesible porque no contiene el texto. */}
+                <button
+                  onClick={() => navigate(`/quick-matches/${qm.id}/scoring`)}
+                  data-testid={`quick-match-history-item-${qm.id}`}
+                  aria-label={
+                    qm.name ||
+                    t(
+                      `history.format.${qm.matchFormat ?? qm.scoringFormat}`,
+                      qm.matchFormat ?? qm.scoringFormat,
+                    )
+                  }
+                  className="absolute inset-0 z-0 rounded-tarjeta"
+                />
+
+                <div className="relative z-10 pointer-events-none flex items-start gap-3 p-4">
+                  <div className="p-2 border border-linea bg-fondo rounded-lg flex-shrink-0">
+                    <Zap className="w-4 h-4 text-tinta" />
+                  </div>
+
+                  {/* Todo el texto en una columna: asi la linea de datos de
+                      abajo arranca en la misma vertical que el nombre y la
+                      fecha, y no debajo del icono. */}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-tinta truncate">
+                      {qm.name ||
+                        t(
+                          `history.format.${qm.matchFormat ?? qm.scoringFormat}`,
+                          qm.matchFormat ?? qm.scoringFormat,
+                        )}
+                    </p>
+                    <p className="text-xs text-tinta-suave truncate">
+                      {qm.name &&
+                        `${t(`history.format.${qm.matchFormat ?? qm.scoringFormat}`, qm.matchFormat ?? qm.scoringFormat)} · `}
+                      {/* Cuando se jugó (H5); con un backend viejo, cuando se creó */}
+                      {instanteEnTexto(
+                        qm.playedAt ?? qm.createdAt,
+                        i18n.language,
+                        { day: 'numeric', month: 'numeric', year: 'numeric' },
+                      )}
+                    </p>
+
+                    {/* En todo menos en las canceladas: ver `llevaMarcaDeNoCuenta` */}
+                    {llevaMarcaDeNoCuenta(qm) && (
+                      <span
+                        data-testid={`quick-match-excluded-badge-${qm.id}`}
+                        className="inline-block mt-1 px-2 py-0.5 rounded-full border border-linea text-tinta text-[10px] font-semibold whitespace-nowrap"
+                      >
+                        {t('history.excludedBadge')}
+                      </span>
+                    )}
+
+                    {/* La linea de las cifras, arrancando en la misma vertical
+                        que el nombre. Solo existe si hay resultado: una partida
+                        sin el no reserva la linea, y la tarjeta no queda hueca. */}
+                    {resultsByMatchId[qm.id] && (
+                      <span
+                        className="mt-2 flex items-baseline flex-wrap gap-x-2 gap-y-1"
+                        data-testid={`quick-match-result-${qm.id}`}
+                      >
+                        {/* En foursomes no hay vuelta propia —una sola bola a
+                              golpes alternos—, asi que el calculador la deja
+                              en null y los golpes del equipo pasan a ser el
+                              titular, con su etiqueta detras. */}
+                        {resultsByMatchId[qm.id].personalToPar ? (
+                          <>
+                            <span className="text-sm font-bold text-tinta">
+                              {resultsByMatchId[qm.id].personalToPar}
+                            </span>
+                            <span className="text-xs text-tinta-suave">
+                              {t('history.grossStrokes', {
+                                count: resultsByMatchId[qm.id].totalStrokes,
+                              })}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-sm font-bold text-tinta">
+                              {t('history.grossStrokes', {
+                                count: resultsByMatchId[qm.id].totalStrokes,
+                              })}
+                            </span>
+                            <span className="text-xs text-tinta-suave">
+                              {t('history.teamTotal')}
+                            </span>
+                          </>
+                        )}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* La columna derecha: los botones arriba y el estado justo
+                      debajo, los dos pegados al borde. Asi cada cosa cae en su
+                      vertical en todas las tarjetas. */}
+                  {/* `flex-col-reverse`: el estado va PRIMERO en el DOM y se
+                      pinta debajo. Con el orden natural, un lector de pantalla
+                      ofrecia «quitar de tus estadisticas» y «quitar del
+                      historial» antes de decir si la partida esta en curso,
+                      terminada o cancelada, que es justo lo que hace falta
+                      saber para decidir si pulsarlos. */}
+                  <div className="flex flex-col-reverse items-end gap-1 flex-shrink-0">
+                    <span
+                      className={`whitespace-nowrap text-xs font-semibold px-2 py-1 rounded-full ${STATUS_STYLES[qm.status] ?? 'border border-current text-tinta'}`}
+                    >
+                      {t(`history.status.${qm.status}`, qm.status)}
+                    </span>
+                    <div className="pointer-events-auto flex items-center gap-2">
+                      {/* Una que ya acabó se puede repetir (FE #1021) */}
+                      {(qm.status === QuickMatchStatus.COMPLETED ||
+                        qm.status === QuickMatchStatus.CANCELLED) &&
+                        user && <RepetirPartida partida={qm} usuario={user} />}
+                      {/* El ojo solo en las terminadas: una partida a medias no
+                          cuenta todavia en ninguna estadistica, asi que el
+                          control no diria nada —y el servidor lo rechaza con un
+                          409—. */}
+                      {esElegibleParaElOjo(qm) && (
+                        <button
+                          onClick={() => handleToggleStats(qm.id)}
+                          disabled={togglingIds.has(qm.id)}
+                          aria-label={
+                            excludedIds.has(qm.id)
+                              ? t('history.excludedFromStats')
+                              : t('history.countsInStats')
+                          }
+                          title={
+                            excludedIds.has(qm.id)
+                              ? t('history.excludedFromStats')
+                              : t('history.countsInStats')
+                          }
+                          aria-pressed={excludedIds.has(qm.id)}
+                          data-testid={`quick-match-stats-toggle-${qm.id}`}
+                          className={`p-3 rounded-lg flex items-center justify-center text-tinta-suave disabled:opacity-40 ${AL_PASAR}`}
+                        >
+                          {excludedIds.has(qm.id) ? (
+                            <EyeOff className="w-4 h-4" />
+                          ) : (
+                            <Eye className="w-4 h-4" />
+                          )}
+                        </button>
+                      )}
+                      {/* La papelera, solo en las acabadas (BE #939): puede
+                          ser el borrado definitivo, cuando la han tirado todos,
+                          y el servidor rechaza con 409 la de una partida viva.
+                          Una viva la cancela su creador desde dentro; los
+                          demás esperan a que se cierre sola (BE #652). */}
+                      {sePuedeTirar(qm) && (
+                        <button
+                          onClick={() => setMatchPendingDeletion(qm)}
+                          disabled={hidingIds.has(qm.id)}
+                          aria-label={t('history.hide')}
+                          title={t('history.hide')}
+                          data-testid={`quick-match-hide-${qm.id}`}
+                          className="p-3 rounded-lg flex items-center justify-center text-tinta-suave hover:text-error hover:bg-tarjeta transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-tinta-suave"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* La papelera no se puede deshacer desde la aplicación, así que se
+          pregunta antes y se dice de qué va: el motivo más probable para
+          pulsarla —que la partida no cuente— tiene su propio botón, que sí se
+          deshace. Por eso el aviso lo menciona en vez de dejar al usuario
+          descubrirlo cuando ya no hay vuelta. */}
+      <ConfirmModal
+        isOpen={matchPendingDeletion !== null}
+        title={t('history.deleteTitle')}
+        // El texto de siempre habla de estadisticas y remite al ojo. Las dos
+        // cosas son falsas en una cancelada: no cuenta en ninguna estadistica,
+        // y ahi no hay ojo al que mandar a nadie.
+        message={(() => {
+          const pendiente = matchPendingDeletion;
+          // El aviso de siempre habla de estadisticas y remite al ojo, y eso
+          // solo es cierto en una partida terminada que todavia cuenta. Fuera
+          // de ahi: una cancelada no cuenta en ninguna, y a quien ya uso el
+          // ojo no hay que mandarle a usarlo otra vez.
+          if (
+            pendiente &&
+            esElegibleParaElOjo(pendiente) &&
+            !excludedIds.has(pendiente.id)
+          ) {
+            return `${t('history.deleteBody')} ${t('history.deleteHint')}`;
+          }
+          return t('history.deleteBodyPlain');
+        })()}
+        confirmText={t('history.deleteConfirm')}
+        cancelText={t('history.deleteCancel')}
+        isDestructive
+        isLoading={
+          matchPendingDeletion !== null &&
+          hidingIds.has(matchPendingDeletion.id)
+        }
+        onConfirm={handleConfirmHide}
+        onCancel={() => setMatchPendingDeletion(null)}
+      />
+    </div>
+  );
+};
+
+export default MyQuickMatchesPage;

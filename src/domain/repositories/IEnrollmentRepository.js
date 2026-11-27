@@ -1,0 +1,179 @@
+/** @typedef {import('../entities/Enrollment').default} Enrollment */
+/**
+ * La respuesta de la API en camelCase, tal cual llegó: lo que falta,
+ * undefined. `EnrollmentAssembler` lee de ella lo que la entidad no guarda
+ * (user con sus nombres, userName, userEmail, userHandicap, fixedHandicap,
+ * category).
+ * @typedef {Object<string, any>} EnrollmentExtras
+ */
+/** @typedef {{entity: Enrollment, extras: EnrollmentExtras|null}} EnrollmentWithExtras */
+
+/**
+ * Interface: IEnrollmentRepository
+ *
+ * Define el contrato de persistencia para Enrollments.
+ * Se inspira en el IEnrollmentRepository del backend, pero solo declara lo que el
+ * front usa (por ejemplo, no tiene find_by_id).
+ *
+ * Responsabilidades:
+ * - Definir operaciones de persistencia (CRUD + queries)
+ * - Establecer firmas de métodos (parámetros y retornos)
+ * - NO contiene implementación (eso va en Infrastructure Layer)
+ *
+ * Principio de Inversión de Dependencias:
+ * - El Domain Layer define el contrato (esta interfaz)
+ * - El Infrastructure Layer implementa el contrato (ApiEnrollmentRepository)
+ * - Los Use Cases dependen de la interfaz, NO de la implementación
+ *
+ * Implementación: ApiEnrollmentRepository (REST API con fetch). Los tests usan
+ * dobles con vi.fn().
+ */
+class IEnrollmentRepository {
+  /**
+   * Guardar un nuevo enrollment o actualizar uno existente
+   *
+   * @param {Enrollment} enrollment - Entidad a persistir
+   * @returns {Promise<Enrollment>} Enrollment guardado (puede incluir campos adicionales del backend)
+   * @throws {Error} Si falla la operación
+   */
+  async save(enrollment) {
+    throw new Error('Method save() must be implemented');
+  }
+
+  /**
+   * Buscar enrollments de una competición
+   *
+   * Equivalente a backend: enrollment_repository.find_by_competition()
+   *
+   * @param {string} competitionId - UUID de la competición
+   * @param {Object} [filters] - Filtros opcionales
+   * @param {string} [filters.status] - Filtrar por estado (ej: "APPROVED", "REQUESTED")
+   * @param {string} [filters.userId] - Filtrar por usuario específico
+   * @param {string} [filters.teamId] - Filtrar por equipo específico
+   * @returns {Promise<EnrollmentWithExtras[]>} Lista
+   *   de enrollments, cada uno con los campos extra de la respuesta (el usuario,
+   *   el hándicap fijado, la categoría) en camelCase, que pinta la lista
+   * @throws {Error} Si falla la operación
+   */
+  async findByCompetition(competitionId, filters = {}) {
+    throw new Error('Method findByCompetition() must be implemented');
+  }
+
+  /**
+   * Buscar enrollment específico de un usuario en una competición
+   *
+   * Útil para verificar si un usuario ya está inscrito.
+   *
+   * @param {string} competitionId - UUID de la competición
+   * @param {string} userId - UUID del usuario
+   * @returns {Promise<Enrollment|null>} Enrollment encontrado o null
+   * @throws {Error} Si falla la operación
+   */
+  async findByCompetitionAndUser(competitionId, userId) {
+    throw new Error('Method findByCompetitionAndUser() must be implemented');
+  }
+
+  /**
+   * Buscar enrollments de un usuario (todas sus inscripciones)
+   *
+   * @param {string} userId - UUID del usuario
+   * @param {Object} [filters] - Filtros opcionales
+   * @param {string} [filters.status] - Filtrar por estado
+   * @returns {Promise<Enrollment[]>} Lista de enrollments del usuario
+   * @throws {Error} Si falla la operación
+   */
+  async findByUser(userId, filters = {}) {
+    throw new Error('Method findByUser() must be implemented');
+  }
+
+  /**
+   * Apuntarse a una pública: se entra directamente, con la franja o su espera
+   * (release social 3, 28 oct 2026)
+   *
+   * @param {string} competitionId - UUID de la competición
+   * @param {Object} data - Datos adicionales (opcional)
+   * @returns {Promise<{enrollment: Enrollment, roundId: string|null, waiting: boolean}>}
+   * @throws {Error} Si falla la operación
+   */
+  async requestEnrollment(competitionId, data = {}) {
+    throw new Error('Method requestEnrollment() must be implemented');
+  }
+
+  /**
+   * Aprobar enrollment (transición REQUESTED/INVITED → APPROVED)
+   *
+   * @param {string} competitionId - UUID de la competición
+   * @param {string} enrollmentId - UUID del enrollment
+   * @param {string|null} teamId - ID del equipo a asignar (opcional)
+   * @returns {Promise<Enrollment>} Enrollment aprobado
+   * @throws {Error} Si falla la operación
+   */
+  async approve(competitionId, enrollmentId, teamId = null) {
+    throw new Error('Method approve() must be implemented');
+  }
+
+  /**
+   * Rechazar enrollment (transición REQUESTED/INVITED → REJECTED)
+   *
+   * @param {string} competitionId - UUID de la competición
+   * @param {string} enrollmentId - UUID del enrollment
+   * @returns {Promise<Enrollment>} Enrollment rechazado
+   * @throws {Error} Si falla la operación
+   */
+  async reject(competitionId, enrollmentId) {
+    throw new Error('Method reject() must be implemented');
+  }
+
+  /**
+   * Establecer handicap personalizado para enrollment
+   *
+   * @param {string} competitionId - UUID de la competición
+   * @param {string} enrollmentId - UUID del enrollment
+   * @param {number} customHandicap - Valor del handicap personalizado (-10.0 a 54.0)
+   * @returns {Promise<Enrollment>} Enrollment con handicap actualizado
+   * @throws {Error} Si falla la operación
+   */
+  async setCustomHandicap(competitionId, enrollmentId, customHandicap) {
+    throw new Error('Method setCustomHandicap() must be implemented');
+  }
+
+  /**
+   * Eliminar handicap personalizado (vuelve a usarse el hándicap oficial del jugador)
+   *
+   * @param {string} competitionId - UUID de la competición
+   * @param {string} enrollmentId - UUID del enrollment
+   * @returns {Promise<Enrollment>} Enrollment sin handicap personalizado
+   * @throws {Error} Si falla la operación
+   */
+  async removeCustomHandicap(competitionId, enrollmentId) {
+    throw new Error('Method removeCustomHandicap() must be implemented');
+  }
+
+  /**
+   * Elegir si la inscripción muestra el nombre legal del jugador o su alias
+   *
+   * Solo el dueño de la inscripción puede cambiarlo (el backend responde 403 a
+   * cualquier otro), y se puede cambiar en cualquier momento.
+   *
+   * @param {string} enrollmentId - UUID del enrollment
+   * @param {boolean} useRealName - true: nombre legal; false: alias
+   * @returns {Promise<Enrollment>} Enrollment con la preferencia actualizada
+   * @throws {Error} Si falla la operación
+   */
+  async setNamePreference(enrollmentId, useRealName) {
+    throw new Error('Method setNamePreference() must be implemented');
+  }
+
+  /**
+   * El organizador quita a un inscrito (release social 2): POST /enrollments/{id}/remove
+   *
+   * @param {string} enrollmentId - UUID del enrollment
+   * @returns {Promise<void>}
+   * @throws {Error} Si no se puede, con `status` y `errorCode`
+   */
+  async remove(enrollmentId) {
+    throw new Error('Method remove() must be implemented');
+  }
+}
+
+export default IEnrollmentRepository;

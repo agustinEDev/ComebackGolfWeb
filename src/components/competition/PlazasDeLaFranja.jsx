@@ -1,0 +1,450 @@
+import { AL_PASAR } from '../ui/clasesDeComportamiento';
+import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { ChevronDown, ChevronUp, UserMinus } from 'lucide-react';
+import {
+  COGER,
+  CAMBIAR,
+  SOLTAR,
+  ESPERAR,
+  DEJAR_DE_ESPERAR,
+} from '../../domain/services/PlazasEnFranjas';
+
+import { Gender } from '../../domain/value_objects/Gender';
+
+/**
+ * Las piezas de las plazas de una franja de stroke play (FE #824, PR 4),
+ * para `FranjasDeLaCompeticion`: lo que puede hacer el jugador, quién juega y
+ * quién espera (con lo que puede hacer el organizador) y los aprobados que aún
+ * no tienen franja. Decidido con Agustín el 10 oct 2026.
+ *
+ * Cada acción la ejecuta el padre con `hacer(accion, aviso)`: la manda, dice
+ * si salió bien o el motivo del servidor, y vuelve a leer la agenda.
+ */
+
+// 44 px de alto: se tocan con el dedo (revisor)
+const boton =
+  'min-h-11 rounded-boton border px-4 py-1.5 text-sm font-bold disabled:opacity-50';
+const principal = `${boton} border-contraste bg-contraste text-sobre-contraste`;
+const secundario = `${boton} border-linea bg-fondo text-tinta ${AL_PASAR}`;
+
+/**
+ * Lo que el jugador puede hacer en una franja, y si tiene plaza o espera.
+ * @param {Object} props
+ * @param {Object} props.franja
+ * @param {Object|null} props.accion - De `situacionEnLasFranjas`
+ * @param {boolean} props.puedeElegir - Con las inscripciones abiertas
+ * @param {string} props.userId
+ * @param {(f: Object) => string} props.etiqueta - «Mañana · sáb 12 oct»
+ * @param {Object<string, Object>} props.franjasPorId
+ * @param {boolean} props.ocupado
+ * @param {(accion: Function, aviso: string) => void} props.hacer
+ * @param {Object} props.casos - Los casos de uso de plazas y esperas
+ */
+export const AccionDelJugador = ({
+  franja,
+  accion,
+  puedeElegir,
+  userId,
+  etiqueta,
+  franjasPorId,
+  ocupado,
+  hacer,
+  casos,
+  genero,
+}) => {
+  const { t } = useTranslation('schedule');
+  const [confirmandoSoltar, setConfirmandoSoltar] = useState(false);
+  const [eligiendoCual, setEligiendoCual] = useState(false);
+  // Si cambia lo que se puede hacer, lo abierto se cierra: si no, al volver a
+  // ser suya la confirmación de soltar se reabría sola (/code-review)
+  //
+  // Al pintar y solo si CAMBIA, no en un efecto: el efecto corría también al
+  // montarse, y con la máquina cargada llegaba después del primer clic y
+  // cerraba la elección recién abierta (4b intermitente en el CI, 21 oct)
+  const tipo = accion?.tipo;
+  const [tipoVisto, setTipoVisto] = useState(tipo);
+  if (tipo !== tipoVisto) {
+    setTipoVisto(tipo);
+    setConfirmandoSoltar(false);
+    setEligiendoCual(false);
+  }
+  if (!accion) return null;
+
+  const estado =
+    accion.tipo === SOLTAR ? (
+      <span className="rounded-full border border-current px-2 py-0.5 text-xs font-semibold text-exito">
+        {t('franjas.mine')}
+      </span>
+    ) : accion.tipo === DEJAR_DE_ESPERAR ? (
+      <span className="rounded-full border border-current px-2 py-0.5 text-xs font-semibold text-aviso">
+        {/* «la 1.ª» a una jugadora (QA del 11 oct 2026) */}
+        {t(
+          'franjas.waitingPosition',
+          genero === Gender.FEMALE
+            ? { count: accion.posicion, context: 'female' }
+            : { count: accion.posicion },
+        )}
+      </span>
+    ) : null;
+  if (!puedeElegir) return estado;
+
+  const cambiarDesde = (dejar) =>
+    hacer(
+      () => casos.coger.execute(franja.id, { insteadOfRoundId: dejar }),
+      'franjas.switched',
+    );
+  const mismoDia =
+    accion.tipo === CAMBIAR &&
+    franjasPorId[accion.dejar[0]]?.roundDate === franja.roundDate;
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      {estado}
+      {accion.tipo === COGER && (
+        <button
+          type="button"
+          disabled={ocupado}
+          className={principal}
+          onClick={() =>
+            hacer(() => casos.coger.execute(franja.id, {}), 'franjas.took')
+          }
+        >
+          {t('franjas.take')}
+        </button>
+      )}
+      {accion.tipo === CAMBIAR && (
+        <button
+          type="button"
+          disabled={ocupado}
+          className={principal}
+          onClick={() =>
+            accion.dejar.length === 1
+              ? cambiarDesde(accion.dejar[0])
+              : setEligiendoCual(true)
+          }
+        >
+          {t(mismoDia ? 'franjas.switchHere' : 'franjas.switchFor')}
+        </button>
+      )}
+      {accion.tipo === SOLTAR && !confirmandoSoltar && (
+        <button
+          type="button"
+          disabled={ocupado}
+          className={secundario}
+          onClick={() => setConfirmandoSoltar(true)}
+        >
+          {t('franjas.release')}
+        </button>
+      )}
+      {accion.tipo === ESPERAR && (
+        <button
+          type="button"
+          disabled={ocupado}
+          className={secundario}
+          onClick={() =>
+            hacer(
+              () => casos.esperar.execute(franja.id),
+              'franjas.waitingJoined',
+            )
+          }
+        >
+          {t('franjas.wait')}
+        </button>
+      )}
+      {accion.tipo === DEJAR_DE_ESPERAR && (
+        <button
+          type="button"
+          disabled={ocupado}
+          className={secundario}
+          onClick={() =>
+            hacer(
+              () => casos.dejarDeEsperar.execute(franja.id, userId),
+              'franjas.waitingLeft',
+            )
+          }
+        >
+          {t('franjas.leaveWaiting')}
+        </button>
+      )}
+
+      {/* Soltar es perder la plaza: puede cogerla otro al momento. Solo si sigue
+          siendo suya: tras releer pudo dejar de serlo (revisor) */}
+      {confirmandoSoltar && accion.tipo === SOLTAR && (
+        <div className="flex w-full flex-wrap items-center gap-2 rounded-lg bg-fondo p-2 text-xs text-aviso">
+          <span className="min-w-0 flex-1">{t('franjas.releaseConfirm')}</span>
+          <button
+            type="button"
+            disabled={ocupado}
+            className="min-h-11 rounded-md bg-aviso px-3 py-1 font-semibold text-sobre-contraste"
+            onClick={() => {
+              setConfirmandoSoltar(false);
+              hacer(
+                () => casos.soltar.execute(franja.id, userId),
+                'franjas.released',
+              );
+            }}
+          >
+            {t('franjas.releaseYes')}
+          </button>
+          <button
+            type="button"
+            className="min-h-11 rounded-md px-3 py-1"
+            onClick={() => setConfirmandoSoltar(false)}
+          >
+            {t('agenda.no')}
+          </button>
+        </div>
+      )}
+
+      {/* Con varias suyas, cuál deja: el cambio es un solo paso. Solo mientras
+          siga siendo un cambio: tras releer pudo pasar a otra cosa, y entonces
+          no hay `dejar` (revisor) */}
+      {eligiendoCual && accion.tipo === CAMBIAR && (
+        <div className="w-full space-y-1 rounded-lg bg-fondo p-2 text-sm">
+          <p className="text-tinta">{t('franjas.whichToLeave')}</p>
+          {accion.dejar.map((id) => (
+            <button
+              key={id}
+              type="button"
+              disabled={ocupado}
+              className={`${secundario} mr-2`}
+              onClick={() => {
+                setEligiendoCual(false);
+                cambiarDesde(id);
+              }}
+            >
+              {t('franjas.leaveThis', {
+                franja: etiqueta(franjasPorId[id]).franja,
+                dia: etiqueta(franjasPorId[id]).dia,
+              })}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="text-sm text-tinta-suave"
+            onClick={() => setEligiendoCual(false)}
+          >
+            {t('agenda.cancel')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Quién juega y quién espera en una franja, desplegable, y lo que puede hacer
+ * con ellos el organizador: moverlos a otra con sitio (en un paso) y, con las
+ * inscripciones abiertas, quitarlos.
+ *
+ * `soloAmigos`: quien no organiza recibe de la agenda solo a sus amigos de la
+ * franja (release social 2). Se le dice así, y la espera va sin números: no
+ * serían su puesto en la lista.
+ */
+export const JugadoresDeLaFranja = ({
+  franja,
+  soloAmigos = false,
+  yo,
+  destinosDe,
+  nombreDe,
+  etiqueta,
+  puedeColocar,
+  puedeQuitar,
+  ocupado,
+  hacer,
+  casos,
+}) => {
+  const { t } = useTranslation('schedule');
+  const [abierta, setAbierta] = useState(false);
+  // A quién se va a quitar: la plaza la coge al momento el primero de la
+  // espera, así que se confirma, como al soltar la propia (/code-review)
+  const [quitando, setQuitando] = useState(null);
+  // Con solo sus amigos, él no cuenta: ya sabe dónde está (revisor)
+  const sinMi = (ids) => (soloAmigos ? ids.filter((id) => id !== yo) : ids);
+  const playerIds = sinMi(franja.teeSheet.playerIds);
+  const waitingIds = sinMi(franja.teeSheet.waitingIds);
+  // Sin ningún amigo en ella, no hay nada que desplegar
+  if (soloAmigos && playerIds.length + waitingIds.length === 0) return null;
+  const Espera = soloAmigos ? 'ul' : 'ol';
+
+  return (
+    <div>
+      <button
+        type="button"
+        aria-expanded={abierta}
+        onClick={() => setAbierta((a) => !a)}
+        className="flex min-h-11 items-center gap-1 text-xs font-medium text-tinta-suave hover:text-tinta"
+      >
+        {abierta ? (
+          <ChevronUp className="h-4 w-4" />
+        ) : (
+          <ChevronDown className="h-4 w-4" />
+        )}
+        {soloAmigos
+          ? t('franjas.showFriends', {
+              count: playerIds.length + waitingIds.length,
+            })
+          : t('franjas.showPlayers', { count: playerIds.length })}
+      </button>
+      {abierta && (
+        <div className="mt-1 space-y-2">
+          <ul data-testid={`jugadores-${franja.id}`} className="space-y-1">
+            {playerIds.map((id) => (
+              <li
+                key={id}
+                className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-tinta"
+              >
+                {/* Adónde se le puede mover: lo decide el dominio */}
+                <span className="min-w-0 flex-1 truncate">{nombreDe(id)}</span>
+                {puedeColocar && destinosDe(id).length > 0 && (
+                  <select
+                    aria-label={t('franjas.moveTo', { jugador: nombreDe(id) })}
+                    value=""
+                    disabled={ocupado}
+                    onChange={(e) =>
+                      e.target.value &&
+                      hacer(
+                        () =>
+                          casos.coger.execute(e.target.value, {
+                            userId: id,
+                            insteadOfRoundId: franja.id,
+                          }),
+                        'franjas.moved',
+                      )
+                    }
+                    className="min-h-11 max-w-full rounded-lg border border-linea px-2 py-1 text-xs"
+                  >
+                    <option value="">{t('franjas.moveToPlaceholder')}</option>
+                    {destinosDe(id).map((f) => (
+                      <option
+                        key={f.id}
+                        value={f.id}
+                      >{`${etiqueta(f).franja} · ${etiqueta(f).dia}`}</option>
+                    ))}
+                  </select>
+                )}
+                {puedeColocar && puedeQuitar && (
+                  <button
+                    type="button"
+                    disabled={ocupado}
+                    aria-label={t('franjas.removePlayer', {
+                      jugador: nombreDe(id),
+                    })}
+                    onClick={() => setQuitando(id)}
+                    className="flex h-11 w-11 items-center justify-center rounded-lg text-tinta-suave hover:bg-tarjeta hover:text-error"
+                  >
+                    <UserMinus className="h-4 w-4" />
+                  </button>
+                )}
+                {quitando === id && (
+                  <div className="flex w-full flex-wrap items-center gap-2 rounded-lg bg-fondo p-2 text-xs text-aviso">
+                    <span className="min-w-0 flex-1">
+                      {t('franjas.removePlayerConfirm', {
+                        jugador: nombreDe(id),
+                      })}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={ocupado}
+                      className="min-h-11 rounded-md bg-aviso px-3 py-1 font-semibold text-sobre-contraste"
+                      onClick={() => {
+                        setQuitando(null);
+                        hacer(
+                          () => casos.soltar.execute(franja.id, id),
+                          'franjas.playerRemoved',
+                        );
+                      }}
+                    >
+                      {t('franjas.removePlayerYes')}
+                    </button>
+                    <button
+                      type="button"
+                      className="min-h-11 rounded-md px-3 py-1"
+                      onClick={() => setQuitando(null)}
+                    >
+                      {t('agenda.no')}
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+          {waitingIds.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-tinta-suave">
+                {t('franjas.waitingList')}
+              </p>
+              <Espera
+                data-testid={`espera-${franja.id}`}
+                className={`${soloAmigos ? 'list-disc' : 'list-decimal'} pl-5 text-sm text-tinta`}
+              >
+                {waitingIds.map((id) => (
+                  <li key={id}>{nombreDe(id)}</li>
+                ))}
+              </Espera>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** Los aprobados sin ninguna franja, para que el organizador los coloque. */
+export const SinFranja = ({
+  jugadores,
+  conSitio,
+  etiqueta,
+  ocupado,
+  hacer,
+  casos,
+}) => {
+  const { t } = useTranslation('schedule');
+  if (jugadores.length === 0) return null;
+  return (
+    <div
+      id="sin-franja"
+      data-testid="sin-franja"
+      className="mt-4 rounded-lg border border-aviso bg-fondo p-3"
+    >
+      <p className="mb-2 text-sm font-semibold text-aviso">
+        {t('franjas.withoutWindow', { count: jugadores.length })}
+      </p>
+      <ul className="space-y-1">
+        {jugadores.map(({ userId, userName }) => (
+          <li
+            key={userId}
+            className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-tinta"
+          >
+            {/* En su línea y entero: al lado del selector quedaba «O…» (2.ª pasada del QA) */}
+            <span className="min-w-0 basis-full break-words">{userName}</span>
+            {conSitio.length > 0 && (
+              <select
+                aria-label={t('franjas.placeIn', { jugador: userName })}
+                value=""
+                disabled={ocupado}
+                onChange={(e) =>
+                  e.target.value &&
+                  hacer(
+                    () => casos.coger.execute(e.target.value, { userId }),
+                    'franjas.placed',
+                  )
+                }
+                className="min-h-11 max-w-full rounded-lg border border-linea px-2 py-1 text-xs"
+              >
+                <option value="">{t('franjas.placeInPlaceholder')}</option>
+                {conSitio.map((f) => (
+                  <option
+                    key={f.id}
+                    value={f.id}
+                  >{`${etiqueta(f).franja} · ${etiqueta(f).dia}`}</option>
+                ))}
+              </select>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+};

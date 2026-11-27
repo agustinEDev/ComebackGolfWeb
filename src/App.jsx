@@ -1,0 +1,796 @@
+/* eslint-disable react-refresh/only-export-components */
+import {
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  Suspense,
+  useState,
+} from 'react';
+import {
+  createRoutesFromElements,
+  Outlet,
+  Route,
+  RouterProvider,
+  ScrollRestoration,
+  useLocation,
+  useParams,
+  useRouteError,
+} from 'react-router';
+import { Toaster } from 'react-hot-toast';
+import AvisoSinConexion from './components/ui/AvisoSinConexion';
+import AvisoTerminosPendientes from './components/ui/AvisoTerminosPendientes';
+import * as Sentry from '@sentry/react';
+import ProtectedRoute from './components/auth/ProtectedRoute';
+import FullScreenLoader from './components/ui/FullScreenLoader';
+import RoleGuard from './components/auth/RoleGuard';
+import LazyLoadErrorBoundary from './components/errors/LazyLoadErrorBoundary';
+import { getUserData } from './hooks/useAuth';
+import { useVaciadoDeLaCola } from './hooks/useVaciadoDeLaCola';
+import { useEnvioDeMuestras } from './hooks/useEnvioDeMuestras';
+import { useTerminosPendientes } from './hooks/useTerminosPendientes';
+import { useRevalidacionDeLaSesion } from './hooks/useRevalidacionDeLaSesion';
+import { setUserContext } from './utils/sentryHelpers';
+import useProactiveTokenRefresh from './hooks/useProactiveTokenRefresh';
+import { onAuthEvent, EVENTS } from './utils/broadcastAuth';
+import { useLogout } from './hooks/useLogout';
+import { useDeviceRevocationMonitor } from './hooks/useDeviceRevocationMonitor';
+import InstallBanner from './components/ui/InstallBanner';
+import BottomNav from './components/layout/BottomNav';
+import {
+  esRutaPublica,
+  esPuertaDeEntrada,
+  esLaClasificacionCompartida,
+} from './utils/rutasPublicas';
+import {
+  VARIABLE_ALTO_BARRA_INFERIOR,
+  ALTO_BARRA_INFERIOR,
+} from './utils/barraInferior';
+import ErrorFallback from './components/errors/ErrorFallback';
+import { useCortinaDeArranque } from './hooks/useCortinaDeArranque';
+import { useVolverArriba } from './hooks/useVolverArriba';
+import { useRecargaAlVolverDeLaCache } from './hooks/useRecargaAlVolverDeLaCache';
+import { lazyWithRetry } from './utils/lazyWithRetry';
+import { esElDominioAntiguo } from './utils/mudanza';
+import SiFallaNada from './components/ui/SiFallaNada';
+import Canonica from './components/ui/Canonica';
+import BarraDeCarga from './components/layout/BarraDeCarga';
+import { marcaElArranque } from './services/cargaDeLaPantalla';
+import {
+  loader as cargaDeTorneos,
+  shouldRevalidate as cuandoVolverAPedirTorneos,
+} from './pages/Competitions.datos';
+import {
+  CLAVE_DEL_SCROLL,
+  creaElRouterDeLaAplicacion,
+} from './utils/routerDeLaAplicacion';
+import { registrarRouterParaSentry } from './utils/routerParaSentry';
+import { apuntaElRouterDeLaAplicacion } from './utils/navegacionEnCurso';
+import { Role } from './domain/value_objects/Role';
+
+// Pantallas diferidas, con un reintento a los 1,5 s: `utils/lazyWithRetry`
+const Landing = lazyWithRetry(() => import('./pages/Landing'));
+// Solo se descarga en el dominio viejo: quien entra por el nuevo no paga nada
+const AvisoDeMudanza = lazyWithRetry(
+  () => import('./components/ui/AvisoDeMudanza'),
+);
+const AppStart = lazyWithRetry(() => import('./pages/AppStart'));
+const Login = lazyWithRetry(() => import('./pages/Login'));
+const Register = lazyWithRetry(() => import('./pages/Register'));
+const VerifyEmail = lazyWithRetry(() => import('./pages/VerifyEmail'));
+const ForgotPassword = lazyWithRetry(() => import('./pages/ForgotPassword'));
+const ResetPassword = lazyWithRetry(() => import('./pages/ResetPassword'));
+const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'));
+const PlayerStatsPage = lazyWithRetry(() => import('./pages/PlayerStatsPage'));
+const Profile = lazyWithRetry(() => import('./pages/Profile'));
+const EditProfile = lazyWithRetry(() => import('./pages/EditProfile'));
+const DeviceManagement = lazyWithRetry(
+  () => import('./pages/DeviceManagement'),
+);
+const Competitions = lazyWithRetry(() => import('./pages/Competitions'));
+const CreateCompetition = lazyWithRetry(
+  () => import('./pages/CreateCompetition'),
+);
+const CompetitionDetail = lazyWithRetry(
+  () => import('./pages/CompetitionDetail'),
+);
+
+// Editar, con una instancia por competición: de editar una a editar otra el
+// formulario no arrastra nada de la anterior, como las listas de vecinos (T3-18)
+function EditarCompeticion() {
+  const { id } = useParams();
+  return <CreateCompetition key={id} />;
+}
+const BrowseCompetitions = lazyWithRetry(
+  () => import('./pages/BrowseCompetitions'),
+);
+
+// Admin pages (v2.4.0 - Admin Panel)
+const AdminPanel = lazyWithRetry(() => import('./pages/admin/AdminPanel'));
+
+// Creator pages (v2.1.0 - Sprint 2)
+const SchedulePage = lazyWithRetry(
+  () => import('./pages/creator/SchedulePage'),
+);
+const InvitationsPage = lazyWithRetry(
+  () => import('./pages/creator/InvitationsPage'),
+);
+
+// Player pages (Sprint 3 + Sprint 4)
+const MyInvitationsPage = lazyWithRetry(
+  () => import('./pages/player/MyInvitationsPage'),
+);
+const FriendsPage = lazyWithRetry(() => import('./pages/player/FriendsPage'));
+const FeedPage = lazyWithRetry(() => import('./pages/player/FeedPage'));
+const PlayerProfilePage = lazyWithRetry(
+  () => import('./pages/player/PlayerProfilePage'),
+);
+const ScoringPage = lazyWithRetry(() => import('./pages/player/ScoringPage'));
+// Anotar una partida de stroke play (FE #824, PR 7)
+const GroupScoringPage = lazyWithRetry(
+  () => import('./pages/player/GroupScoringPage'),
+);
+const UpcomingMatchesPage = lazyWithRetry(
+  () => import('./pages/player/UpcomingMatchesPage'),
+);
+
+// Quick Match pages (FE #236)
+const QuickMatchScoringPage = lazyWithRetry(
+  () => import('./pages/quick_match/QuickMatchScoringPage'),
+);
+const QuickMatchSharedPage = lazyWithRetry(
+  () => import('./pages/quick_match/QuickMatchSharedPage'),
+);
+const TarjetaDeUnAmigoPage = lazyWithRetry(
+  () => import('./pages/player/TarjetaDeUnAmigoPage'),
+);
+const MyQuickMatchesPage = lazyWithRetry(
+  () => import('./pages/quick_match/MyQuickMatchesPage'),
+);
+
+// Google OAuth pages
+const GoogleCallback = lazyWithRetry(() => import('./pages/GoogleCallback'));
+const CompleteProfile = lazyWithRetry(() => import('./pages/CompleteProfile'));
+const AcceptTerms = lazyWithRetry(() => import('./pages/AcceptTerms'));
+const ConfirmEmailChange = lazyWithRetry(
+  () => import('./pages/ConfirmEmailChange'),
+);
+
+// Public pages
+const LeaderboardPage = lazyWithRetry(
+  () => import('./pages/public/LeaderboardPage'),
+);
+const DraftRoomPage = lazyWithRetry(() => import('./pages/DraftRoomPage'));
+const EnvelopePage = lazyWithRetry(() => import('./pages/EnvelopePage'));
+const Pricing = lazyWithRetry(() => import('./pages/public/Pricing'));
+const Contact = lazyWithRetry(() => import('./pages/public/Contact'));
+const Terms = lazyWithRetry(() => import('./pages/public/Terms'));
+const Privacy = lazyWithRetry(() => import('./pages/public/Privacy'));
+const Cookies = lazyWithRetry(() => import('./pages/public/Cookies'));
+const LegalNotice = lazyWithRetry(() => import('./pages/public/LegalNotice'));
+
+// Error pages
+const Unauthorized = lazyWithRetry(() => import('./pages/public/Unauthorized'));
+const NotFound = lazyWithRetry(() => import('./pages/public/NotFound'));
+
+/**
+ * La carcasa de la aplicación: lo que cuelga de todas las pantallas (sesión,
+ * cola sin cobertura, avisos, barra inferior). Es la ruta raíz del router y las
+ * pantallas se pintan en su `<Outlet />`, así que navegar no la vuelve a montar.
+ */
+function AppContent() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // De quién es la sesión: el vaciado de la cola solo manda lo de esta persona
+  const [usuarioActualId, setUsuarioActualId] = useState(null);
+  const { logout } = useLogout();
+  const location = useLocation();
+  // La mudanza a comebackgolf.com, fase 1: el dominio viejo avisa al abrir
+  const enElDominioAntiguo = esElDominioAntiguo(
+    globalThis.location?.hostname ?? '',
+  );
+
+  // ============================================
+  // RUTAS PÚBLICAS (no requieren autenticación)
+  // ============================================
+  // La lista vive en `utils/rutasPublicas`: estaba escrita dos veces, aquí y en
+  // el interceptor de refresco, y esa copia ya iba dos entradas por detrás. Cada
+  // olvido significa consultar la sesión donde no la hay, comerse un 401 y echar
+  // al usuario a `/login` diciendo que expiró.
+  const isPublicRoute = esRutaPublica(location.pathname);
+  // La clasificación compartida es pública, pero quien tiene sesión llega desde
+  // su competición y la ve como el resto de la aplicación, con su barra
+  // inferior (QA, FE #865-4). Ahí sí se pregunta por la sesión: el interceptor
+  // ya no refresca sin `user` guardado (`sinSesionEnRutaPublica`)
+  const conSesionPosible =
+    !isPublicRoute || esLaClasificacionCompartida(location.pathname);
+
+  // Cada pantalla empieza por el principio, menos al volver atrás (FE #643).
+  // Va aquí arriba, colgado del router y no de cada pantalla: el defecto no era
+  // de una pantalla concreta, eran las 24
+  useVolverArriba();
+
+  // Desde aquí, los `loader` ya no están en la primera carga: antes de montarse
+  // la carcasa, la pantalla carga dentro, como siempre (`cargaDeLaPantalla`)
+  useLayoutEffect(() => marcaElArranque(true), []);
+
+  // Una página que vuelve desde la caché del historial del navegador se recarga:
+  // volvía congelada, en «Loading...» tras salir o con la cuenta de antes (FE #865)
+  useRecargaAlVolverDeLaCache();
+
+  // La cortina del arranque: se queda puesta hasta que la pantalla de destino
+  // avisa de que no le queda nada cargando (FE #485)
+  useCortinaDeArranque(location.pathname);
+
+  // La anotación en vivo es inmersiva: la navegación inferior le robaría
+  // el espacio vertical que necesita el flujo hoyo a hoyo (FE #306)
+  const isScoringRoute = /\/scoring$/.test(location.pathname);
+  // Completar el perfil es un paso de entrada, como el login: sin la barra
+  // inferior, que además tapaba «Omitir por ahora» (26 nov 2026)
+  const esPasoDeEntrada = /^\/auth\/complete-profile\/?$/i.test(
+    location.pathname,
+  );
+
+  // Los golpes que quedaron sin enviar de CUALQUIER partida salen en cuanto
+  // vuelve la cobertura o se vuelve a la aplicación, no solo los de la pantalla
+  // que se esté mirando (FE #521). Va aquí arriba a propósito: colgado de una
+  // pantalla dependería de que el usuario volviera a ella, que es justo lo que
+  // no pasa
+  //
+  // Con los Términos sin aceptar, el backend responde 403 a todo salvo
+  // current-user, accept-terms y logout (F3): nada que llame a la API arranca
+  // hasta aceptarlos, ni la barra inferior se pinta
+  // Y se vuelve a preguntar por la sesión al volver a la aplicación o a la red:
+  // la instalada vive días abierta, y sin esto quien tuviera los Términos
+  // pendientes nunca llegaba a aceptarlos (hotfix 2.50.1)
+  useRevalidacionDeLaSesion();
+  const terminosPendientes = useTerminosPendientes();
+  const conApi = isAuthenticated && !terminosPendientes;
+  useVaciadoDeLaCola({ activo: conApi, userId: usuarioActualId });
+  // Las muestras de hoyo que se quedaron en la cola (BE #532, marcado por par)
+  useEnvioDeMuestras({ activo: conApi, userId: usuarioActualId });
+
+  // Navegación inferior: solo móvil, solo con sesión y fuera del scoring
+  const showBottomNav =
+    conApi && conSesionPosible && !isScoringRoute && !esPasoDeEntrada;
+
+  // Su hueco, publicado para las páginas de pantalla completa: lo descuentan
+  // solo cuando la barra está de verdad, sin deducirlo de la sesión
+  useLayoutEffect(() => {
+    const raiz = document.documentElement.style;
+    raiz.setProperty(
+      VARIABLE_ALTO_BARRA_INFERIOR,
+      showBottomNav ? ALTO_BARRA_INFERIOR : '0px',
+    );
+    return () => raiz.removeProperty(VARIABLE_ALTO_BARRA_INFERIOR);
+  }, [showBottomNav]);
+
+  // Establecer contexto de usuario en Sentry si está autenticado (via httpOnly cookie)
+  useEffect(() => {
+    const initUserContext = async () => {
+      // FIX: No verificar sesión en rutas públicas (previene bucle infinito en /login después de logout),
+      // salvo en la clasificación compartida (`conSesionPosible`)
+      if (!conSesionPosible) {
+        setIsAuthenticated(false);
+        setUsuarioActualId(null);
+        return;
+      }
+
+      const user = await getUserData();
+      if (user) {
+        setUserContext(user);
+        setIsAuthenticated(true);
+        setUsuarioActualId(user.id ?? null);
+      } else {
+        setIsAuthenticated(false);
+        setUsuarioActualId(null);
+      }
+    };
+    initUserContext();
+  }, [conSesionPosible]);
+
+  /**
+   * Cerrar sesión cuando otra pestaña de este navegador la cierra: es el mismo
+   * dispositivo, con las mismas cookies. Wrapped in useCallback to prevent stale closures
+   */
+  const handleLogoutFromOtherTab = useCallback(async () => {
+    setIsAuthenticated(false);
+    // Sin eco: ni se vuelve a avisar ni se llama al backend (FE #865)
+    await logout({ desdeOtraPestana: true });
+  }, [logout]);
+
+  /**
+   * Listener de eventos de broadcast para sincronización multi-tab
+   * Escucha eventos de logout desde otras pestañas y ejecuta logout local
+   */
+  useEffect(() => {
+    // Configurar listener de eventos de broadcast
+    const cleanup = onAuthEvent((event) => {
+      if (event.type === EVENTS.LOGOUT) {
+        handleLogoutFromOtherTab();
+      }
+    });
+
+    // Cleanup: remover listener al desmontar
+    return cleanup;
+  }, [handleLogoutFromOtherTab]);
+
+  // Sin cierre por inactividad en el navegador (BE #376, ADR-039): echaba a
+  // jugadores en el campo sin cobertura para volver a entrar, y con la pestaña
+  // cerrada no invalidaba nada. La inactividad (OWASP A07) la decide el
+  // servidor: 24 h sin usar este dispositivo
+
+  // Hook de monitoreo de revocación de dispositivo (v1.14.0)
+  // Detecta cuando el dispositivo actual fue revocado desde otro navegador
+  // Solo activo cuando hay usuario autenticado
+  useDeviceRevocationMonitor({
+    // Pide /users/me/devices, que da 403 con los Términos pendientes
+    enabled: conApi,
+  });
+
+  // Hook de refresh proactivo de token (v2.0.4)
+  // Refresca el token ANTES de que expire si el usuario está activo
+  // Previene "sesión expirada" mientras el usuario está usando la app
+  // Los tiempos (TTL del token y margen de refresco) los define el propio hook,
+  // que es donde se anota de donde sale el valor del backend (FE #392)
+  useProactiveTokenRefresh({
+    enabled: isAuthenticated,
+  });
+
+  return (
+    <LazyLoadErrorBoundary>
+      {/* Notificaciones: se suben por encima de la navegacion inferior cuando
+          esta visible, o la taparian por completo (FE #322) */}
+      <Toaster
+        position="bottom-right"
+        containerClassName={
+          showBottomNav ? 'toast-container-above-bottom-nav' : undefined
+        }
+        // Los avisos de arriba (los de los modales de barras) por debajo de la
+        // muesca: la app pinta bajo la barra de estado (viewport-fit=cover)
+        containerStyle={{ top: 'calc(16px + env(safe-area-inset-top))' }}
+        toastOptions={{
+          duration: 4000,
+          style: {
+            background: '#fff',
+            color: '#131613',
+            border: '1px solid #dee3df',
+            borderRadius: '0.5rem',
+            padding: '16px',
+            fontSize: '14px',
+            boxShadow:
+              '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+          },
+          success: {
+            iconTheme: {
+              primary: '#2d7b3e',
+              secondary: '#fff',
+            },
+          },
+          error: {
+            iconTheme: {
+              primary: '#ef4444',
+              secondary: '#fff',
+            },
+          },
+        }}
+      />
+      <Suspense fallback={<FullScreenLoader />}>
+        {/* Que no haya red se dice UNA vez y para toda la aplicacion: sin esto
+            solo se notaba por lo que no pasaba —listas vacias, buscadores que
+            no traen nada— y el jugador no sabia si le fallaba el movil o esto.
+            Dentro de la espera por lo mismo que el aviso de instalar: fuera, su
+            barra se suma a los 100vh de la pantalla de arranque, y eso saca la
+            barra de desplazamiento y descentra el monograma */}
+        <AvisoSinConexion />
+        {/* Los Términos pendientes, en las rutas públicas: en las privadas
+            lleva a aceptarlos el guardia (hotfix 2.50.1) */}
+        <AvisoTerminosPendientes />
+        <Canonica ruta={location.pathname} />
+        {/* Dentro de la espera a proposito: fuera se pintaba ENCIMA de ella,
+            apareciendo antes que la pantalla a la que acompaña. Ni en la portada
+            ni en el arranque: ofrecer «instala la aplicacion» en la pantalla por
+            la que se entra a la aplicacion ya instalada no tiene sentido. */}
+        {/* En el dominio viejo NO: invitaría a instalar la app vieja, y allí
+            el aviso de la mudanza explica cómo instalar la nueva (27 nov 2026) */}
+        {!esPuertaDeEntrada(location.pathname) && !enElDominioAntiguo && (
+          <InstallBanner aboveBottomNav={showBottomNav} />
+        )}
+        {enElDominioAntiguo && (
+          <SiFallaNada>
+            <Suspense fallback={null}>
+              <AvisoDeMudanza />
+            </Suspense>
+          </SiFallaNada>
+        )}
+        {/* Volver atrás te deja donde estabas en las pantallas con `loader`;
+            en las demás, `useVolverArriba` (que corre después) sube arriba */}
+        <ScrollRestoration storageKey={CLAVE_DEL_SCROLL} />
+        <BarraDeCarga />
+        <Outlet />
+        {showBottomNav && (
+          <>
+            {/* Espaciador en el flujo: la nav es fixed y taparía el final de la
+              página. 4rem, lo que mide la barra (eran 5 mientras tuvo el botón
+              redondo de «Partida», que sobresalía; QA, FE #865-8). Más el aviso
+              de instalar, que va encima (#865-13) */}
+            <div
+              aria-hidden="true"
+              data-testid="hueco-barra-inferior"
+              data-tapa-abajo=""
+              className="md:hidden h-[calc(4rem+env(safe-area-inset-bottom)+var(--alto-aviso-instalar,0px))]"
+            />
+            <BottomNav />
+          </>
+        )}
+        {/* Sin la barra (sin sesión, o en el escritorio), el aviso de instalar va
+          al borde: su hueco, para que no tape lo último (QA, FE #865-13). En la
+          anotación no: es inmersiva */}
+        {!isScoringRoute && (
+          <div
+            aria-hidden="true"
+            data-testid="hueco-aviso-instalar"
+            data-tapa-abajo=""
+            className={`${showBottomNav ? 'hidden md:block' : ''} h-[var(--alto-aviso-instalar,0px)]`}
+          />
+        )}
+      </Suspense>
+    </LazyLoadErrorBoundary>
+  );
+}
+
+/**
+ * El router de datos trae su propia pantalla de error en cada ruta («Unexpected
+ * Application Error»). Este la devuelve hacia arriba para que el fallo lo recoja
+ * quien lo recogía antes del router de datos: el `LazyLoadErrorBoundary` de la
+ * carcasa si es de una pantalla, y el `Sentry.ErrorBoundary` si es de la carcasa.
+ */
+function RelanzarElError() {
+  throw useRouteError();
+}
+
+// Las rutas siguen escritas como JSX (`createRoutesFromElements`); `rutasDeLaAplicacion`
+// es su copia sin la comodín, y un test vigila que no se separen
+export const rutasDeLaApp = createRoutesFromElements(
+  <Route
+    element={<AppContent />}
+    errorElement={<RelanzarElError />}
+    hydrateFallbackElement={<FullScreenLoader />}
+  >
+    <Route errorElement={<RelanzarElError />}>
+      {/* Public routes */}
+      <Route path="/" element={<Landing />} />
+      {/* Por donde arranca la aplicacion instalada (FE #465): es el `start_url`
+          del manifiesto. Abierta en un navegador redirige a la portada. */}
+      <Route path="/start" element={<AppStart />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password/:token" element={<ResetPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/pricing" element={<Pricing />} />
+      <Route path="/contact" element={<Contact />} />
+      <Route path="/terms" element={<Terms />} />
+      <Route path="/privacy" element={<Privacy />} />
+      <Route path="/cookies" element={<Cookies />} />
+      <Route path="/legal" element={<LegalNotice />} />
+      <Route path="/auth/google/callback" element={<GoogleCallback />} />
+      <Route
+        path="/competitions/:id/leaderboard"
+        element={<LeaderboardPage />}
+      />
+
+      {/* Protected routes */}
+      <Route
+        path="/auth/complete-profile"
+        element={
+          <ProtectedRoute>
+            <CompleteProfile />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/accept-terms"
+        element={
+          <ProtectedRoute>
+            <AcceptTerms />
+          </ProtectedRoute>
+        }
+      />
+      {/* El enlace del correo nuevo, solo con sesión (BE #749) */}
+      <Route
+        path="/confirm-email-change"
+        element={
+          <ProtectedRoute>
+            <ConfirmEmailChange />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/stats"
+        element={
+          <ProtectedRoute>
+            <PlayerStatsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <Profile />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile/edit"
+        element={
+          <ProtectedRoute>
+            <EditProfile />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile/devices"
+        element={
+          <ProtectedRoute>
+            <DeviceManagement />
+          </ProtectedRoute>
+        }
+      />
+      {/* Con sus datos antes de pintarse (FE #647, fase 3): sin ellos, volver
+          atrás no puede devolverte a donde estabas */}
+      <Route
+        path="/competitions"
+        loader={cargaDeTorneos}
+        shouldRevalidate={cuandoVolverAPedirTorneos}
+        handle={{ restauraElScroll: true }}
+        element={
+          <ProtectedRoute>
+            <Competitions />
+          </ProtectedRoute>
+        }
+      />
+      {/* Crear y editar son la misma pantalla: cada ruta con su instancia, y editar
+          una por competición, para que al pasar de una a otra no se arrastren la
+          espera ni los datos de la otra (T3-18) */}
+      <Route
+        path="/competitions/create"
+        element={
+          <ProtectedRoute>
+            <CreateCompetition key="crear" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/competitions/:id/edit"
+        element={
+          <ProtectedRoute>
+            <EditarCompeticion />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/competitions/:id"
+        element={
+          <ProtectedRoute>
+            <CompetitionDetail />
+          </ProtectedRoute>
+        }
+      />
+      {/* La sala de draft la ve el grupo entero, no solo los capitanes (FE #653) */}
+      <Route
+        path="/competitions/:id/draft"
+        element={
+          <ProtectedRoute>
+            <DraftRoomPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* El sobre de cada capitán para una sesión (FE #655) */}
+      <Route
+        path="/competitions/:id/rounds/:roundId/envelope"
+        element={
+          <ProtectedRoute>
+            <EnvelopePage />
+          </ProtectedRoute>
+        }
+      />
+      {/* La partida o el partido de un amigo, en solo lectura, desde su logro (release social 2) */}
+      <Route
+        path="/competitions/:id/groups/:groupId"
+        element={
+          <ProtectedRoute>
+            <TarjetaDeUnAmigoPage tipo="partida" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/competitions/:id/matches/:matchId"
+        element={
+          <ProtectedRoute>
+            <TarjetaDeUnAmigoPage tipo="partido" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/browse-competitions"
+        element={
+          <ProtectedRoute>
+            <BrowseCompetitions />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Admin (v2.4.0), protegido por el rol ADMIN; cada sección del panel en su ruta (17 oct): resumen, usuarios, competiciones, campos y hoyos */}
+      <Route
+        path="/admin/:seccion?"
+        element={
+          <ProtectedRoute>
+            <RoleGuard allowedRoles={Role.ADMIN}>
+              <AdminPanel />
+            </RoleGuard>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Invitation routes (Sprint 3) */}
+      <Route
+        path="/creator/competitions/:id/invitations"
+        element={
+          <ProtectedRoute>
+            <InvitationsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/player/invitations"
+        element={
+          <ProtectedRoute>
+            <MyInvitationsPage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Social routes */}
+      <Route
+        path="/feed"
+        element={
+          <ProtectedRoute>
+            <FeedPage />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/players/:userId"
+        element={
+          <ProtectedRoute>
+            <PlayerProfilePage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Friends routes */}
+      <Route
+        path="/friends"
+        element={
+          <ProtectedRoute>
+            <FriendsPage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Player routes (Sprint 4) */}
+      <Route
+        path="/player/matches"
+        element={
+          <ProtectedRoute>
+            <UpcomingMatchesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/player/matches/:matchId/scoring"
+        element={
+          <ProtectedRoute>
+            <ScoringPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/player/groups/:groupId/scoring"
+        element={
+          <ProtectedRoute>
+            <GroupScoringPage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Quick Match routes (FE #236) */}
+      <Route
+        path="/quick-matches"
+        element={
+          <ProtectedRoute>
+            <MyQuickMatchesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/quick-matches/:quickMatchId/scoring"
+        element={
+          <ProtectedRoute>
+            <QuickMatchScoringPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* La partida terminada de un amigo, en solo lectura (K) */}
+      <Route
+        path="/quick-matches/:quickMatchId/shared"
+        element={
+          <ProtectedRoute>
+            <QuickMatchSharedPage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Schedule routes (v2.1.0 - Sprint 2) */}
+      {/* Creator route: full management. Player route: read-only (canManage=false) */}
+      {/* Authorization is per-competition (handled by useUserRoles inside SchedulePage) */}
+      <Route
+        path="/creator/competitions/:id/schedule"
+        element={
+          <ProtectedRoute>
+            <SchedulePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/competitions/:id/schedule"
+        element={
+          <ProtectedRoute>
+            <SchedulePage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Error routes */}
+      <Route path="/unauthorized" element={<Unauthorized />} />
+      {/* Lo que no lleva a ninguna pantalla: antes, una página en blanco (FE #544).
+          Cualquier ruta nueva va también en `utils/rutasDeLaAplicacion` */}
+      <Route path="*" element={<NotFound />} />
+    </Route>
+  </Route>,
+);
+
+/**
+ * Componente principal: el router de datos de React Router (FE #647, fase 1) y
+ * el ErrorBoundary de Sentry.
+ */
+function App() {
+  // Uno por montaje y no al importar: lee la dirección del momento en que se
+  // abre (los tests montan la aplicación en direcciones distintas)
+  const [router] = useState(() => creaElRouterDeLaAplicacion(rutasDeLaApp));
+  // Sentry sigue sus navegaciones cuando llega su seguimiento, ~2 s después
+  // (`utils/navegacionesEnSentry`), y la vuelta tras aceptar los Términos lee la
+  // navegación en curso (`utils/navegacionEnCurso`). En un efecto y no al crearlo:
+  // con StrictMode React lo crea dos veces y se queda con el PRIMERO (revisor)
+  useEffect(() => {
+    registrarRouterParaSentry(router, rutasDeLaApp);
+    return apuntaElRouterDeLaAplicacion(router);
+  }, [router]);
+  return (
+    <Sentry.ErrorBoundary fallback={ErrorFallback} showDialog={false}>
+      <RouterProvider router={router} />
+    </Sentry.ErrorBoundary>
+  );
+}
+
+export default Sentry.withProfiler(App);

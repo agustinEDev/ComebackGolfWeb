@@ -1,0 +1,289 @@
+import { useNavigate } from 'react-router';
+import { Zap, Flag } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import BlockLoader from '../ui/BlockLoader';
+import {
+  AsistenteDeRepetir,
+  IconoRepetir,
+} from '../quick_match/RepetirPartida';
+import { useRepetirPartida } from '../quick_match/useRepetirPartida';
+import { MatchOutcome } from '../../domain/value_objects/MatchOutcome';
+
+/**
+ * Las últimas partidas del jugador: la respuesta a "¿cómo quedó lo último?".
+ *
+ * Mezcla torneo y partidas rápidas, que es como se juega en realidad. La fila
+ * intenta decir de un vistazo qué pasó: cómo acabó, contra quién, dónde y
+ * cuándo, y con qué marcador.
+ */
+
+const RESULT_TONES = {
+  // Por la forma, además de por la letra (ComeBack Golf): ganada rellena,
+  // empatada con contorno, perdida con contorno de error, sin terminar tenue
+  [MatchOutcome.WON]: 'bg-contraste text-sobre-contraste',
+  [MatchOutcome.LOST]: 'border-[1.5px] border-error text-error',
+  [MatchOutcome.HALVED]: 'border-[1.5px] border-tinta text-tinta',
+  // Una partida rápida de match play que no cuenta: más apagado que el
+  // empate, porque no es un resultado (Agustín, 24 oct 2026)
+  [MatchOutcome.UNFINISHED]: 'border border-borde text-tinta-suave',
+};
+
+const MatchRow = ({ match, onOpen, t, formatDate, repetir }) => {
+  // Sin terminar no hay tanteo: un 6UP de seis hoyos no es un resultado
+  const score = match.shownScore;
+  const opponents = match.opponents.join(', ');
+  const format = match.matchFormat || match.scoringFormat;
+  const formatLabel = format
+    ? t(`recentMatches.format.${format}`, format)
+    : null;
+  // El titular es el NOMBRE: el que le puso quien creó la partida rápida, o el
+  // de la competición si es de torneo. Es como uno reconoce la partida que
+  // jugó, y titular con el rival dejaba el nombre sin aparecer en ningún sitio
+  // (#575). Una partida rápida puede no tener nombre, y entonces el rival
+  // vuelve arriba; en una vuelta en solitario no hay ni una cosa ni la otra y
+  // queda el propio formato, que el subtítulo entonces no repite: decir
+  // "Medal / Medal · St Andrews" no añade nada
+  const name = match.matchName || match.tournamentName;
+  const headline = name || opponents || formatLabel;
+  // Se compara con lo que HAY, no con el texto: una partida rápida que su
+  // creador llamara «Medal» daba igualdad por casualidad y se quedaba sin
+  // formato en el subtítulo
+  const repeatsHeadline = !name && !opponents;
+  // El rival, cuando no es él quien titula. Repetirlo arriba y abajo gastaría
+  // la única línea que queda para el formato, el marcador y el campo
+  const opponentsLine =
+    name && opponents ? t('recentMatches.versus', { opponents }) : null;
+  // Los golpes y los hoyos viven aquí y no en la columna de la derecha: medido
+  // en el iPhone, «85 golpes · 18 hoyos» ensanchaba esa columna a 107 px —el
+  // resultado pide 31 y la fecha 33— y estrangulaba al nombre y al rival, que
+  // se cortaban los dos. Abajo tiene la línea entera y es el dato que menos
+  // duele truncar (#575)
+  const strokesLabel =
+    match.totalStrokes !== null
+      ? // Sin `holesPlayed` no se dicen los hoyos. El `?? 18` de antes afirmaba
+        // dieciocho sin saberlo, y «45 golpes · 18 hoyos» en una vuelta de nueve
+        // parece un juegazo — es la confusión que la propia entidad documenta en
+        // `isHalfRound()`. Antes vivía arrinconado a la derecha; ahora tiene una
+        // línea entera, así que la mentira se lee
+        match.holesPlayed !== null && match.holesPlayed !== undefined
+        ? t('recentMatches.strokesOverHoles', {
+            strokes: match.totalStrokes,
+            count: match.holesPlayed,
+          })
+        : t('recentMatches.strokesOnly', { strokes: match.totalStrokes })
+      : null;
+
+  // Una partida rápida (aquí solo llegan terminadas) se puede repetir (FE
+  // #1021). El icono va AL LADO de la fila, no dentro: un botón dentro de
+  // otro no es válido y el lector de pantalla no los distingue
+  const sePuedeRepetir = repetir && !match.isFromTournament();
+
+  return (
+    <div className="flex items-center border-b border-linea last:border-b-0">
+      <button
+        type="button"
+        onClick={() => onOpen(match)}
+        data-testid={`recent-match-${match.id}`}
+        className="flex min-w-0 flex-1 items-center gap-3 px-1 py-3 text-left hover:bg-fondo"
+      >
+        {match.hasResult() ? (
+          <span
+            data-testid="result-badge"
+            className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+              RESULT_TONES[match.result] ?? RESULT_TONES.HALVED
+            }`}
+          >
+            {t(`recentMatches.resultShort.${match.result}`)}
+            <span className="sr-only">
+              {t(`recentMatches.result.${match.result}`)}
+            </span>
+          </span>
+        ) : (
+          // Medal y Stableford no se ganan a nadie: no hay resultado que marcar
+          <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-tarjeta">
+            <Flag className="h-4 w-4 text-tinta-suave" aria-hidden="true" />
+          </span>
+        )}
+
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold text-tinta">
+            {headline}
+          </span>
+          {/* Contra quién, en su propia línea. Medido en un móvil de 390: el
+            subtítulo tiene 224 px y «vs Rivalillo, Cuarto Prueba · Foursomes ·
+            Son Parc - Par 71» pide 329, así que en una sola línea las parejas
+            se comían el campo. Cualquier apaño en una línea —resumir los
+            rivales, quitar el campo— se vuelve a cortar en cuanto los nombres
+            crecen un poco (#575) */}
+          {opponentsLine && (
+            <span className="block truncate text-xs text-tinta-suave">
+              {opponentsLine}
+            </span>
+          )}
+          {/* El formato va aquí y no como último recurso: es lo que distingue dos
+            partidas contra el mismo rival, en el mismo campo y el mismo día */}
+          <span className="block truncate text-xs text-tinta-suave">
+            {[
+              repeatsHeadline ? null : formatLabel,
+              // El marcador solo cuando la columna de la derecha está ocupada por
+              // los puntos: si no, esa columna ya lo enseña en grande, y
+              // repetirlo aquí volvía a dejar el campo fuera
+              match.hasResult() && match.stablefordPoints !== null
+                ? score
+                : null,
+              match.golfCourseName,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </span>
+          {/* Los golpes, en su propia línea. Puestos delante del campo se lo
+            comían entero —«Stableford · 85 golpes · 18 hoyos · Axis…»— y el
+            campo es lo que dice dónde jugaste; con el campo delante, los
+            golpes no se veían nunca en campos de nombre largo. Aquí caben los
+            dos: la línea de arriba pide 211 px de 235, y esta 120 (#575) */}
+          {strokesLabel && (
+            <span className="block truncate text-xs text-tinta-suave">
+              {strokesLabel}
+            </span>
+          )}
+          {/* La misma marca que en el historial. Sin ella, el resumen de arriba
+            —que no la cuenta— y esta lista —que la enseña— se contradicen sin
+            que nada lo explique: la vuelta está a la vista pero no suma. */}
+          {match.excludedFromStats && (
+            <span
+              data-testid={`recent-match-excluded-${match.id}`}
+              className="mt-1 inline-block rounded-full bg-tarjeta px-2 py-0.5 text-[10px] font-semibold text-tinta"
+            >
+              {t('recentMatches.excludedBadge')}
+            </span>
+          )}
+        </span>
+
+        <span className="flex flex-shrink-0 flex-col items-end">
+          {/* Los puntos mandan visualmente porque son lo único comparable entre
+            vueltas: 36 es jugar a tu hándicap, en cualquier campo y formato */}
+          {match.stablefordPoints !== null ? (
+            <span className="text-base font-bold text-tinta">
+              {t('recentMatches.points', { count: match.stablefordPoints })}
+            </span>
+          ) : (
+            score && (
+              <span className="text-base font-bold text-tinta">{score}</span>
+            )
+          )}
+          <span className="text-[10px] text-tinta-suave">
+            {formatDate(match.playedAt ?? match.date)}
+          </span>
+        </span>
+      </button>
+      {sePuedeRepetir && (
+        <IconoRepetir
+          partida={{ id: match.id, name: match.matchName }}
+          onRepetir={repetir.repetir}
+          preparando={repetir.preparando}
+        />
+      )}
+    </div>
+  );
+};
+
+const RecentMatches = ({
+  matches = [],
+  isLoading = false,
+  onCreateQuickMatch,
+  titleKey = 'recentMatches.title',
+  // Cuando otra espera de la misma pantalla ya se anuncia. Sin esto, un lector
+  // de pantalla oye «Cargando...» dos veces seguidas sin nada que las distinga
+  esperaSilenciosa = false,
+  // Con quien mira, sus partidas rápidas ofrecen «Repetir» (FE #1021)
+  usuario = null,
+}) => {
+  const { t, i18n } = useTranslation('dashboard');
+  // Aquí y no en cada fila: al recargar la lista, las filas se desmontan, y el
+  // asistente abierto se iba con ellas (`/code-review`)
+  const repetir = useRepetirPartida(usuario);
+  const navigate = useNavigate();
+
+  const formatDate = (date) =>
+    date
+      ? new Date(date).toLocaleDateString(i18n.language, {
+          day: 'numeric',
+          month: 'short',
+        })
+      : '';
+
+  // El asistente de repetir, siempre en el mismo sitio (hermano de la
+  // sección): así sigue abierto, con lo editado, aunque la lista se recargue
+  const asistente = (
+    <AsistenteDeRepetir
+      borrador={repetir.borrador}
+      usuario={usuario}
+      cierra={repetir.cierra}
+    />
+  );
+
+  if (isLoading) {
+    return (
+      <>
+        <section data-testid="recent-matches" aria-busy="true">
+          <h2 className="mb-3 text-xl font-bold text-tinta">{t(titleKey)}</h2>
+          {/* El dibujo compartido, no tres rectangulos grises: la aplicacion
+            espera siempre con la misma imagen (FE #495). `silencioso` cuando
+            acompaña a otra espera en la misma pantalla, o un lector oiria
+            «Cargando...» dos veces seguidas */}
+          <BlockLoader silencioso={esperaSilenciosa} />
+        </section>
+        {asistente}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <section data-testid="recent-matches">
+        <h2 className="mb-3 text-xl font-bold text-tinta">{t(titleKey)}</h2>
+
+        {matches.length === 0 ? (
+          <div
+            data-testid="recent-matches-empty"
+            className="rounded-tarjeta border-2 border-dashed border-linea p-6 text-center"
+          >
+            <p className="text-sm font-semibold text-tinta">
+              {t('recentMatches.emptyTitle')}
+            </p>
+            <p className="mt-1 text-xs text-tinta-suave">
+              {t('recentMatches.emptyDescription')}
+            </p>
+            {onCreateQuickMatch && (
+              <button
+                type="button"
+                onClick={onCreateQuickMatch}
+                data-testid="recent-matches-empty-cta"
+                className="mt-4 inline-flex items-center gap-2 rounded-lg bg-contraste px-4 py-2 text-sm font-semibold text-sobre-contraste hover:opacity-90"
+              >
+                <Zap className="h-4 w-4" aria-hidden="true" />
+                {t('recentMatches.emptyAction')}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="rounded-tarjeta border border-linea px-3">
+            {matches.map((match) => (
+              <MatchRow
+                key={match.id}
+                match={match}
+                onOpen={(target) => navigate(target.detailPath)}
+                t={t}
+                formatDate={formatDate}
+                repetir={usuario ? repetir : null}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+      {asistente}
+    </>
+  );
+};
+
+export default RecentMatches;

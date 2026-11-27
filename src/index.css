@@ -1,0 +1,1059 @@
+/* El orden de las capas, antes que nada: la hoja de MapLibre (que solo se carga
+   al abrir el mapa, ver components/scoring/mapa/mapa.css) va en `maplibre`, por
+   debajo de `utilities`. Sin capa, ganaba a todas las utilidades de Tailwind en
+   cualquier elemento `.maplibregl-*` (el mapa del hoyo salía gris, BE #532) */
+@layer theme, base, components, maplibre, utilities;
+@import 'tailwindcss';
+/* Montserrat se importa en main.jsx, desde la propia aplicación */
+
+/* ───────────────────────── ComeBack Golf ─────────────────────────
+   La identidad (brand/comebackgolf/): tres colores y sus derivados.
+
+   · Sand manda en claro; Deep Forest es la tinta y el fondo del oscuro; Acid
+     Lime solo en botones principales, acciones e indicadores activos, nunca en
+     superficies grandes.
+   · Los colores de equipo son aparte y solo informan: van siempre con el
+     nombre del equipo o una flecha, nunca solos.
+
+   Dos familias de tokens:
+   1. SEMÁNTICOS (`bg-fondo`, `text-tinta`, `border-linea`…): cambian con el
+      tema. Son los que usan las pantallas ya rediseñadas.
+   2. ESCALAS DE ANTES (`primary`, `gray`, `accent`…): reajustadas a la marca
+      para que las pantallas aún sin rediseñar no desentonen. Son variables, y
+      el oscuro les da otro valor (la paleta oscura, más abajo). */
+:root {
+  /* La paleta corporativa: no se retoca */
+  --cbg-sand: #e8ddce;
+  --cbg-forest: #222d24;
+  --cbg-lime: #ddf478;
+  /* Los auxiliares de la interfaz (25 nov 2026): extensiones de la paleta para
+     dar jerarquía. El claro, todo en arena, perdía frescura */
+  --cbg-off-white: #f8f7f2;
+  --cbg-sage: #dce3d7;
+  --cbg-forest-medium: #354638;
+
+  /* Las superficies, de más a menos presencia en claro: el fondo (Off White,
+     la mayor parte), la tarjeta (Sand: superficies secundarias y bloques de
+     contenido) y el realce (Soft Sage: tarjetas informativas, marcadores y
+     competiciones activas). Que no todas las tarjetas lleven el mismo fondo:
+     el contraste lo dan las superficies, no los bordes */
+  --cbg-fondo: var(--cbg-off-white);
+  --cbg-tarjeta: var(--cbg-sand);
+  --cbg-realce: var(--cbg-sage);
+  /* El contorno de una tarjeta sin borde: en claro no hace falta, la separa
+     su superficie; en oscuro la tarjeta y el fondo son casi el mismo tono
+     (1,08:1) y sin él no se distinguía dónde acaba (revisión, 25 nov 2026) */
+  --cbg-contorno: transparent;
+  --cbg-tinta: var(--cbg-forest);
+  --cbg-tinta-suave: #545b52;
+  --cbg-linea: #bfaf97;
+  /* El contorno de un control (un filtro, un campo, un hoyo vacío): 3:1 contra
+     el fondo, que la línea de una tarjeta no alcanza ni necesita */
+  --cbg-borde: #7f7663;
+  --cbg-trazo: #d3c4ac;
+  --cbg-contraste: var(--cbg-forest);
+  --cbg-sobre-contraste: var(--cbg-sand);
+  --cbg-foco: var(--cbg-forest);
+  --cbg-team-a: #1f4e8c;
+  --cbg-team-b: #b5341c;
+  /* Los estados (anotación: validado, pendiente, en conflicto): se distinguen
+     por su color Y por su icono o texto, nunca solo por el color */
+  --cbg-aviso: #7a5000;
+  --cbg-error: #b42318;
+  --cbg-exito: #2f6b3a;
+  /* La bola que contó en un hoyo de fourball: la lima sobre el fondo, opaca.
+     Más cargada en claro, donde la lima apenas se separa del Off White */
+  --cbg-mejor-bola: color-mix(in srgb, var(--cbg-lime) 60%, var(--cbg-fondo));
+  /* El fondo suave de una insignia de estado o de equipo («Gana», «Pierde»,
+     «Retirado», la cabecera de un equipo): su color al 12 % sobre el FONDO, y
+     opaco. Con una opacidad (`bg-error/15`) el tinte dependía de lo que hubiera
+     debajo, y sobre una tarjeta arena o salvia el texto bajaba de 4,5:1
+     (revisión, 25 nov 2026). Salen de los de arriba: el oscuro no los repite.
+     Excepción: la cabecera de equipo de la tarjeta de resultados lo pinta al
+     65 %, para dejar ver la marca de agua; su letra es de tinta, no del color
+     del equipo, y no pierde contraste (26 nov 2026) */
+  --cbg-aviso-suave: color-mix(in srgb, var(--cbg-aviso) 12%, var(--cbg-fondo));
+  --cbg-error-suave: color-mix(in srgb, var(--cbg-error) 12%, var(--cbg-fondo));
+  --cbg-exito-suave: color-mix(in srgb, var(--cbg-exito) 12%, var(--cbg-fondo));
+  --cbg-team-a-suave: color-mix(
+    in srgb,
+    var(--cbg-team-a) 12%,
+    var(--cbg-fondo)
+  );
+  --cbg-team-b-suave: color-mix(
+    in srgb,
+    var(--cbg-team-b) 12%,
+    var(--cbg-fondo)
+  );
+  color-scheme: light;
+}
+
+/* El tema oscuro, en toda la aplicación (24 nov 2026). Las pantallas ya
+   rediseñadas lo pintan con los tokens semánticos de aquí; las que siguen con
+   las escalas de antes, con la paleta oscura de más abajo. */
+:root[data-tema='oscuro'] {
+  /* El oscuro no es el claro invertido: Deep Forest de fondo y Forest Medium
+     para lo que se eleva sobre él */
+  --cbg-fondo: var(--cbg-forest);
+  --cbg-tarjeta: #273328;
+  --cbg-realce: var(--cbg-forest-medium);
+  /* Muy poca lima en oscuro: con más, el texto de la casilla bajaba de 4,5:1 */
+  --cbg-mejor-bola: color-mix(in srgb, var(--cbg-lime) 15%, var(--cbg-fondo));
+  --cbg-contorno: var(--cbg-linea);
+  --cbg-tinta: var(--cbg-sand);
+  --cbg-tinta-suave: #b7bdb2;
+  --cbg-linea: #56655a;
+  --cbg-borde: #7c8a7f;
+  --cbg-trazo: #344437;
+  --cbg-contraste: var(--cbg-sand);
+  --cbg-sobre-contraste: var(--cbg-forest);
+  --cbg-foco: var(--cbg-lime);
+  --cbg-team-a: #8fb8f0;
+  /* Un punto más claro que antes (#f08a76): sobre el realce, Forest Medium, no
+     llegaba a 4,5:1. Igual de legible que el azul del otro equipo */
+  --cbg-team-b: #f4a08f;
+  --cbg-aviso: #f0c36a;
+  --cbg-error: #f59a8e;
+  --cbg-exito: #9fd48e;
+  color-scheme: dark;
+}
+
+@theme inline {
+  /* La marca, fija */
+  --color-sand: #e8ddce;
+  --color-forest: #222d24;
+  --color-lime: #ddf478;
+
+  /* Semánticos: siguen al tema */
+  --color-fondo: var(--cbg-fondo);
+  --color-tarjeta: var(--cbg-tarjeta);
+  --color-realce: var(--cbg-realce);
+  --color-mejor-bola: var(--cbg-mejor-bola);
+  --color-contorno: var(--cbg-contorno);
+  --color-tinta: var(--cbg-tinta);
+  --color-tinta-suave: var(--cbg-tinta-suave);
+  --color-linea: var(--cbg-linea);
+  --color-borde: var(--cbg-borde);
+  --color-trazo: var(--cbg-trazo);
+  /* La pieza que resalta sobre el fondo (filtro activo, equipo que gana) y su texto */
+  --color-contraste: var(--cbg-contraste);
+  --color-sobre-contraste: var(--cbg-sobre-contraste);
+  --color-team-a: var(--cbg-team-a);
+  --color-team-b: var(--cbg-team-b);
+  --color-aviso: var(--cbg-aviso);
+  --color-error: var(--cbg-error);
+  --color-exito: var(--cbg-exito);
+  --color-aviso-suave: var(--cbg-aviso-suave);
+  --color-error-suave: var(--cbg-error-suave);
+  --color-exito-suave: var(--cbg-exito-suave);
+  --color-team-a-suave: var(--cbg-team-a-suave);
+  --color-team-b-suave: var(--cbg-team-b-suave);
+
+  --font-sans: 'Montserrat Variable', 'Montserrat', system-ui, sans-serif;
+
+  --radius-tarjeta: 1.25rem; /* 20 px */
+  --radius-boton: 1.625rem; /* 26 px */
+}
+
+/* Las escalas de antes, en un `@theme` SIN `inline`: así son variables de
+   verdad (`--color-gray-500`…) y el oscuro puede darles otro valor sin
+   reescribir cada pieza (ver la paleta oscura, más abajo) */
+@theme {
+  /* Escalas de antes, reajustadas. `primary` era el verde de la marca antigua:
+     ahora es Deep Forest (botones oscuros con texto claro, enlaces) y sus tonos
+     claros, arenas */
+  --color-primary-50: #eee5d8;
+  --color-primary-100: #e1d5c3;
+  --color-primary-200: #d3c4ac;
+  --color-primary-300: #bfaf97;
+  --color-primary-400: #6f7b70;
+  --color-primary-500: #222d24;
+  --color-primary-600: #1c251e;
+  --color-primary-700: #161d17;
+  --color-primary-800: #111712;
+  --color-primary-900: #0c110d;
+  --color-primary-950: #070a08;
+
+  --color-secondary-500: #222d24;
+
+  /* `accent` era el dorado: ahora la familia de la lima, con los tonos oscuros
+     en oliva para que el texto blanco que llevan encima se siga leyendo */
+  --color-accent-50: #f7fae6;
+  --color-accent-100: #f0f6c9;
+  --color-accent-200: #e7f2a4;
+  --color-accent-300: #ddf478;
+  --color-accent-400: #b9cf55;
+  --color-accent-500: #5f6b2a;
+  --color-accent-600: #4f5a22;
+  --color-accent-700: #414a1c;
+  --color-accent-800: #343b17;
+  --color-accent-900: #272d12;
+
+  --color-navy-700: #2c372e;
+  --color-navy-800: #222d24;
+  --color-navy-900: #171f19;
+
+  /* Los grises, cálidos: del Sand al Deep Forest */
+  --color-gray-50: #e8ddce;
+  --color-gray-100: #e1d5c3;
+  --color-gray-200: #d3c4ac;
+  --color-gray-300: #bfaf97;
+  --color-gray-400: #7f7c6d;
+  --color-gray-500: #5c6258;
+  --color-gray-600: #4a5148;
+  --color-gray-700: #3a433b;
+  --color-gray-800: #2c372e;
+  --color-gray-900: #222d24;
+  --color-gray-950: #171f19;
+  /* Cada color «a secas»: de él salen sus opacidades (bg-primary/90,
+     ring-primary/20, bg-accent/90…). Sin ellos, Tailwind no generaba ninguna
+     (pasada del Kind, 27 oct 2026) */
+  --color-primary: var(--color-primary-500);
+  --color-secondary: var(--color-secondary-500);
+  --color-accent: var(--color-accent-500);
+  --color-navy: var(--color-navy-800);
+}
+
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html {
+    background-color: var(--cbg-fondo);
+  }
+
+  body {
+    font-family: 'Montserrat Variable', 'Montserrat', system-ui, sans-serif;
+    background-color: var(--cbg-fondo);
+    color: var(--cbg-tinta);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+
+    /* Safe areas (FE #308). Installed as a standalone PWA there is no browser
+       chrome, so content would run under the notch and the rounded corners.
+       The side insets go on the body because in landscape they apply to every
+       screen; the top and bottom ones live on the elements that reach those
+       edges (headers, footer, fixed panels) so their background still covers
+       the system UI instead of leaving a blank strip. All of them are 0 in a
+       browser tab and in portrait on devices without a notch. */
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: 'Montserrat Variable', 'Montserrat', system-ui, sans-serif;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+  }
+}
+
+@layer components {
+  /* El contenedor de contenido de cada pantalla es un `flex-1` dentro de un
+     padre flex, y un hijo flex NO encoge por debajo del ancho de su contenido
+     salvo que se le permita explícitamente. Sin esto, un texto largo —el nombre
+     de un rival, el de un campo— estira el contenedor más allá del ancho de la
+     pantalla: el móvil acaba con scroll horizontal y la página desplazada, con
+     el contenido cortado por la izquierda mientras la navegación inferior y los
+     avisos (que son `fixed`) siguen en su sitio. Se arregla aquí y no en cada
+     una de las trece pantallas que usan la clase. */
+  .layout-content-container {
+    min-width: 0;
+  }
+
+  /* Botón principal: Acid Lime con texto Deep Forest, en los dos temas */
+  .btn-primary {
+    background-color: var(--cbg-lime);
+    color: var(--cbg-forest);
+    font-weight: 700;
+    padding: 0.625rem 1.5rem;
+    border-radius: var(--radius-boton);
+    transition: filter 200ms;
+  }
+
+  .btn-primary:hover {
+    filter: brightness(0.95);
+  }
+
+  /* Secundario: el fondo de la pantalla con contorno de tinta */
+  .btn-secondary {
+    background-color: var(--cbg-fondo);
+    color: var(--cbg-tinta);
+    font-weight: 700;
+    padding: 0.625rem 1.5rem;
+    border: 1.5px solid var(--cbg-tinta);
+    border-radius: var(--radius-boton);
+    transition: background-color 200ms;
+  }
+
+  .btn-secondary:hover {
+    background-color: var(--cbg-tarjeta);
+  }
+
+  /* Borde fino y sin sombra: la tarjeta de la marca */
+  .card {
+    background-color: var(--cbg-tarjeta);
+    border: 1px solid var(--cbg-linea);
+    border-radius: var(--radius-tarjeta);
+    padding: 1.5rem;
+  }
+
+  .input-field {
+    width: 100%;
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--color-gray-300);
+    border-radius: 0.5rem;
+    transition: all 200ms;
+  }
+
+  .input-field:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-primary-500);
+    border-color: transparent;
+  }
+
+  /* Los nombres de las fuentes de antes siguen en muchas pantallas: las dos
+     son ya Montserrat, la única de la marca */
+  .font-poppins,
+  .font-inter {
+    font-family: 'Montserrat Variable', 'Montserrat', system-ui, sans-serif;
+  }
+}
+
+/* En claro, el blanco de antes es el fondo, Off White: las pantallas aún sin
+   rediseñar pintaban su fondo y sus tarjetas en blanco puro, que desentona con
+   la cabecera y la barra. Fue el arena de las tarjetas un día (24 nov 2026) y
+   la app entera quedaba arena. El oscuro, más abajo, le da su propio valor. Lo
+   que pinta sus propios colores, blanco. */
+:root {
+  --color-white: var(--cbg-fondo);
+}
+
+[data-paleta='propia'] {
+  --color-white: #fff;
+}
+
+/* La paleta oscura de las escalas de antes (`gray`, `primary`, `white`, y los
+   colores de Tailwind: rojo, verde, azul, ámbar…). Vale para toda la aplicación:
+   así las pantallas aún sin rediseñar también tienen modo oscuro, sin
+   reescribir sus clases una a una.
+
+   Cada tono claro (50 a 300) es su versión oscura, la tarjeta teñida del color;
+   el 500 es el tono vivo sobre oscuro; y los oscuros (600 a 900), que eran
+   texto, son claros. El blanco es la tarjeta oscura: así una tarjeta `bg-white`
+   es una tarjeta oscura, y un botón `bg-red-600 text-white` queda con fondo
+   claro y texto oscuro, y se lee. `gray-50`, que era el fondo de las páginas,
+   es el Deep Forest del fondo.
+
+   El significado de cada color se conserva: lo que era un fondo claro con texto
+   oscuro es un fondo oscuro con texto claro del mismo tono.
+
+   Los valores salen de una regla, no se eligen uno a uno: tocar aquí un tono
+   suelto lo descuadra de los demás. */
+:root[data-tema='oscuro'] {
+  --color-white: #273328;
+
+  --color-gray-50: #222d24;
+  --color-gray-100: #2f3c31;
+  --color-gray-200: #3d4c40;
+  --color-gray-300: #56655a;
+  --color-gray-400: #96a297;
+  --color-gray-500: #a9b3a8;
+  --color-gray-600: #b7bdb2;
+  --color-gray-700: #cdd2c8;
+  --color-gray-800: #dcd6c8;
+  --color-gray-900: #e8ddce;
+  --color-gray-950: #f2eadf;
+
+  /* `slate` se usa como un gris más */
+  --color-slate-100: #2f3c31;
+  --color-slate-700: #cdd2c8;
+
+  /* El primario, el secundario y el `navy` eran Deep Forest sobre claro: aquí,
+     Sand sobre oscuro */
+  --color-primary-50: #2a372c;
+  --color-primary-100: #2f3c31;
+  --color-primary-200: #3d4c40;
+  --color-primary-300: #56655a;
+  --color-primary-400: #a5afa4;
+  --color-primary-500: #e8ddce;
+  --color-primary-600: #e8ddce;
+  --color-primary-700: #e8ddce;
+  --color-primary-800: #f2eadf;
+  --color-primary-900: #f2eadf;
+  --color-primary-950: #f2eadf;
+  --color-primary: #e8ddce;
+  --color-secondary-500: #e8ddce;
+  --color-secondary: #e8ddce;
+  --color-navy-700: #dcd6c8;
+  --color-navy-800: #e8ddce;
+  --color-navy-900: #f2eadf;
+  --color-navy: #e8ddce;
+
+  /* `accent` es la familia de la lima: sobre oscuro, la lima es el tono fuerte */
+  --color-accent-50: #2f361f;
+  --color-accent-100: #353d22;
+  --color-accent-200: #454f27;
+  --color-accent-300: #5f6b2a;
+  --color-accent-400: #b9cf55;
+  --color-accent-500: #ddf478;
+  --color-accent-600: #ddf478;
+  --color-accent-700: #e6f79a;
+  --color-accent-800: #eef9bb;
+  --color-accent-900: #f4fbd2;
+  --color-accent: #ddf478;
+
+  --color-blue-50: #314243;
+  --color-blue-100: #374b52;
+  --color-blue-200: #3f5869;
+  --color-blue-300: #4a6a87;
+  --color-blue-400: #5e88bc;
+  --color-blue-500: #6ea0e6;
+  --color-blue-600: #89b0e6;
+  --color-blue-700: #a2bee6;
+  --color-blue-800: #b9cce6;
+  --color-blue-900: #cdd8e6;
+
+  --color-red-50: #433f33;
+  --color-red-100: #534639;
+  --color-red-200: #6b5143;
+  --color-red-300: #8c5e4f;
+  --color-red-400: #c47765;
+  --color-red-500: #f08a76;
+  --color-red-600: #f19e8c;
+  --color-red-700: #f2b1a1;
+  --color-red-800: #f3c2b4;
+  --color-red-900: #f4d1c4;
+
+  --color-green-50: #354833;
+  --color-green-100: #3d543a;
+  --color-green-200: #496544;
+  --color-green-300: #5a7d51;
+  --color-green-400: #76a668;
+  --color-green-500: #8cc77a;
+  --color-green-600: #a1cf90;
+  --color-green-700: #b4d7a3;
+  --color-green-800: #c6deb5;
+  --color-green-900: #d6e4c6;
+
+  --color-emerald-50: #33493a;
+  --color-emerald-100: #3a5544;
+  --color-emerald-200: #456853;
+  --color-emerald-300: #538167;
+  --color-emerald-400: #6cad8a;
+  --color-emerald-500: #7fcfa6;
+  --color-emerald-600: #97d6b3;
+  --color-emerald-700: #acdcbe;
+  --color-emerald-800: #c0e1c9;
+  --color-emerald-900: #d2e6d3;
+
+  --color-yellow-50: #42472d;
+  --color-yellow-100: #515330;
+  --color-yellow-200: #686435;
+  --color-yellow-300: #867b3a;
+  --color-yellow-400: #bca345;
+  --color-yellow-500: #e6c34d;
+  --color-yellow-600: #e9cc6c;
+  --color-yellow-700: #ecd487;
+  --color-yellow-800: #efdca1;
+  --color-yellow-900: #f1e2b8;
+
+  --color-amber-50: #41442d;
+  --color-amber-100: #504e2f;
+  --color-amber-200: #665e34;
+  --color-amber-300: #847239;
+  --color-amber-400: #b79443;
+  --color-amber-500: #e0b04a;
+  --color-amber-600: #e4bd69;
+  --color-amber-700: #e8c885;
+  --color-amber-800: #ecd3a0;
+  --color-amber-900: #efddb7;
+
+  --color-orange-50: #43422f;
+  --color-orange-100: #534b33;
+  --color-orange-200: #6b5839;
+  --color-orange-300: #8c6a41;
+  --color-orange-400: #c4884f;
+  --color-orange-500: #f0a05a;
+  --color-orange-600: #f1b076;
+  --color-orange-700: #f2be8f;
+  --color-orange-800: #f3cca7;
+  --color-orange-900: #f4d8bc;
+
+  --color-purple-50: #3b4144;
+  --color-purple-100: #474a54;
+  --color-purple-200: #58566c;
+  --color-purple-300: #6f668c;
+  --color-purple-400: #9783c4;
+  --color-purple-500: #b79af0;
+  --color-purple-600: #c4abee;
+  --color-purple-700: #cfbbec;
+  --color-purple-800: #dac9ea;
+  --color-purple-900: #e3d6e9;
+
+  --color-indigo-50: #374345;
+  --color-indigo-100: #404c55;
+  --color-indigo-200: #4e5a6e;
+  --color-indigo-300: #606c8e;
+  --color-indigo-400: #818dc8;
+  --color-indigo-500: #9aa6f5;
+  --color-indigo-600: #acb5f2;
+  --color-indigo-700: #bdc2ef;
+  --color-indigo-800: #cdcfed;
+  --color-indigo-900: #dadaea;
+
+  --color-pink-50: #43403d;
+  --color-pink-100: #534749;
+  --color-pink-200: #6b535c;
+  --color-pink-300: #8c6274;
+  --color-pink-400: #c47c9f;
+  --color-pink-500: #f090c0;
+  --color-pink-600: #f1a3c8;
+  --color-pink-700: #f2b4ce;
+  --color-pink-800: #f3c5d5;
+  --color-pink-900: #f4d3db;
+
+  --color-rose-50: #443f39;
+  --color-rose-100: #544642;
+  --color-rose-200: #6d5151;
+  --color-rose-300: #8e5e64;
+  --color-rose-400: #c87786;
+  --color-rose-500: #f58aa0;
+  --color-rose-600: #f59eae;
+  --color-rose-700: #f5b1bb;
+  --color-rose-800: #f6c2c6;
+  --color-rose-900: #f6d1d1;
+
+  --color-sky-50: #334744;
+  --color-sky-100: #3a5354;
+  --color-sky-200: #44646b;
+  --color-sky-300: #527c8b;
+  --color-sky-400: #69a4c2;
+  --color-sky-500: #7cc4ee;
+  --color-sky-600: #94cdec;
+  --color-sky-700: #aad5eb;
+  --color-sky-800: #bfdcea;
+  --color-sky-900: #d1e3e8;
+
+  --color-teal-50: #31493d;
+  --color-teal-100: #375649;
+  --color-teal-200: #3f685c;
+  --color-teal-300: #4b8274;
+  --color-teal-400: #5fad9f;
+  --color-teal-500: #6fd0c0;
+  --color-teal-600: #8ad6c8;
+  --color-teal-700: #a2dcce;
+  --color-teal-800: #b9e2d5;
+  --color-teal-900: #cee6db;
+
+  --color-violet-50: #3b4245;
+  --color-violet-100: #474b55;
+  --color-violet-200: #59586e;
+  --color-violet-300: #706a8e;
+  --color-violet-400: #9988c8;
+  --color-violet-500: #b9a0f5;
+  --color-violet-600: #c5b0f2;
+  --color-violet-700: #d0beef;
+  --color-violet-800: #dbcced;
+  --color-violet-900: #e4d8ea;
+}
+
+/* Lo que pinta sus propios colores en los dos temas —el mapa del hoyo, en negro
+   con texto blanco; un texto blanco sobre una foto; el panel de marca del
+   acceso— se queda fuera de la paleta oscura: dentro de `data-paleta="propia"`
+   TODAS las escalas vuelven a su valor de claro.
+
+   Todas, no solo el blanco y los grises: un `bg-green-700 text-white` sobre el
+   satélite quedaba verde pálido con texto blanco, y los marcadores amarillos,
+   apagados (revisión, 25 nov 2026). Una variable heredada no se puede «devolver»
+   con `revert`, así que van escritas: son las mismas que redefine el oscuro, con
+   el valor que les da el tema, y un test vigila que no falte ninguna. */
+:root[data-tema='oscuro'] [data-paleta='propia'] {
+  --color-white: #fff;
+  --color-gray-50: #e8ddce;
+  --color-gray-100: #e1d5c3;
+  --color-gray-200: #d3c4ac;
+  --color-gray-300: #bfaf97;
+  --color-gray-400: #7f7c6d;
+  --color-gray-500: #5c6258;
+  --color-gray-600: #4a5148;
+  --color-gray-700: #3a433b;
+  --color-gray-800: #2c372e;
+  --color-gray-900: #222d24;
+  --color-gray-950: #171f19;
+  --color-slate-100: oklch(96.8% 0.007 247.896);
+  --color-slate-700: oklch(37.2% 0.044 257.287);
+  --color-primary-50: #eee5d8;
+  --color-primary-100: #e1d5c3;
+  --color-primary-200: #d3c4ac;
+  --color-primary-300: #bfaf97;
+  --color-primary-400: #6f7b70;
+  --color-primary-500: #222d24;
+  --color-primary-600: #1c251e;
+  --color-primary-700: #161d17;
+  --color-primary-800: #111712;
+  --color-primary-900: #0c110d;
+  --color-primary-950: #070a08;
+  --color-primary: var(--color-primary-500);
+  --color-secondary-500: #222d24;
+  --color-secondary: var(--color-secondary-500);
+  --color-navy-700: #2c372e;
+  --color-navy-800: #222d24;
+  --color-navy-900: #171f19;
+  --color-navy: var(--color-navy-800);
+  --color-accent-50: #f7fae6;
+  --color-accent-100: #f0f6c9;
+  --color-accent-200: #e7f2a4;
+  --color-accent-300: #ddf478;
+  --color-accent-400: #b9cf55;
+  --color-accent-500: #5f6b2a;
+  --color-accent-600: #4f5a22;
+  --color-accent-700: #414a1c;
+  --color-accent-800: #343b17;
+  --color-accent-900: #272d12;
+  --color-accent: var(--color-accent-500);
+  --color-blue-50: oklch(97% 0.014 254.604);
+  --color-blue-100: oklch(93.2% 0.032 255.585);
+  --color-blue-200: oklch(88.2% 0.059 254.128);
+  --color-blue-300: oklch(80.9% 0.105 251.813);
+  --color-blue-400: oklch(70.7% 0.165 254.624);
+  --color-blue-500: oklch(62.3% 0.214 259.815);
+  --color-blue-600: oklch(54.6% 0.245 262.881);
+  --color-blue-700: oklch(48.8% 0.243 264.376);
+  --color-blue-800: oklch(42.4% 0.199 265.638);
+  --color-blue-900: oklch(37.9% 0.146 265.522);
+  --color-red-50: oklch(97.1% 0.013 17.38);
+  --color-red-100: oklch(93.6% 0.032 17.717);
+  --color-red-200: oklch(88.5% 0.062 18.334);
+  --color-red-300: oklch(80.8% 0.114 19.571);
+  --color-red-400: oklch(70.4% 0.191 22.216);
+  --color-red-500: oklch(63.7% 0.237 25.331);
+  --color-red-600: oklch(57.7% 0.245 27.325);
+  --color-red-700: oklch(50.5% 0.213 27.518);
+  --color-red-800: oklch(44.4% 0.177 26.899);
+  --color-red-900: oklch(39.6% 0.141 25.723);
+  --color-green-50: oklch(98.2% 0.018 155.826);
+  --color-green-100: oklch(96.2% 0.044 156.743);
+  --color-green-200: oklch(92.5% 0.084 155.995);
+  --color-green-300: oklch(87.1% 0.15 154.449);
+  --color-green-400: oklch(79.2% 0.209 151.711);
+  --color-green-500: oklch(72.3% 0.219 149.579);
+  --color-green-600: oklch(62.7% 0.194 149.214);
+  --color-green-700: oklch(52.7% 0.154 150.069);
+  --color-green-800: oklch(44.8% 0.119 151.328);
+  --color-green-900: oklch(39.3% 0.095 152.535);
+  --color-emerald-50: oklch(97.9% 0.021 166.113);
+  --color-emerald-100: oklch(95% 0.052 163.051);
+  --color-emerald-200: oklch(90.5% 0.093 164.15);
+  --color-emerald-300: oklch(84.5% 0.143 164.978);
+  --color-emerald-400: oklch(76.5% 0.177 163.223);
+  --color-emerald-500: oklch(69.6% 0.17 162.48);
+  --color-emerald-600: oklch(59.6% 0.145 163.225);
+  --color-emerald-700: oklch(50.8% 0.118 165.612);
+  --color-emerald-800: oklch(43.2% 0.095 166.913);
+  --color-emerald-900: oklch(37.8% 0.077 168.94);
+  --color-yellow-50: oklch(98.7% 0.026 102.212);
+  --color-yellow-100: oklch(97.3% 0.071 103.193);
+  --color-yellow-200: oklch(94.5% 0.129 101.54);
+  --color-yellow-300: oklch(90.5% 0.182 98.111);
+  --color-yellow-400: oklch(85.2% 0.199 91.936);
+  --color-yellow-500: oklch(79.5% 0.184 86.047);
+  --color-yellow-600: oklch(68.1% 0.162 75.834);
+  --color-yellow-700: oklch(55.4% 0.135 66.442);
+  --color-yellow-800: oklch(47.6% 0.114 61.907);
+  --color-yellow-900: oklch(42.1% 0.095 57.708);
+  --color-amber-50: oklch(98.7% 0.022 95.277);
+  --color-amber-100: oklch(96.2% 0.059 95.617);
+  --color-amber-200: oklch(92.4% 0.12 95.746);
+  --color-amber-300: oklch(87.9% 0.169 91.605);
+  --color-amber-400: oklch(82.8% 0.189 84.429);
+  --color-amber-500: oklch(76.9% 0.188 70.08);
+  --color-amber-600: oklch(66.6% 0.179 58.318);
+  --color-amber-700: oklch(55.5% 0.163 48.998);
+  --color-amber-800: oklch(47.3% 0.137 46.201);
+  --color-amber-900: oklch(41.4% 0.112 45.904);
+  --color-orange-50: oklch(98% 0.016 73.684);
+  --color-orange-100: oklch(95.4% 0.038 75.164);
+  --color-orange-200: oklch(90.1% 0.076 70.697);
+  --color-orange-300: oklch(83.7% 0.128 66.29);
+  --color-orange-400: oklch(75% 0.183 55.934);
+  --color-orange-500: oklch(70.5% 0.213 47.604);
+  --color-orange-600: oklch(64.6% 0.222 41.116);
+  --color-orange-700: oklch(55.3% 0.195 38.402);
+  --color-orange-800: oklch(47% 0.157 37.304);
+  --color-orange-900: oklch(40.8% 0.123 38.172);
+  --color-purple-50: oklch(97.7% 0.014 308.299);
+  --color-purple-100: oklch(94.6% 0.033 307.174);
+  --color-purple-200: oklch(90.2% 0.063 306.703);
+  --color-purple-300: oklch(82.7% 0.119 306.383);
+  --color-purple-400: oklch(71.4% 0.203 305.504);
+  --color-purple-500: oklch(62.7% 0.265 303.9);
+  --color-purple-600: oklch(55.8% 0.288 302.321);
+  --color-purple-700: oklch(49.6% 0.265 301.924);
+  --color-purple-800: oklch(43.8% 0.218 303.724);
+  --color-purple-900: oklch(38.1% 0.176 304.987);
+  --color-indigo-50: oklch(96.2% 0.018 272.314);
+  --color-indigo-100: oklch(93% 0.034 272.788);
+  --color-indigo-200: oklch(87% 0.065 274.039);
+  --color-indigo-300: oklch(78.5% 0.115 274.713);
+  --color-indigo-400: oklch(67.3% 0.182 276.935);
+  --color-indigo-500: oklch(58.5% 0.233 277.117);
+  --color-indigo-600: oklch(51.1% 0.262 276.966);
+  --color-indigo-700: oklch(45.7% 0.24 277.023);
+  --color-indigo-800: oklch(39.8% 0.195 277.366);
+  --color-indigo-900: oklch(35.9% 0.144 278.697);
+  --color-pink-50: oklch(97.1% 0.014 343.198);
+  --color-pink-100: oklch(94.8% 0.028 342.258);
+  --color-pink-200: oklch(89.9% 0.061 343.231);
+  --color-pink-300: oklch(82.3% 0.12 346.018);
+  --color-pink-400: oklch(71.8% 0.202 349.761);
+  --color-pink-500: oklch(65.6% 0.241 354.308);
+  --color-pink-600: oklch(59.2% 0.249 0.584);
+  --color-pink-700: oklch(52.5% 0.223 3.958);
+  --color-pink-800: oklch(45.9% 0.187 3.815);
+  --color-pink-900: oklch(40.8% 0.153 2.432);
+  --color-rose-50: oklch(96.9% 0.015 12.422);
+  --color-rose-100: oklch(94.1% 0.03 12.58);
+  --color-rose-200: oklch(89.2% 0.058 10.001);
+  --color-rose-300: oklch(81% 0.117 11.638);
+  --color-rose-400: oklch(71.2% 0.194 13.428);
+  --color-rose-500: oklch(64.5% 0.246 16.439);
+  --color-rose-600: oklch(58.6% 0.253 17.585);
+  --color-rose-700: oklch(51.4% 0.222 16.935);
+  --color-rose-800: oklch(45.5% 0.188 13.697);
+  --color-rose-900: oklch(41% 0.159 10.272);
+  --color-sky-50: oklch(97.7% 0.013 236.62);
+  --color-sky-100: oklch(95.1% 0.026 236.824);
+  --color-sky-200: oklch(90.1% 0.058 230.902);
+  --color-sky-300: oklch(82.8% 0.111 230.318);
+  --color-sky-400: oklch(74.6% 0.16 232.661);
+  --color-sky-500: oklch(68.5% 0.169 237.323);
+  --color-sky-600: oklch(58.8% 0.158 241.966);
+  --color-sky-700: oklch(50% 0.134 242.749);
+  --color-sky-800: oklch(44.3% 0.11 240.79);
+  --color-sky-900: oklch(39.1% 0.09 240.876);
+  --color-teal-50: oklch(98.4% 0.014 180.72);
+  --color-teal-100: oklch(95.3% 0.051 180.801);
+  --color-teal-200: oklch(91% 0.096 180.426);
+  --color-teal-300: oklch(85.5% 0.138 181.071);
+  --color-teal-400: oklch(77.7% 0.152 181.912);
+  --color-teal-500: oklch(70.4% 0.14 182.503);
+  --color-teal-600: oklch(60% 0.118 184.704);
+  --color-teal-700: oklch(51.1% 0.096 186.391);
+  --color-teal-800: oklch(43.7% 0.078 188.216);
+  --color-teal-900: oklch(38.6% 0.063 188.416);
+  --color-violet-50: oklch(96.9% 0.016 293.756);
+  --color-violet-100: oklch(94.3% 0.029 294.588);
+  --color-violet-200: oklch(89.4% 0.057 293.283);
+  --color-violet-300: oklch(81.1% 0.111 293.571);
+  --color-violet-400: oklch(70.2% 0.183 293.541);
+  --color-violet-500: oklch(60.6% 0.25 292.717);
+  --color-violet-600: oklch(54.1% 0.281 293.009);
+  --color-violet-700: oklch(49.1% 0.27 292.581);
+  --color-violet-800: oklch(43.2% 0.232 292.759);
+  --color-violet-900: oklch(38% 0.189 293.745);
+}
+
+/* Lo que solo se pinta en un tema: los logos, que van en dos tintas y no pueden
+   heredar el color (son los SVG originales, sin tocar).
+
+   FUERA de @layer a propósito, y con `!important`: dentro de la capa de
+   utilidades, un `block` o un `flex` puesto en el mismo elemento le ganaba por
+   orden y salían las dos tintas a la vez (la cabecera pública, 24 nov 2026).
+   Esconder la que no toca no puede depender de qué otras clases lleve. */
+.solo-oscuro {
+  display: none !important;
+}
+
+:root[data-tema='oscuro'] .solo-claro {
+  display: none !important;
+}
+
+:root[data-tema='oscuro'] .solo-oscuro {
+  display: revert !important;
+}
+
+/* react-hot-toast fija su contenedor con `bottom: 16px` en un style inline, de
+   modo que en movil los toasts caen dentro de la navegacion inferior y la tapan
+   (FE #322). Solo un !important puede ganar a ese inline style.
+
+   5rem: los 4 de la barra (`h-16` en BottomNav) y uno de aire, para que el
+   aviso no la toque. A partir de `md` la navegacion no se pinta y el toast
+   recupera su sitio. */
+.toast-container-above-bottom-nav {
+  bottom: calc(5rem + env(safe-area-inset-bottom)) !important;
+}
+
+@media (min-width: 768px) {
+  .toast-container-above-bottom-nav {
+    bottom: 16px !important;
+  }
+}
+
+/* Sentry feedback widget ("Report a Bug") defaults to bottom-right, which
+   overlaps our react-hot-toast notifications and bottom banners. The widget
+   renders in a shadow DOM host (#sentry-feedback) that only reads CSS custom
+   properties, so it can't be restyled with normal selectors — moving it means
+   overriding --actor-inset (top/right/bottom/left) from outside the shadow
+   root. Left untouched: --dialog-inset, so the report form itself still opens
+   in its default position. */
+#sentry-feedback {
+  --actor-inset: auto auto 0 0;
+}
+
+/* Safari en iOS AMPLÍA la página al enfocar un campo de texto cuya letra mide
+   menos de 16px, y no la devuelve al soltarlo: la escala se queda puesta y, al
+   ser una SPA, la pantalla siguiente se hereda ampliada. De ahí el perfil de un
+   jugador gigante después de buscarlo, aunque el campo pequeño estuviera en la
+   pantalla anterior (FE #441).
+
+   Se arregla desde aquí y no campo a campo porque son 38 repartidos por 19
+   formularios, y el siguiente que se escriba volvería a caer.
+
+   La condición es el DISPOSITIVO, no el ancho: un iPhone en horizontal declara
+   932px y un iPad 768 o más, así que un `max-width: 767px` a secas deja fuera
+   justo los aparatos que hacen el zoom. `hover: none` + `pointer: coarse` es
+   táctil sin ratón —móvil y tablet— y no alcanza a un portátil con pantalla
+   táctil, que tiene hover. El `max-width` se queda detrás para el escritorio
+   estrecho, donde no hay zoom que evitar pero tampoco daño, y porque es la
+   única rama que se puede comprobar en un navegador de sobremesa.
+
+   Va FUERA de @layer a propósito: las utilidades de Tailwind viven en la capa
+   `utilities`, que gana a `base` por orden de capa y no por especificidad, así
+   que dentro de una capa esto no pintaría nada frente a `text-sm`. Un estilo
+   sin capa gana a todas ellas. El precio es que también gana a las utilidades
+   que vengan después, así que un campo que quiera letra MAYOR de 16px hay que
+   excluirlo a mano, como el panel de anotar golpes con su text-lg. La lista
+   cubre las clases literales del propio elemento: una variante (`sm:text-lg`),
+   un valor arbitrario (`text-[18px]`) o un tamaño heredado del contenedor NO
+   se libran solos, y hoy no hay ninguno, pero al añadir uno hay que pasar por
+   aquí.
+
+   Lo que NO se hace es meter maximum-scale/user-scalable=no en el viewport,
+   que es el remedio que sale en todas partes: quita el pinch-zoom a todo el
+   mundo, y hay quien lo necesita para leer. */
+@media (hover: none) and (pointer: coarse), (max-width: 767px) {
+  input:not([type='checkbox']):not([type='radio']):not(.text-base):not(
+      .text-lg
+    ):not(.text-xl):not(.text-2xl):not(.text-3xl),
+  select:not(.text-base):not(.text-lg):not(.text-xl):not(.text-2xl):not(
+      .text-3xl
+    ),
+  textarea:not(.text-base):not(.text-lg):not(.text-xl):not(.text-2xl):not(
+      .text-3xl
+    ) {
+    font-size: 16px;
+  }
+}
+
+@layer base {
+  /* Sin esto, un doble toque rápido en un botón lo interpreta el móvil como
+     «amplía aquí». manipulation deja el toque y el desplazamiento intactos y
+     solo se lleva el doble-toque-para-ampliar; el pinch para acercar sigue.
+
+     Este sí va en @layer base, al revés que la regla de arriba: es un valor por
+     defecto, y así una utilidad `touch-none` puntual —un control que se
+     arrastre— le sigue ganando en vez de quedarse sin efecto sin explicación. */
+  button,
+  [role='button'],
+  a {
+    touch-action: manipulation;
+  }
+
+  /* El anillo de foco, en la tinta de la marca y no en el azul del navegador
+     (21 oct). Solo con :focus-visible: con el teclado se ve, con el ratón o el
+     dedo no. En base, para que el anillo propio de un componente (`focus:ring`
+     con `focus:outline-none`) le gane. Nunca se quita sin reemplazo: WCAG 2.4.7 */
+  :focus-visible {
+    outline: 2px solid var(--cbg-foco);
+    outline-offset: 2px;
+  }
+
+  /* Los botones del mapa ya marcan el foco con su sombra azul (la hoja de
+     MapLibre): el global, encima, sería un segundo anillo */
+  .maplibregl-ctrl-group button:focus-visible,
+  .maplibregl-ctrl-attrib-button:focus-visible {
+    outline: none;
+  }
+}
+
+/* La pantalla de espera, la MISMA en toda la cadena del arranque: al abrir la
+   aplicacion instalada se encadenan el paquete de la pantalla de arranque, la
+   consulta de sesion y el paquete del panel, y las tres pintan esto. Que el
+   dibujo cambiara justo en la ultima era lo que se percibia como parpadeo.
+
+   Va en el fondo del tema —Sand en claro, Deep Forest en oscuro—, instalada o
+   no: la marca anterior pintaba el arranque instalado de otro color, y hubo que
+   distinguir arranque de transicion para que una espera de dentro no pareciera
+   un reinicio (FE #492). Con un solo fondo esa distincion sobra.
+
+   La franja del reloj, la bateria y la cobertura la pinta el fondo del
+   documento (`html`, en @layer base), no esta pantalla. En la aplicacion
+   instalada sus simbolos son oscuros en claro: de ahi que el arranque NO pueda
+   ir en Deep Forest mientras el tema sea el claro (se reporto desde un iPhone). */
+.pantalla-de-espera {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--cbg-fondo);
+  color: var(--cbg-tinta-suave);
+}
+
+.pantalla-de-espera__texto {
+  margin-top: 1rem;
+}
+
+/* El anillo de carga que rodea la marca (FE #495). Su tinta va aqui, con el
+   resto de la pantalla, y no en las clases del componente: la distincion entre
+   el arranque y lo demas ya vive en este fichero, y repartirla en dos sitios es
+   como acaban divergiendo. La pista tenue detras es lo que lo hace legible como
+   circulo de carga incluso cuando el arco esta arriba. */
+.espera-anillo {
+  border-color: color-mix(in srgb, var(--cbg-tinta) 18%, transparent);
+  border-top-color: var(--cbg-tinta);
+}
+
+/* Una espera sobre fondo oscuro (la del mapa del hoyo, 19 oct): el anillo
+   claro; la tinta oscura no se ve sobre el negro */
+.espera-sobre-oscuro .espera-anillo {
+  border-color: rgba(255, 255, 255, 0.28);
+  border-top-color: #ffffff;
+}
+
+/* La barra fina de arriba mientras la pantalla siguiente espera sus datos
+   (BarraDeCarga, FE #647 fase 3): un tramo que cruza de lado a lado */
+@keyframes barra-de-carga {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+/* Las marcas de agua (`utils/marcaDeAgua.js`): el dibujo va en una capa FIJA a
+   la pantalla, detrás de todo, abajo a la derecha y asomando un poco por el
+   borde en el móvil. Se ve nada más abrir la pantalla y no se mueve: lo que se
+   desplaza por delante es el contenido (Agustín, 26 nov 2026; antes era el
+   fondo del contenedor y había que bajar hasta el final para verlo).
+
+   Cómo queda detrás sin atrapar a los diálogos: la capa es un pseudo-elemento
+   con `z-index: -1` y el contenedor NO crea contexto de apilado, así que se
+   pinta justo encima del fondo del `<html>` y debajo de todo lo demás. Por eso
+   el contenedor que la lleva pierde su color de fondo: con él la taparía. Va
+   FUERA de las capas de Tailwind a propósito, para poder con el `bg-*` que la
+   página ya trae.
+   Una página cuyo fondo NO es el de la aplicación (el 404, «No autorizado», la
+   clasificación) se lo da a la capa con `--fondo-de-agua`, y sigue viéndose
+   igual: la capa lo pinta a pantalla completa, bajo el dibujo.
+   El `body` también lo pierde mientras hay marca: el `<html>` tiene su propio
+   fondo, así que el del `body` no pasa al lienzo y se pinta encima de la capa
+   (26 nov 2026: la capa estaba y no se veía). Debajo queda el del `<html>`, que
+   es el mismo color.
+
+   No es `background-attachment: fixed`: Safari de iOS no lo respeta. */
+.marca-de-agua {
+  background-color: transparent;
+}
+/* Regla aparte: un navegador sin `:has()` descarta la lista entera de
+   selectores, y el contenedor se quedaría con su fondo */
+body:has(.marca-de-agua) {
+  background-color: transparent;
+}
+.marca-de-agua::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  /* Por encima de la barra inferior y del aviso de instalar, que flotan abajo */
+  bottom: calc(
+    var(--alto-barra-inferior, 0px) + var(--alto-aviso-instalar, 0px)
+  );
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--fondo-de-agua, transparent);
+  background-repeat: no-repeat;
+  background-position: right -3rem bottom 1.5rem;
+  background-size: 20rem 20rem;
+}
+/* En la anotación, por encima de la barra de entregar la tarjeta, que va fija
+   abajo: lo que la página le reserva (9rem) más la zona segura */
+.marca-de-agua-alta::before {
+  background-position: right -3rem bottom
+    calc(9rem + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 768px) {
+  .marca-de-agua::before {
+    bottom: var(--alto-aviso-instalar, 0px);
+    background-position: right 2rem bottom 2rem;
+    background-size: 24rem 24rem;
+  }
+  .marca-de-agua-alta::before {
+    background-position: right 2rem bottom
+      calc(9rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+.agua-arbol-calle::before {
+  background-image: url('./assets/ilustraciones/arbol-calle.svg');
+}
+.agua-bola-tee::before {
+  background-image: url('./assets/ilustraciones/bola-tee.svg');
+}
+.agua-bolsa::before {
+  background-image: url('./assets/ilustraciones/bolsa.svg');
+}
+.agua-carrito::before {
+  background-image: url('./assets/ilustraciones/carrito.svg');
+}
+.agua-green-bandera::before {
+  background-image: url('./assets/ilustraciones/green-bandera.svg');
+}
+.agua-trofeo::before {
+  background-image: url('./assets/ilustraciones/trofeo.svg');
+}
+.agua-bunker-rastrillo::before {
+  background-image: url('./assets/ilustraciones/bunker-rastrillo.svg');
+}
+.agua-guante::before {
+  background-image: url('./assets/ilustraciones/guante.svg');
+}
+.agua-tarjeta-lapiz::before {
+  background-image: url('./assets/ilustraciones/tarjeta-lapiz.svg');
+}
+/* El monograma de la portada pública y de Inicio (`marcaDeAguaDelMonograma`):
+   el sello de la cabecera, en grande y centrado. El sello es de tinta maciza,
+   así que va bajo un VELO del color del fondo que deja ver un 7 %: una opacidad
+   en la capa apagaría también el fondo que la capa pinta. Dos imágenes de
+   fondo: la primera, el velo, queda encima. En oscuro cambia solo el fichero,
+   al sello lima, como en la cabecera. Sin `color-mix` (Safari anterior a 16.2)
+   la regla no vale y no se pinta sello: nunca sale a tinta plena.
+   El tamaño se limita también por el ALTO de la pantalla: a 45rem de ancho mide
+   820 px de alto, y en un portátil se cortaba por arriba y por abajo.
+   Después del bloque de escritorio, que si no le ganaría el tamaño */
+.marca-de-agua-monograma::before {
+  --sello: url('/brand/stamp-deep.svg');
+  --velo: color-mix(
+    in srgb,
+    var(--fondo-de-agua, var(--cbg-fondo)) 93%,
+    transparent
+  );
+  background-image: linear-gradient(var(--velo), var(--velo)), var(--sello);
+  background-position:
+    0 0,
+    center 58%;
+  background-size:
+    auto,
+    min(120vw, 45rem, 75vh) auto;
+}
+:root[data-tema='oscuro'] .marca-de-agua-monograma::before {
+  --sello: url('/brand/stamp-acid.svg');
+}
+/* Fin de las marcas de agua */

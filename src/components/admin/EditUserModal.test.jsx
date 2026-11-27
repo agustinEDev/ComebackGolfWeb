@@ -1,0 +1,205 @@
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import EditUserModal from './EditUserModal';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key) => key,
+  }),
+}));
+
+vi.mock('framer-motion', () => ({
+  motion: {
+    div: ({ children, initial, animate, transition, ...rest }) => {
+      void initial;
+      void animate;
+      void transition;
+      return <div {...rest}>{children}</div>;
+    },
+  },
+}));
+
+const user = {
+  id: 'u1',
+  firstName: 'Agus',
+  lastName: 'Estevez',
+  email: 'agus@test.com',
+  handicap: 17.7,
+  isAdmin: false,
+};
+
+describe('EditUserModal', () => {
+  it('pre-fills the form with the user data', () => {
+    render(<EditUserModal user={user} onSubmit={vi.fn()} onCancel={vi.fn()} />);
+
+    expect(screen.getByDisplayValue('Agus')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Estevez')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('agus@test.com')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('17.7')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox')).not.toBeChecked();
+  });
+
+  it('calls onCancel when the cancel button is clicked', () => {
+    const onCancel = vi.fn();
+    render(
+      <EditUserModal user={user} onSubmit={vi.fn()} onCancel={onCancel} />,
+    );
+
+    const cancelButtons = screen.getAllByRole('button', {
+      name: 'editModal.cancel',
+    });
+    fireEvent.click(cancelButtons[cancelButtons.length - 1]);
+
+    expect(onCancel).toHaveBeenCalled();
+  });
+
+  it('submits the edited fields, converting handicap to a number', async () => {
+    const onSubmit = vi.fn().mockResolvedValue();
+    render(
+      <EditUserModal user={user} onSubmit={onSubmit} onCancel={vi.fn()} />,
+    );
+
+    fireEvent.change(screen.getByDisplayValue('Agus'), {
+      target: { value: 'Agustin' },
+    });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'editModal.save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload.firstName).toBe('Agustin');
+    expect(payload.handicap).toBe(17.7);
+    expect(payload.isAdmin).toBe(true);
+  });
+
+  it('sends handicap as undefined when the field is cleared', async () => {
+    const onSubmit = vi.fn().mockResolvedValue();
+    render(
+      <EditUserModal user={user} onSubmit={onSubmit} onCancel={vi.fn()} />,
+    );
+
+    fireEvent.change(screen.getByDisplayValue('17.7'), {
+      target: { value: '' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'editModal.save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0].handicap).toBeUndefined();
+  });
+
+  it('shows an error message when onSubmit rejects', async () => {
+    const onSubmit = vi
+      .fn()
+      .mockRejectedValue(new Error('Email already in use'));
+    render(
+      <EditUserModal user={user} onSubmit={onSubmit} onCancel={vi.fn()} />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'editModal.save' }));
+
+    // Sin estado HTTP no es un motivo del servidor: el aviso traducido
+    expect(await screen.findByText('editModal.error')).toBeInTheDocument();
+  });
+});
+
+// QA del 26 oct (FE #938): el plus con el «+» de al lado, no con un «-»
+describe('EditUserModal · el «+» del hándicap', () => {
+  it('con un correo pendiente, lo enseña debajo del campo (BE #753)', () => {
+    render(
+      <EditUserModal
+        user={{ ...user, pendingEmail: 'nuevo@test.com' }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('editModal.pendingEmail')).toBeInTheDocument();
+  });
+
+  it('un correo pendiente largo parte la línea en vez de desbordar a 360 px', () => {
+    render(
+      <EditUserModal
+        user={{ ...user, pendingEmail: 'una.direccion.muy.larga@example.com' }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('editModal.pendingEmail').className).toMatch(
+      /break-all|break-words/,
+    );
+  });
+
+  it('un correo de otra cuenta lo dice en el idioma de la app, no con el texto del backend', async () => {
+    const onSubmit = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(
+          new Error('That email is already used by another account.'),
+          { errorCode: 'EMAIL_ALREADY_IN_USE' },
+        ),
+      );
+    render(
+      <EditUserModal user={user} onSubmit={onSubmit} onCancel={vi.fn()} />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'editModal.save' }));
+
+    expect(
+      await screen.findByText('editModal.emailAlreadyInUse'),
+    ).toBeInTheDocument();
+  });
+
+  it('sin pendiente, no dice nada', () => {
+    render(<EditUserModal user={user} onSubmit={vi.fn()} onCancel={vi.fn()} />);
+
+    expect(screen.queryByText('editModal.pendingEmail')).toBeNull();
+  });
+
+  it('P5: un plus se ve sin signo y con el «+» pulsado', () => {
+    render(
+      <EditUserModal
+        user={{ ...user, handicap: -1.5 }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('editModal.handicap')).toHaveValue('1.5');
+    expect(
+      screen.getByRole('button', { name: 'handicapField.plus' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('P6: con el «+» pulsado se envía en negativo', async () => {
+    const onSubmit = vi.fn().mockResolvedValue();
+    render(
+      <EditUserModal
+        user={{ ...user, handicap: 2 }}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'handicapField.plus' }));
+    fireEvent.click(screen.getByRole('button', { name: 'editModal.save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0].handicap).toBe(-2);
+  });
+
+  it('P7: con coma, «1,5» se envía 1.5', async () => {
+    const onSubmit = vi.fn().mockResolvedValue();
+    render(
+      <EditUserModal user={user} onSubmit={onSubmit} onCancel={vi.fn()} />,
+    );
+
+    fireEvent.change(screen.getByLabelText('editModal.handicap'), {
+      target: { value: '1,5' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'editModal.save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0].handicap).toBe(1.5);
+  });
+});

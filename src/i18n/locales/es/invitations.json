@@ -1,0 +1,126 @@
+{
+  "title": "Invitaciones",
+  "loading": "Cargando invitaciones...",
+  "noInvitations": "No hay invitaciones todavía",
+  "send": {
+    "title": "Enviar invitación",
+    "tabSearchUser": "Buscar usuario",
+    "tabByEmail": "Por email",
+    "searchPlaceholder": "Buscar por nombre...",
+    "searchMinChars": "Escribe al menos 2 caracteres",
+    "noUsersFound": "No se encontraron usuarios",
+    "noUserSelected": "Por favor, selecciona un usuario primero",
+    "emailLabel": "Email",
+    "emailPlaceholder": "Introduce el email del jugador",
+    "personalMessage": "Mensaje personal (opcional)",
+    "personalMessagePlaceholder": "Añade un mensaje personal a la invitación...",
+    "send": "Enviar invitación",
+    "sending": "Enviando...",
+    "searchFailed": "No se ha podido buscar. Inténtalo otra vez.",
+    "tabFriends": "Amigos",
+    "noFriends": "Todavía no tienes amigos en la aplicación",
+    "alreadyInvited": "Ya invitado",
+    "alreadyEnrolled": "Ya está en el torneo",
+    "loadingFriends": "Cargando tus amigos…",
+    "friendsLoadFailed": "No se ha podido cargar tu lista de amigos",
+    "eligibilityLoadFailed": "No se ha podido comprobar quién está ya invitado o dentro. Ciérralo y vuelve a abrirlo",
+    "tabsLabel": "Cómo invitar"
+  },
+  "status": {
+    "PENDING": "Pendiente",
+    "ACCEPTED": "Aceptada",
+    "DECLINED": "Rechazada",
+    "EXPIRED": "Expirada",
+    "NO_ROOM": "Sin plaza",
+    "CANCELLED": "Retirada",
+    "ON_HOLD": "En lista de espera"
+  },
+  "actions": {
+    "accept": "Aceptar",
+    "decline": "Rechazar",
+    "accepting": "Aceptando...",
+    "declining": "Rechazando...",
+    "withdraw": "Retirar",
+    "reinvite": "Volver a invitar",
+    "reinviteAria": "Volver a invitar a {{name}}"
+  },
+  "filter": {
+    "allStatuses": "Todos los estados",
+    "status": "Estado"
+  },
+  "card": {
+    "from": "De",
+    "for": "Para la competición",
+    "expires": "Expira",
+    "expired": "Expirada",
+    "expiresIn": "Expira en {{days}} días",
+    "expiresInHours": "Expira en {{hours}} horas",
+    "respondedAt": "Respondida",
+    "message": "Mensaje",
+    "withdrawnAt": "Retirada el {{date}}",
+    "noRoomSince": "Sin plaza desde el {{date}}",
+    "onHold": "En lista de espera: la inscripción está cerrada. Si el organizador la reabre, podrás aceptarla.",
+    "viewCompetition": "Ver la competición",
+    "invitedPlayer": "Jugador invitado"
+  },
+  "success": {
+    "sent": "Invitación enviada correctamente",
+    "accepted": "Invitación aceptada",
+    "declined": "Invitación rechazada",
+    "withdrawn": "Invitación retirada"
+  },
+  "errors": {
+    "failedToLoad": "Error al cargar las invitaciones",
+    "failedToSend": "Error al enviar la invitación",
+    "failedToRespond": "Error al responder a la invitación",
+    "noRoom": "Esta invitación se quedó sin plaza.",
+    "duplicateInvitation": "Ya se ha enviado una invitación a este email",
+    "invalidEmail": "Por favor, introduce un email válido",
+    "rolesCheckFailed": "No se ha podido comprobar si puedes gestionar esta competición",
+    "retry": "Reintentar",
+    "notPendingAnymore": "Esa invitación ya no estaba pendiente: la lista se ha actualizado.",
+    "competitionFull": "La competición está completa: ya no quedan plazas para invitar.",
+    "failedToWithdraw": "No se pudo retirar la invitación.",
+    "rateLimited_one": "Ya has enviado {{count}} invitación en la última hora en esta competición. Podrás enviar más en un rato.",
+    "rateLimited_other": "Ya has enviado {{count}} invitaciones en la última hora en esta competición. Podrás enviar más en un rato.",
+    "userRateLimited_one": "Ya has enviado {{count}} invitación en la última hora. Podrás enviar más en un rato.",
+    "userRateLimited_other": "Ya has enviado {{count}} invitaciones en la última hora. Podrás enviar más en un rato.",
+    "teamsFormed": "Los equipos ya están formados: habla con el organizador.",
+    "enrollmentDeadlinePassed": "La inscripción está cerrada.",
+    "teamsFormedOrganizer": "Con los equipos formados no se invita. Si aún no hay partidos, puedes deshacerlos en la agenda.",
+    "draftInProgress": "Ahora mismo se está haciendo el draft: inténtalo cuando acabe",
+    "onHoldExists": "Esa persona ya tiene una invitación en lista de espera.",
+    "onHold": "En lista de espera: la inscripción está cerrada. Si el organizador la reabre, podrás aceptarla.",
+    "messageHasLink": "El mensaje no puede llevar enlaces ni direcciones web."
+  },
+  "creator": {
+    "title": "Invitaciones",
+    "subtitle": "Gestionar invitaciones para esta competición",
+    "sendNew": "Enviar invitación",
+    "sentCount_one": "{{count}} invitación enviada",
+    "sentCount_other": "{{count}} invitaciones enviadas",
+    "nearCapacity": "Ya hay {{accepted}} invitaciones aceptadas de {{max}} plazas. El torneo está casi lleno.",
+    "enrollmentClosed": "La inscripción está cerrada: ya no se puede invitar.",
+    "withdrawDialog": {
+      "title": "¿Retirar la invitación a {{name}}?",
+      "body": "Ya no podrá aceptarla. No se le avisa: en sus invitaciones aparecerá como retirada.",
+      "confirm": "Retirar",
+      "keep": "Mantener"
+    },
+    "competitionFull_one": "La competición está completa ({{count}} plaza ocupada): no se puede invitar a nadie más.",
+    "competitionFull_other": "La competición está completa ({{count}} plazas ocupadas): no se puede invitar a nadie más.",
+    "teamsFormed": "Con los equipos formados no se invita. Si aún no hay partidos, puedes deshacerlos en la agenda."
+  },
+  "player": {
+    "title": "Mis invitaciones",
+    "subtitle": "Ver y responder a invitaciones de competiciones",
+    "pendingCount_one": "{{count}} pendiente",
+    "pendingCount_other": "{{count}} pendientes",
+    "verifyEmailNotice": "Verifica tu correo para ver las invitaciones enviadas a tu dirección"
+  },
+  "inDetail": {
+    "title": "Te han invitado a esta competición",
+    "expiresOn": "Caduca el {{date}}",
+    "notPendingAnymore": "Esa invitación ya no estaba pendiente."
+  }
+}

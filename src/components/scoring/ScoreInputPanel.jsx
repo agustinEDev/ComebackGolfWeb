@@ -1,0 +1,197 @@
+import { AL_PASAR, AL_PULSAR, ELEGIDO } from '../ui/clasesDeComportamiento';
+import { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useFocoRetenido } from '../../hooks/useFocoRetenido';
+import { alTocarElFondo } from '../ui/alTocarElFondo';
+
+const MAX_SCORE = 15;
+
+/**
+ * Bottom-sheet numpad for picking a hole score (1-9, custom, or picked up).
+ * Extracted out of HoleInput so it can be reused by any score entry surface
+ * (tournament scoring and quick match scoring share the exact same picker).
+ *
+ * `allowPickedUp` esconde la raya donde no se puede recoger. En Medal hay que
+ * embocar en todos los hoyos —quien no lo hace no entrega tarjeta—, así que
+ * ofrecer ahí el botón es ofrecer algo que el backend rechaza. En Stableford y
+ * en match play sí: recoger es parte del juego. Por defecto NO sale: se ofrece
+ * solo donde se permite expresamente (Agustín, 23 oct 2026).
+ */
+const ScoreInputPanel = ({
+  value,
+  onSelect,
+  onClose,
+  label,
+  par,
+  allowPickedUp = false,
+}) => {
+  const { t } = useTranslation('scoring');
+  const [customMode, setCustomMode] = useState(false);
+  const [customInput, setCustomInput] = useState('');
+
+  const getScoreLabel = (n) => {
+    if (!par) return null;
+    const diff = n - par;
+    if (diff === -2) return t('input.scoreEagle');
+    if (diff === -1) return t('input.scoreBirdie');
+    if (diff === 0) return t('input.par');
+    if (diff === 1) return t('input.scoreBogey');
+    if (diff === 2) return t('input.scoreDouble');
+    return null;
+  };
+
+  const trimmed = customInput.trim();
+  // Solo cifras: «07» es 7; «+5», «4.5» o «abc», no (revisor)
+  const num = /^\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN;
+  const valido = num >= 1 && num <= MAX_SCORE;
+  // Con algo escrito que no vale, se dice por qué: antes no pasaba nada (#855)
+  const fueraDeRango = trimmed !== '' && !valido;
+
+  // Modal de verdad: el foco entra, no se sale y vuelve al disparador (#389).
+  // Escape, en la misma escucha y exclusivo, como las otras dos hojas: antes
+  // solo cerraba si el foco ya estaba dentro
+  const hojaRef = useRef(null);
+  useFocoRetenido(hojaRef, { alEscape: onClose, escapeExclusivo: true });
+
+  const handleCustomConfirm = (e) => {
+    e?.preventDefault();
+    if (valido) onSelect(num);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40"
+      role="presentation"
+      {...alTocarElFondo(onClose)}
+    >
+      <div
+        ref={hojaRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+        className="bg-fondo rounded-t-2xl border-t border-contorno w-full max-w-md p-4 pb-[calc(2rem+env(safe-area-inset-bottom))]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-sm font-semibold text-tinta-suave">
+            {label}
+          </span>
+          <button
+            onClick={onClose}
+            aria-label={t('input.close')}
+            // 44 px para el dedo: era de 14×18 (QA del 11 oct 2026)
+            className="-mr-2 flex min-h-11 min-w-11 items-center justify-center text-lg leading-none text-tinta-suave hover:text-tinta"
+          >
+            ✕
+          </button>
+        </div>
+
+        {!customMode ? (
+          <>
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => {
+                const label = getScoreLabel(n);
+                return (
+                  <button
+                    key={n}
+                    onClick={() => onSelect(n)}
+                    className={`h-14 rounded-xl transition-colors flex flex-col items-center justify-center leading-none gap-0.5 ${
+                      value === n
+                        ? ELEGIDO
+                        : `border border-contorno bg-tarjeta text-tinta ${AL_PASAR} ${AL_PULSAR}`
+                    }`}
+                  >
+                    <span className="text-xl font-bold">{n}</span>
+                    {label && (
+                      <span className="text-[10px] font-medium opacity-70 leading-none">
+                        {label}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex flex-col gap-2">
+              {allowPickedUp && (
+                <button
+                  data-testid="picked-up-button"
+                  onClick={() => onSelect(null)}
+                  className={`h-12 w-full rounded-xl transition-colors flex flex-col items-center justify-center leading-none ${
+                    value === null
+                      ? ELEGIDO
+                      : `border border-contorno bg-tarjeta text-tinta ${AL_PASAR} ${AL_PULSAR}`
+                  }`}
+                >
+                  <span className="text-xl font-bold">-</span>
+                  <span className="text-xs font-medium">
+                    {t('input.pickedUpLabel')}
+                  </span>
+                </button>
+              )}
+              <button
+                onClick={() => setCustomMode(true)}
+                className={`h-12 w-full rounded-xl border border-contorno text-base font-bold bg-tarjeta text-tinta ${AL_PASAR} ${AL_PULSAR}`}
+              >
+                {t('input.customScore')}
+              </button>
+            </div>
+          </>
+        ) : (
+          // Un formulario: Intro confirma (#855)
+          <form className="flex flex-col gap-3" onSubmit={handleCustomConfirm}>
+            <p className="text-sm text-tinta-suave">
+              {t('input.enterCustomScore')}
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                min="1"
+                max={MAX_SCORE}
+                value={customInput}
+                onChange={(e) => setCustomInput(e.target.value)}
+                aria-invalid={fueraDeRango}
+                aria-describedby={fueraDeRango ? 'fuera-de-rango' : undefined}
+                // min-w-0: el campo encoge y los botones caben a 360 px (#855)
+                className="min-w-0 flex-1 border border-borde rounded-lg px-3 py-2 text-lg font-bold text-center focus:outline-none focus:ring-2 focus:ring-tinta"
+                autoFocus
+              />
+              <button
+                type="submit"
+                disabled={!valido}
+                aria-label={t('input.confirmScore')}
+                className="shrink-0 px-4 py-2 bg-contraste text-sobre-contraste rounded-lg font-semibold hover:bg-contraste/90 disabled:opacity-50"
+              >
+                ✓
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomMode(false);
+                  setCustomInput('');
+                }}
+                aria-label={t('input.back')}
+                className={`shrink-0 px-4 py-2 border border-contorno bg-tarjeta text-tinta rounded-lg ${AL_PASAR}`}
+              >
+                ←
+              </button>
+            </div>
+            {fueraDeRango && (
+              // Sin `role="alert"`: interrumpía al lector de pantalla a cada tecla (/code-review)
+              <p
+                id="fuera-de-rango"
+                data-testid="fuera-de-rango"
+                className="text-sm text-error"
+              >
+                {t('input.customScoreRange', { max: MAX_SCORE })}
+              </p>
+            )}
+          </form>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default ScoreInputPanel;

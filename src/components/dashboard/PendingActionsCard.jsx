@@ -1,0 +1,779 @@
+import { AL_PASAR } from '../ui/clasesDeComportamiento';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router';
+import { motion } from 'framer-motion';
+import {
+  Mail,
+  Users,
+  Flag,
+  TrendingUp,
+  ChevronRight,
+  Bell,
+  UserPlus,
+  Zap,
+  Inbox,
+  AlertTriangle,
+  CalendarCheck,
+  UserX,
+} from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { useEntryMotion } from '../../hooks/useEntryMotion';
+import { slideUp, getEntryProps } from '../../utils/animations';
+import {
+  listMyInvitationsUseCase,
+  listEnrollmentsUseCase,
+  listPendingFriendRequestsUseCase,
+  listMyQuickMatchesUseCase,
+  listMyPendingEnvelopesUseCase,
+  listMySessionsWithoutMatchesUseCase,
+  listMyAssignedPlacesUseCase,
+  acknowledgeAssignedPlaceUseCase,
+  listMyHandicapsNotUpdatedUseCase,
+} from '../../composition';
+import customToast from '../../utils/toast';
+import {
+  loQueSeEnseñoAntes,
+  recuerdaLasAccionesPendientes,
+} from '../../services/accionesPendientes';
+import BlockLoader from '../ui/BlockLoader';
+import { diaDeLaSesion } from '../../utils/diaDeLaSesion';
+import { CompetitionStatusEnum } from '../../domain/value_objects/CompetitionStatus';
+import EnrollmentStatus from '../../domain/value_objects/EnrollmentStatus';
+import InvitationStatus from '../../domain/value_objects/InvitationStatus';
+import { registraElFallo } from '../../utils/registraElFallo';
+import QuickMatchStatus from '../../domain/value_objects/QuickMatchStatus';
+import { Role } from '../../domain/value_objects/Role';
+
+/** Lo que la tarjeta recuerda, con sus valores por defecto. */
+const loRecordado = (r) => ({
+  pendingInvitations: r?.pendingInvitations ?? 0,
+  pendingEnrollments: r?.pendingEnrollments ?? [],
+  pendingFriendRequests: r?.pendingFriendRequests ?? 0,
+  activeQuickMatches: r?.activeQuickMatches ?? [],
+  sobresPendientes: r?.sobresPendientes ?? [],
+  sesionesSinPartidos: r?.sesionesSinPartidos ?? [],
+  plazasAsignadas: r?.plazasAsignadas ?? [],
+  rfegSinActualizar: r?.rfegSinActualizar ?? [],
+  rfegNoEncontrado: r?.rfegNoEncontrado ?? [],
+});
+
+const PendingActionsCard = ({
+  user,
+  competitions,
+  onHandicapAction,
+  handicapPending = false,
+  upcomingMatches = 0,
+}) => {
+  const navigate = useNavigate();
+  const { t, i18n } = useTranslation('dashboard');
+  const { animateEntry } = useEntryMotion();
+  // Arranca con lo ultimo que esta tarjeta llego a enseñar (FE #502). El panel
+  // se remonta cada vez que se vuelve a Inicio desde la barra inferior, asi que
+  // sin esto cada vuelta empezaba de cero y pintaba el esqueleto amarillo
+  // Una vez, al montar: lo que siembra los estados y lo aplicado (/code-review)
+  const [inicial] = useState(() => loRecordado(loQueSeEnseñoAntes(user?.id)));
+
+  const [pendingInvitations, setPendingInvitations] = useState(
+    inicial.pendingInvitations,
+  );
+  const [pendingEnrollments, setPendingEnrollments] = useState(
+    inicial.pendingEnrollments,
+  );
+  const [pendingFriendRequests, setPendingFriendRequests] = useState(
+    inicial.pendingFriendRequests,
+  );
+  const [activeQuickMatches, setActiveQuickMatches] = useState(
+    inicial.activeQuickMatches,
+  );
+  const [sobresPendientes, setSobresPendientes] = useState(
+    inicial.sobresPendientes,
+  );
+  const [sesionesSinPartidos, setSesionesSinPartidos] = useState(
+    inicial.sesionesSinPartidos,
+  );
+  // Las plazas que le asignaron desde una lista de espera (FE #824): sin
+  // correo, se entera aquí hasta que pulsa «Entendido»
+  const [plazasAsignadas, setPlazasAsignadas] = useState(
+    inicial.plazasAsignadas,
+  );
+  // Los hándicaps sin actualizar con la RFEG (15 nov 2026): las competiciones
+  // que organiza con jugadores sin actualizar, y en las que no le encontró
+  const [rfegSinActualizar, setRfegSinActualizar] = useState(
+    inicial.rfegSinActualizar,
+  );
+  const [rfegNoEncontrado, setRfegNoEncontrado] = useState(
+    inicial.rfegNoEncontrado,
+  );
+  // Las que ya se mandaron como vistas: un doble toque no repite el envío, y una
+  // lectura lanzada antes no las devuelve a la lista (revisor)
+  const [enviandoVista, setEnviandoVista] = useState(() => new Set());
+  const vistas = useRef(new Set());
+  // Si se desmonta (o se cierra sesión) antes de que acabe un «Entendido», ya
+  // no se escribe la memoria: sería de la cuenta anterior (/code-review)
+  const montada = useRef(true);
+  useEffect(() => {
+    montada.current = true;
+    return () => {
+      montada.current = false;
+    };
+  }, []);
+  // Otra cuenta en la misma tarjeta montada: lo de la anterior no se enseña ni
+  // un momento mientras llega lo nuevo (CodeRabbit en la #836). Se reinicia al
+  // pintar, no en un efecto, para que no llegue a verse; con lo que la nueva
+  // cuenta tenga recordado, si tiene algo (revisor, 14 nov 2026)
+  const [cuentaDe, setCuentaDe] = useState(user?.id);
+  if (user?.id !== cuentaDe) {
+    const deLaNueva = loRecordado(loQueSeEnseñoAntes(user?.id));
+    setCuentaDe(user?.id);
+    setPendingInvitations(deLaNueva.pendingInvitations);
+    setPendingEnrollments(deLaNueva.pendingEnrollments);
+    setPendingFriendRequests(deLaNueva.pendingFriendRequests);
+    setActiveQuickMatches(deLaNueva.activeQuickMatches);
+    setSobresPendientes(deLaNueva.sobresPendientes);
+    setSesionesSinPartidos(deLaNueva.sesionesSinPartidos);
+    setPlazasAsignadas(deLaNueva.plazasAsignadas);
+    setRfegSinActualizar(deLaNueva.rfegSinActualizar);
+    setRfegNoEncontrado(deLaNueva.rfegNoEncontrado);
+    // Lo que la anterior tenía a medio enviar no es de esta
+    setEnviandoVista(new Set());
+  }
+  // Solo se enseña la espera cuando NO hay nada que enseñar: con lo de antes en
+  // pantalla, el refresco va en silencio
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Lo ultimo que se llego a APLICAR, que es lo que hay que recordar. En una ref
+  // y no leyendo los estados dentro del efecto: eso obligaria a meterlos en sus
+  // dependencias y el efecto se relanzaria a si mismo
+  const ultimoAplicado = useRef(inicial);
+  // De qué cuenta es lo aplicado: lo de la anterior no puede quedarse, ni
+  // guardarse en el móvil, bajo la nueva si a esta le falla una petición (revisor)
+  const aplicadoDe = useRef(user?.id);
+
+  const isCreator = useMemo(
+    () =>
+      user?.is_admin ||
+      (user?.roles &&
+        Array.isArray(user.roles) &&
+        user.roles.some(
+          (r) =>
+            (typeof r === 'string' ? r : r.name) === Role.CREATOR ||
+            (typeof r === 'string' ? r : r.name) === Role.ADMIN,
+        )),
+    [user],
+  );
+
+  // La lista por lo que dice, no por el objeto (Agustín, 14 nov 2026): el panel
+  // pinta primero la lista guardada y luego la que llega, y con las mismas
+  // competiciones eso pedía todo dos veces. Lo que se pide es en vivo igualmente.
+  // Se ajusta al pintar, no en un efecto (el patrón de la documentación de React)
+  const claveDeLaLista = JSON.stringify(
+    (competitions ?? []).map((c) => [c?.id, c?.name, c?.status]),
+  );
+  const [lista, setLista] = useState({
+    clave: claveDeLaLista,
+    competiciones: competitions ?? [],
+  });
+  if (lista.clave !== claveDeLaLista) {
+    setLista({ clave: claveDeLaLista, competiciones: competitions ?? [] });
+  }
+  const competiciones = lista.competiciones;
+
+  // Quien organiza algo (BE #361): el rol, o tener alguna competición. La
+  // lista que recibe esta tarjeta ya son las que ha CREADO (`findByCreator`)
+  const organiza = Boolean(isCreator || competiciones.length > 0);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelado = false;
+    if (aplicadoDe.current !== user.id) {
+      aplicadoDe.current = user.id;
+      ultimoAplicado.current = loRecordado(loQueSeEnseñoAntes(user.id));
+      vistas.current = new Set();
+    }
+
+    const loadPendingData = async () => {
+      // Con lo de antes en pantalla, sin espera; también si la cuenta anterior
+      // dejó la suya puesta al cambiar con su carga a medias
+      setIsLoading(!loQueSeEnseñoAntes(user.id));
+      try {
+        // Cada una dentro de su función async: si alguna fallara aunque fuera
+        // en síncrono, queda como un rechazo más y no tumba el panel entero
+        const pedir = (peticion) => (async () => peticion())();
+        const results = await Promise.allSettled([
+          pedir(() =>
+            listMyInvitationsUseCase.execute({
+              status: InvitationStatus.PENDING,
+            }),
+          ),
+          isCreator
+            ? pedir(() => loadPendingEnrollments(competiciones))
+            : Promise.resolve([]),
+          pedir(() =>
+            listPendingFriendRequestsUseCase.execute(user.id, 'received'),
+          ),
+          pedir(() =>
+            listMyQuickMatchesUseCase.execute({
+              status: QuickMatchStatus.IN_PROGRESS,
+            }),
+          ),
+          pedir(() => listMyPendingEnvelopesUseCase.execute()),
+          // Solo quien organiza algo: para los demás siempre es vacía, y cada
+          // vuelta a Inicio era una petición más contra el límite compartido
+          organiza
+            ? pedir(() => listMySessionsWithoutMatchesUseCase.execute())
+            : Promise.resolve([]),
+          pedir(() => listMyAssignedPlacesUseCase.execute()),
+          pedir(() => listMyHandicapsNotUpdatedUseCase.execute()),
+        ]);
+
+        // Una respuesta que llega cuando ya nos hemos ido no escribe: antes solo
+        // tocaba el estado de un componente muerto, pero ahora deja memoria que
+        // pinta el SIGUIENTE montaje. Aceptar unas solicitudes y volver a Inicio
+        // enseñaba las de antes, ya atendidas
+        if (cancelado) return;
+
+        // Lo que se aplica es tambien lo que se recuerda. Guardar ceros de las
+        // que fallaron dejaba la memoria diciendo «no hay nada» mientras la
+        // pantalla seguia enseñando lo de antes, y a la vuelta desaparecian
+        const aplicado = ultimoAplicado.current;
+
+        if (results[0].status === 'fulfilled') {
+          const invitations = results[0].value?.invitations;
+          aplicado.pendingInvitations = Array.isArray(invitations)
+            ? invitations.length
+            : 0;
+          setPendingInvitations(aplicado.pendingInvitations);
+        }
+        // Las inscripciones se sacan de las competiciones, y al volver a Inicio
+        // el panel se pinta antes de tenerlas: sin esta condicion se ponian a
+        // cero en cada vuelta y la fila del creador parpadeaba
+        if (
+          results[1].status === 'fulfilled' &&
+          (competiciones.length > 0 || !isCreator)
+        ) {
+          aplicado.pendingEnrollments = results[1].value;
+          setPendingEnrollments(aplicado.pendingEnrollments);
+        }
+        if (results[2].status === 'fulfilled') {
+          aplicado.pendingFriendRequests = results[2].value?.totalCount || 0;
+          setPendingFriendRequests(aplicado.pendingFriendRequests);
+        }
+        if (results[3].status === 'fulfilled') {
+          aplicado.activeQuickMatches = results[3].value?.quickMatches || [];
+          setActiveQuickMatches(aplicado.activeQuickMatches);
+        }
+        if (results[4].status === 'fulfilled') {
+          aplicado.sobresPendientes = results[4].value || [];
+          setSobresPendientes(aplicado.sobresPendientes);
+        }
+        if (results[5].status === 'fulfilled') {
+          aplicado.sesionesSinPartidos = results[5].value || [];
+          setSesionesSinPartidos(aplicado.sesionesSinPartidos);
+        }
+        if (results[6].status === 'fulfilled') {
+          aplicado.plazasAsignadas = (results[6].value || []).filter(
+            (p) => !vistas.current.has(p.roundId),
+          );
+          setPlazasAsignadas(aplicado.plazasAsignadas);
+        }
+        if (results[7].status === 'fulfilled') {
+          aplicado.rfegSinActualizar = results[7].value?.asOrganizer || [];
+          aplicado.rfegNoEncontrado = results[7].value?.asPlayer || [];
+          setRfegSinActualizar(aplicado.rfegSinActualizar);
+          setRfegNoEncontrado(aplicado.rfegNoEncontrado);
+        }
+
+        ultimoAplicado.current = aplicado;
+        recuerdaLasAccionesPendientes({ ...aplicado }, user.id);
+      } catch (error) {
+        registraElFallo(
+          'PendingActionsCard.error-loading-pending-actions',
+          'Error loading pending actions:',
+          error,
+        );
+      } finally {
+        if (!cancelado) setIsLoading(false);
+      }
+    };
+
+    loadPendingData();
+
+    return () => {
+      cancelado = true;
+    };
+  }, [user, competiciones, isCreator, organiza]);
+
+  // El día y la franja, con el idioma de la aplicación. `Intl` revienta con un
+  // RangeError si la fecha no se puede leer, y esto vive dentro de la tarjeta
+  // entera del panel
+  const cuandoSeJuega = (sobre) => {
+    const franja = sobre.sessionType
+      ? t(`nextMatch.session.${sobre.sessionType}`)
+      : '';
+    let dia = '';
+    try {
+      // Como ese día en casa: leída como UTC, por detrás de UTC salía el anterior
+      const fecha = diaDeLaSesion(sobre.roundDate);
+      if (fecha) {
+        dia = fecha.toLocaleDateString(i18n.language, {
+          day: 'numeric',
+          month: 'short',
+        });
+      }
+    } catch {
+      dia = '';
+    }
+    return [dia, franja].filter(Boolean).join(' ');
+  };
+
+  // «Entendido»: fuera de la lista en cuanto el servidor lo acepta, también de
+  // la memoria (si no, volvería al volver a Inicio). Si falla, se queda y se dice
+  const entendido = async (plaza) => {
+    setEnviandoVista((s) => new Set(s).add(plaza.roundId));
+    // De quién era: si al volver la tarjeta es de otra cuenta, esto no toca lo
+    // suyo ni guarda lo de la nueva a nombre de la vieja (/code-review)
+    const deQuien = user?.id;
+    try {
+      await acknowledgeAssignedPlaceUseCase.execute(plaza.roundId);
+      if (!montada.current || aplicadoDe.current !== deQuien) return;
+      vistas.current.add(plaza.roundId);
+      const quedan = (lista) =>
+        lista.filter((p) => p.roundId !== plaza.roundId);
+      ultimoAplicado.current = {
+        ...ultimoAplicado.current,
+        plazasAsignadas: quedan(ultimoAplicado.current.plazasAsignadas),
+      };
+      recuerdaLasAccionesPendientes({ ...ultimoAplicado.current }, deQuien);
+      setPlazasAsignadas(quedan);
+    } catch (error) {
+      // El nuestro, traducido: el del servidor puede venir en otro idioma (CodeRabbit)
+      registraElFallo(
+        'PendingActionsCard.marking-the-place-as-seen',
+        'No se ha podido marcar la plaza como vista:',
+        error,
+      );
+      customToast.error(t('pendingActions.placeAssignedOkFailed'));
+    } finally {
+      if (montada.current && aplicadoDe.current === deQuien)
+        setEnviandoVista((s) => {
+          const sin = new Set(s);
+          sin.delete(plaza.roundId);
+          return sin;
+        });
+    }
+  };
+
+  const totalItems =
+    pendingInvitations +
+    pendingEnrollments.length +
+    (upcomingMatches > 0 ? 1 : 0) +
+    (handicapPending ? 1 : 0) +
+    (pendingFriendRequests > 0 ? 1 : 0) +
+    activeQuickMatches.length +
+    sobresPendientes.length +
+    sesionesSinPartidos.length +
+    plazasAsignadas.length +
+    rfegSinActualizar.length +
+    rfegNoEncontrado.length;
+
+  if (isLoading) {
+    return (
+      <motion.div
+        {...getEntryProps(animateEntry)}
+        variants={slideUp}
+        className="px-4 mb-2"
+      >
+        {/* El dibujo compartido, no un recuadro amarillo a medio pintar: la
+            aplicacion espera siempre con la misma imagen (FE #495) */}
+        <div className="rounded-tarjeta border border-linea bg-tarjeta">
+          <BlockLoader silencioso />
+        </div>
+      </motion.div>
+    );
+  }
+
+  if (totalItems === 0) return null;
+
+  return (
+    <motion.div
+      {...getEntryProps(animateEntry)}
+      variants={slideUp}
+      className="px-4 mb-2"
+      data-testid="pending-actions-card"
+    >
+      <div className="rounded-tarjeta border border-linea bg-tarjeta p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="p-1.5 bg-contraste rounded-lg">
+            <Bell className="w-4 h-4 text-sobre-contraste" />
+          </div>
+          <h3 className="text-lg font-bold text-tinta">
+            {t('pendingActions.title')}
+          </h3>
+        </div>
+
+        <div className="space-y-3">
+          {pendingInvitations > 0 && (
+            <button
+              onClick={() => navigate('/player/invitations')}
+              className="flex items-center justify-between w-full p-3 bg-fondo border border-linea rounded-xl hover:border-tinta transition-colors group"
+              data-testid="pending-invitations-action"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-tarjeta rounded-lg">
+                  <Mail className="w-4 h-4 text-tinta" />
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-semibold text-tinta">
+                    {t('pendingActions.invitations')}
+                  </p>
+                  <p className="text-xs text-tinta-suave">
+                    {t('pendingActions.invitations', {
+                      count: pendingInvitations,
+                    })}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-1.5 rounded-full bg-contraste text-sobre-contraste text-xs font-bold">
+                  {pendingInvitations}
+                </span>
+                <ChevronRight className="w-4 h-4 text-tinta-suave group-hover:text-tinta transition-colors" />
+              </div>
+            </button>
+          )}
+
+          {pendingFriendRequests > 0 && (
+            <button
+              onClick={() => navigate('/friends')}
+              className="flex items-center justify-between w-full p-3 bg-fondo border border-linea rounded-xl hover:border-tinta transition-colors group"
+              data-testid="pending-friend-requests-action"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-tarjeta rounded-lg">
+                  <UserPlus className="w-4 h-4 text-tinta" />
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-semibold text-tinta">
+                    {t('pendingActions.friendRequests')}
+                  </p>
+                  <p className="text-xs text-tinta-suave">
+                    {t('pendingActions.friendRequestsDesc', {
+                      count: pendingFriendRequests,
+                    })}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-1.5 rounded-full bg-contraste text-sobre-contraste text-xs font-bold">
+                  {pendingFriendRequests}
+                </span>
+                <ChevronRight className="w-4 h-4 text-tinta-suave group-hover:text-tinta transition-colors" />
+              </div>
+            </button>
+          )}
+
+          {activeQuickMatches.map((qm) => (
+            <button
+              key={qm.id}
+              onClick={() => navigate(`/quick-matches/${qm.id}/scoring`)}
+              className="flex items-center justify-between w-full p-3 bg-fondo border border-linea rounded-xl hover:border-tinta transition-colors group"
+              data-testid={`active-quick-match-${qm.id}`}
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-tarjeta rounded-lg">
+                  <Zap className="w-4 h-4 text-tinta" />
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-semibold text-tinta">
+                    {qm.name || t('pendingActions.quickMatchInProgress')}
+                  </p>
+                  <p className="text-xs text-tinta-suave">
+                    {qm.name
+                      ? t('pendingActions.quickMatchInProgress')
+                      : t(
+                          `pendingActions.quickMatchFormat.${qm.matchFormat ?? qm.scoringFormat}`,
+                          qm.matchFormat ?? qm.scoringFormat,
+                        )}
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-tinta-suave group-hover:text-tinta transition-colors" />
+            </button>
+          ))}
+
+          {/* El sobre del capitán, que si no se entrega a tiempo lo rellena la
+              aplicación por hándicap. Aquí es donde se entera: no hay
+              notificaciones en ninguna parte del producto */}
+          {sobresPendientes.map((sobre) => (
+            <button
+              key={sobre.roundId}
+              onClick={() =>
+                navigate(
+                  `/competitions/${sobre.competitionId}/rounds/${sobre.roundId}/envelope`,
+                )
+              }
+              className="flex items-center justify-between w-full p-3 bg-fondo border border-linea rounded-xl hover:border-tinta transition-colors group"
+              data-testid={`sobre-pendiente-${sobre.roundId}`}
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="shrink-0 p-2 bg-tarjeta rounded-lg">
+                  <Inbox className="w-4 h-4 text-tinta" />
+                </div>
+                <div className="min-w-0 text-left">
+                  <p className="text-sm font-semibold text-tinta">
+                    {t('pendingActions.envelopePending')}
+                  </p>
+                  {/* De qué sesión: un Ryder de tres días son seis sobres, y
+                      sin esto salen seis botones idénticos que llevan a sitios
+                      distintos */}
+                  <p className="truncate text-xs text-tinta-suave">
+                    {[cuandoSeJuega(sobre), sobre.competitionName]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 shrink-0 text-tinta-suave group-hover:text-tinta transition-colors" />
+            </button>
+          ))}
+
+          {/* La plaza que le tocó desde una lista de espera (FE #824). Dos
+              botones hermanos, no uno dentro de otro: ir a la competición y
+              «Entendido» */}
+          {plazasAsignadas.map((plaza) => (
+            <div
+              key={plaza.roundId}
+              data-testid={`plaza-asignada-${plaza.roundId}`}
+              className="flex items-center justify-between gap-2 w-full p-3 bg-fondo border border-linea rounded-xl"
+            >
+              <button
+                type="button"
+                data-testid={`plaza-asignada-ir-${plaza.roundId}`}
+                onClick={() => navigate(`/competitions/${plaza.competitionId}`)}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left"
+              >
+                <div className="shrink-0 p-2 bg-tarjeta rounded-lg">
+                  <CalendarCheck className="w-4 h-4 text-tinta" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-tinta">
+                    {t('pendingActions.placeAssigned')}
+                  </p>
+                  <p className="truncate text-xs text-tinta-suave">
+                    {[cuandoSeJuega(plaza), plaza.competitionName]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </p>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => entendido(plaza)}
+                disabled={enviandoVista.has(plaza.roundId)}
+                className={`min-h-11 shrink-0 rounded-lg border border-linea bg-tarjeta px-3 py-2 text-xs font-semibold text-tinta disabled:opacity-50 ${AL_PASAR}`}
+              >
+                {t('pendingActions.placeAssignedOk')}
+              </button>
+            </div>
+          ))}
+
+          {/* La sesión que se abrió sin poder crear sus partidos (BE #361): la
+              arregla el organizador, y sin este aviso se enteraría a la hora
+              de jugar */}
+          {sesionesSinPartidos.map((sesion) => (
+            <button
+              key={sesion.roundId}
+              onClick={() =>
+                navigate(
+                  `/creator/competitions/${sesion.competitionId}/schedule`,
+                )
+              }
+              className="flex items-center justify-between w-full p-3 bg-fondo border border-linea rounded-xl hover:border-tinta transition-colors group"
+              data-testid={`sesion-sin-partidos-${sesion.roundId}`}
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="shrink-0 p-2 bg-tarjeta rounded-lg">
+                  <AlertTriangle className="w-4 h-4 text-error" />
+                </div>
+                <div className="min-w-0 text-left">
+                  <p className="text-sm font-semibold text-tinta">
+                    {t('pendingActions.sessionWithoutMatches')}
+                  </p>
+                  <p className="truncate text-xs text-tinta-suave">
+                    {[cuandoSeJuega(sesion), sesion.competitionName]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 shrink-0 text-tinta-suave group-hover:text-tinta transition-colors" />
+            </button>
+          ))}
+
+          {/* Jugadores sin actualizar con la RFEG en una que organiza: a la
+              tarjeta de hándicaps de la competición (15 nov 2026) */}
+          {rfegSinActualizar.map((c) => (
+            <button
+              key={c.competitionId}
+              onClick={() =>
+                navigate(`/competitions/${c.competitionId}`, {
+                  state: { verHandicaps: true },
+                })
+              }
+              className="flex items-center justify-between w-full p-3 bg-fondo border border-linea rounded-xl hover:border-tinta transition-colors group"
+              data-testid={`rfeg-sin-actualizar-${c.competitionId}`}
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="p-2 bg-tarjeta rounded-lg">
+                  <TrendingUp className="w-4 h-4 text-tinta" />
+                </div>
+                <p className="min-w-0 text-left text-sm font-semibold text-tinta">
+                  {t('pendingActions.handicapsNotUpdated', {
+                    count: c.count,
+                    competition: c.competitionName,
+                  })}
+                </p>
+              </div>
+              <ChevronRight className="w-4 h-4 shrink-0 text-tinta-suave group-hover:text-tinta transition-colors" />
+            </button>
+          ))}
+
+          {/* La RFEG no le encontró: a revisar el nombre en su perfil */}
+          {rfegNoEncontrado.map((c) => (
+            <button
+              key={c.competitionId}
+              onClick={() => navigate('/profile/edit')}
+              className="flex items-center justify-between w-full p-3 bg-fondo border border-linea rounded-xl hover:border-tinta transition-colors group"
+              data-testid={`rfeg-no-encontrado-${c.competitionId}`}
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="p-2 bg-tarjeta rounded-lg">
+                  <UserX className="w-4 h-4 text-tinta" />
+                </div>
+                <p className="min-w-0 text-left text-sm text-tinta">
+                  {t('pendingActions.rfegHandicapNotFound', {
+                    competition: c.competitionName,
+                  })}
+                </p>
+              </div>
+              <ChevronRight className="w-4 h-4 shrink-0 text-tinta-suave group-hover:text-tinta transition-colors" />
+            </button>
+          ))}
+
+          {pendingEnrollments.map((enrollment) => (
+            <button
+              key={enrollment.competitionId}
+              onClick={() =>
+                navigate(`/competitions/${enrollment.competitionId}`)
+              }
+              className="flex items-center justify-between w-full p-3 bg-fondo border border-linea rounded-xl hover:border-tinta transition-colors group"
+              data-testid="pending-enrollments-action"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-tarjeta rounded-lg">
+                  <Users className="w-4 h-4 text-tinta" />
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-semibold text-tinta">
+                    {t('pendingActions.enrollments')}
+                  </p>
+                  <p className="text-xs text-tinta-suave">
+                    {t('pendingActions.enrollments', {
+                      count: enrollment.count,
+                      name: enrollment.name,
+                    })}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-1.5 rounded-full bg-contraste text-sobre-contraste text-xs font-bold">
+                  {enrollment.count}
+                </span>
+                <ChevronRight className="w-4 h-4 text-tinta-suave group-hover:text-tinta transition-colors" />
+              </div>
+            </button>
+          ))}
+
+          {upcomingMatches > 0 && (
+            <button
+              onClick={() => navigate('/player/matches')}
+              className="flex items-center justify-between w-full p-3 bg-fondo border border-linea rounded-xl hover:border-tinta transition-colors group"
+              data-testid="upcoming-matches-action"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-tarjeta rounded-lg">
+                  <Flag className="w-4 h-4 text-tinta" />
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-semibold text-tinta">
+                    {t('pendingActions.matches')}
+                  </p>
+                  <p className="text-xs text-tinta-suave">
+                    {t('pendingActions.matches', { count: upcomingMatches })}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-1.5 rounded-full bg-contraste text-sobre-contraste text-xs font-bold">
+                  {upcomingMatches}
+                </span>
+                <ChevronRight className="w-4 h-4 text-tinta-suave group-hover:text-tinta transition-colors" />
+              </div>
+            </button>
+          )}
+
+          {handicapPending && (
+            <button
+              onClick={onHandicapAction}
+              className="flex items-center justify-between w-full p-3 bg-fondo border border-linea rounded-xl hover:border-tinta transition-colors group"
+              data-testid="handicap-pending-action"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-tarjeta rounded-lg">
+                  <TrendingUp className="w-4 h-4 text-tinta" />
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-semibold text-tinta">
+                    {t('pendingActions.handicap')}
+                  </p>
+                  <p className="text-xs text-tinta-suave">
+                    {t('pendingActions.handicapDesc')}
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-tinta-suave group-hover:text-tinta transition-colors" />
+            </button>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
+async function loadPendingEnrollments(competitions) {
+  if (!competitions || competitions.length === 0) return [];
+
+  const createdCompetitions = competitions.filter(
+    (c) => c.status === CompetitionStatusEnum.ACTIVE,
+  );
+
+  const results = await Promise.allSettled(
+    createdCompetitions.map(async (comp) => {
+      const enrollments = await listEnrollmentsUseCase.execute(comp.id, {
+        status: EnrollmentStatus.REQUESTED,
+      });
+      return {
+        competitionId: comp.id,
+        name: comp.name,
+        count: enrollments.length,
+      };
+    }),
+  );
+
+  return results
+    .filter((r) => r.status === 'fulfilled' && r.value.count > 0)
+    .map((r) => r.value);
+}
+
+export default PendingActionsCard;

@@ -1,0 +1,109 @@
+import { useEffect, useRef } from 'react';
+import { REDUCED_MOTION_QUERY } from './useEntryMotion';
+
+// Lo que hace quien mira por su cuenta: a partir de ahí, no se le mueve
+const GESTOS = ['wheel', 'touchmove', 'keydown', 'pointerdown'];
+
+/**
+ * Lo que le falta a la página para que la fila quede en el centro, como
+ * espacio al final del bloque (FE #988): la fila «tu posición» del scratch va
+ * la última, y la página no podía bajar lo bastante para centrarla.
+ */
+// Lo que tapan por abajo la barra inferior y el aviso de instalar: lo que miden
+// los huecos que App deja para ellos (`data-tapa-abajo`; ocultos, 0). Su
+// variable es un calc() con env() que no se puede leer en px (CodeRabbit)
+const tapaAbajo = () =>
+  [...document.querySelectorAll('[data-tapa-abajo]')].reduce(
+    (total, hueco) => total + hueco.getBoundingClientRect().height,
+    0,
+  );
+
+const hacerSitioDebajo = (bloque, fila, tapa) => {
+  if (!bloque) return;
+  // Lo de una vez anterior no cuenta: se calcula de nuevo
+  bloque.style.paddingBottom = '';
+  const caja = fila.getBoundingClientRect();
+  // Lo que se ve: la pantalla sin la barra inferior ni el aviso de instalar,
+  // que la tapan por abajo (code-review)
+  const visible = globalThis.innerHeight - tapa;
+  // Ya se ve entera: no hace falta espacio, ni dejar media pantalla en blanco
+  // debajo de una tabla corta (revisor)
+  if (caja.top >= 0 && caja.bottom <= visible) return;
+  const hastaElCentro =
+    caja.top + globalThis.scrollY + caja.height / 2 - visible / 2;
+  const puedeBajar =
+    document.documentElement.scrollHeight - globalThis.innerHeight;
+  const falta = Math.ceil(hastaElCentro - puedeBajar);
+  if (falta > 0) bloque.style.paddingBottom = `${falta}px`;
+};
+
+/**
+ * Si participo, la clasificación me lleva a mi fila, centrada y con el foco
+ * (14 oct 2026). `modo`: «una», la primera vez que se ve; «alAbrir», cada vez
+ * que se abre. Cuenta la primera respuesta llegada después de abrir, buena o
+ * mala: con la lectura de antes mi puesto puede haber cambiado, y si en lo
+ * primero que se ve no estaba (o falló), un refresco que me trae no me mueve
+ * mientras leo. Tampoco si quien mira ya se ha movido por su cuenta.
+ *
+ * @param {Object} opciones
+ * @param {'una'|'alAbrir'|null} opciones.modo - Sin él, nunca
+ * @param {boolean} opciones.activa - Si la clasificación está a la vista
+ * @param {number} opciones.respuestas - Sube con cada lectura que responde, bien o mal
+ * @returns {import('react').RefObject<HTMLElement>} El bloque donde buscar mi fila (`tr[data-yo="true"]`)
+ */
+export const useCentrarEnMiFila = ({ modo, activa, respuestas }) => {
+  const bloqueRef = useRef(null);
+  const yaVista = useRef(false);
+  const abiertaTras = useRef(0);
+
+  // Cerrada con «alAbrir»: la próxima vez que se abra, otra vez
+  useEffect(() => {
+    if (activa || modo !== 'alAbrir') return;
+    yaVista.current = false;
+    abiertaTras.current = respuestas;
+  }, [activa, modo, respuestas]);
+
+  // Abierta y sin centrar todavía: si quien mira se mueve, se respeta
+  useEffect(() => {
+    if (!modo || !activa) return undefined;
+    const seMueve = () => {
+      yaVista.current = true;
+    };
+    GESTOS.forEach((g) =>
+      globalThis.addEventListener(g, seMueve, { passive: true }),
+    );
+    return () =>
+      GESTOS.forEach((g) => globalThis.removeEventListener(g, seMueve));
+  }, [modo, activa]);
+
+  useEffect(() => {
+    if (
+      !modo ||
+      !activa ||
+      yaVista.current ||
+      respuestas <= abiertaTras.current
+    )
+      return;
+    yaVista.current = true;
+    // También la de debajo del corte (scratch)
+    const mia = bloqueRef.current?.querySelector('tr[data-yo="true"]');
+    if (!mia) return;
+    const tapa = tapaAbajo();
+    hacerSitioDebajo(bloqueRef.current, mia, tapa);
+    const sinAnimacion = globalThis.matchMedia?.(REDUCED_MOTION_QUERY).matches;
+    // Centrada en lo que se ve, no detrás de la barra: lo tapado, como
+    // scroll-padding solo mientras se calcula adónde ir (CodeRabbit)
+    const raiz = document.documentElement.style;
+    const antes = raiz.scrollPaddingBottom;
+    raiz.scrollPaddingBottom = `${tapa}px`;
+    mia.scrollIntoView({
+      block: 'center',
+      behavior: sinAnimacion ? 'auto' : 'smooth',
+    });
+    raiz.scrollPaddingBottom = antes;
+    // El foco con ella, para el lector de pantalla, sin mover más la vista
+    mia.focus({ preventScroll: true });
+  }, [modo, activa, respuestas]);
+
+  return bloqueRef;
+};

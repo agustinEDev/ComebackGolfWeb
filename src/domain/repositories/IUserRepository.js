@@ -1,0 +1,85 @@
+/** @typedef {import('../value_objects/Email').default} Email */
+/** @typedef {import('../value_objects/Password').default} Password */
+/** @typedef {import('../entities/User').default} User */
+
+class IUserRepository {
+  /**
+   * Obtiene un usuario por su ID.
+   * @param {string} id - El ID del usuario.
+   * @returns {Promise<User|null>} El objeto User si se encuentra, o null.
+   */
+  async getById(id) {
+    throw new Error('Method not implemented: getById');
+  }
+
+  /**
+   * Actualiza la información de un usuario.
+   * @param {string} userId - El ID del usuario a actualizar.
+   * @param {Object} updateData - Un objeto con los campos a actualizar.
+   * @returns {Promise<import('../entities/User').default>} El objeto User actualizado.
+   */
+  async update(userId, updateData) {
+    throw new Error('Method not implemented: update');
+  }
+
+  /**
+   * Actualiza la información de seguridad de un usuario (ej. email, contraseña).
+   * @param {string} userId - El ID del usuario a actualizar.
+   * @param {Object} securityData - Datos de seguridad (ej. { current_password?, new_password?, new_email? }).
+   * @param {Password} [securityData.current_password] - La contraseña actual como Value Object (opcional).
+   * @param {Password} [securityData.new_password] - La nueva contraseña como Value Object (opcional).
+   * @param {Email} [securityData.new_email] - El nuevo email como Value Object (opcional).
+   * @returns {Promise<import('../entities/User').default>} El objeto User actualizado.
+   */
+  async updateSecurity(userId, securityData) {
+    throw new Error('Method not implemented: updateSecurity');
+  }
+
+  /**
+   * Obtiene los roles de un usuario en una competición específica.
+   * @param {string} competitionId - El ID de la competición.
+   * @returns {Promise<{is_admin: boolean, is_creator: boolean, is_player: boolean}>} Objeto con los roles del usuario.
+   */
+  async getUserRoles(competitionId) {
+    throw new Error('Method not implemented: getUserRoles');
+  }
+
+  /**
+   * Searches for registered users by name or email.
+   * @param {string} query - Search query (min 2 characters).
+   * @returns {Promise<Array<{id: string, firstName: string, lastName: string, email: string, countryCode: string|null}>>}
+   */
+  async searchUsers(query) {
+    throw new Error('Method not implemented: searchUsers');
+  }
+
+  /**
+   * Acepta la versión vigente de los Términos para el usuario de la sesión.
+   * Idempotente: aceptarla dos veces no falla.
+   * @returns {Promise<Object>} El usuario ya con la aceptación, tal como lo
+   *   devuelve el backend: es con lo que se siembra la sesión compartida
+   */
+  async acceptTerms() {
+    throw new Error('Method not implemented: acceptTerms');
+  }
+
+  /**
+   * Confirma el correo nuevo pendiente con el token de su enlace (BE #749).
+   * Solo con la sesión de la cuenta.
+   * @param {string} _token
+   * @returns {Promise<Object>} El usuario, tal como lo devuelve el backend
+   */
+  async confirmEmailChange(_token) {
+    throw new Error('Method not implemented: confirmEmailChange');
+  }
+
+  /**
+   * Anula el correo nuevo pendiente (BE #749).
+   * @returns {Promise<Object>} El usuario, tal como lo devuelve el backend
+   */
+  async cancelEmailChange() {
+    throw new Error('Method not implemented: cancelEmailChange');
+  }
+}
+
+export default IUserRepository;

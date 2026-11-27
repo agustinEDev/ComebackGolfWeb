@@ -1,0 +1,3081 @@
+{
+  "generatedBy": "backend StrokeAllocationService",
+  "scenarios": [
+    {
+      "name": "singles Meis 18 vs 20.7",
+      "matchFormat": "SINGLES",
+      "allowancePercentage": 100,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [
+        {
+          "color": "YELLOW",
+          "gender": "MALE",
+          "courseRating": 73.1,
+          "slopeRating": 140
+        },
+        {
+          "color": "YELLOW",
+          "gender": "FEMALE",
+          "courseRating": 79.4,
+          "slopeRating": 147
+        },
+        {
+          "color": "WHITE",
+          "gender": null,
+          "courseRating": 74.0,
+          "slopeRating": 142
+        }
+      ],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "42dd358b-229b-4849-908f-42e75e6b1905",
+          "handicap": 18.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        },
+        {
+          "participantId": "5b9af0e1-7505-4cb1-89c4-06f8d9dc6b04",
+          "handicap": 20.7,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        }
+      ],
+      "expected": {
+        "42dd358b-229b-4849-908f-42e75e6b1905": {
+          "playingHandicap": 23,
+          "strokesByHole": {}
+        },
+        "5b9af0e1-7505-4cb1-89c4-06f8d9dc6b04": {
+          "playingHandicap": 27,
+          "strokesByHole": {
+            "2": 1,
+            "7": 1,
+            "11": 1,
+            "17": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "singles barras distinto genero",
+      "matchFormat": "SINGLES",
+      "allowancePercentage": 100,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [
+        {
+          "color": "YELLOW",
+          "gender": "MALE",
+          "courseRating": 73.1,
+          "slopeRating": 140
+        },
+        {
+          "color": "YELLOW",
+          "gender": "FEMALE",
+          "courseRating": 79.4,
+          "slopeRating": 147
+        },
+        {
+          "color": "WHITE",
+          "gender": null,
+          "courseRating": 74.0,
+          "slopeRating": 142
+        }
+      ],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "b4f9faf4-83df-430c-a7b0-727da72a267f",
+          "handicap": 18.0,
+          "color": "YELLOW",
+          "teeGender": "FEMALE",
+          "team": null
+        },
+        {
+          "participantId": "c174e2ce-b74d-4f3d-a812-5160fd72d9c1",
+          "handicap": 20.7,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        }
+      ],
+      "expected": {
+        "b4f9faf4-83df-430c-a7b0-727da72a267f": {
+          "playingHandicap": 31,
+          "strokesByHole": {
+            "2": 1,
+            "7": 1,
+            "11": 1,
+            "17": 1
+          }
+        },
+        "c174e2ce-b74d-4f3d-a812-5160fd72d9c1": {
+          "playingHandicap": 27,
+          "strokesByHole": {}
+        }
+      }
+    },
+    {
+      "name": "libre 95%",
+      "matchFormat": null,
+      "allowancePercentage": 95,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [
+        {
+          "color": "YELLOW",
+          "gender": "MALE",
+          "courseRating": 73.1,
+          "slopeRating": 140
+        },
+        {
+          "color": "YELLOW",
+          "gender": "FEMALE",
+          "courseRating": 79.4,
+          "slopeRating": 147
+        },
+        {
+          "color": "WHITE",
+          "gender": null,
+          "courseRating": 74.0,
+          "slopeRating": 142
+        }
+      ],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "1ab9973c-e0f1-4762-82ea-f3e06a4ea61a",
+          "handicap": 18.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        },
+        {
+          "participantId": "ab8d2759-607e-4545-80b8-5248f74ab71c",
+          "handicap": 20.7,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        }
+      ],
+      "expected": {
+        "1ab9973c-e0f1-4762-82ea-f3e06a4ea61a": {
+          "playingHandicap": 22,
+          "strokesByHole": {
+            "1": 1,
+            "2": 2,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 2,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 2,
+            "12": 1,
+            "13": 1,
+            "14": 1,
+            "15": 1,
+            "16": 1,
+            "17": 2,
+            "18": 1
+          }
+        },
+        "ab8d2759-607e-4545-80b8-5248f74ab71c": {
+          "playingHandicap": 25,
+          "strokesByHole": {
+            "1": 2,
+            "2": 2,
+            "3": 1,
+            "4": 2,
+            "5": 1,
+            "6": 1,
+            "7": 2,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 2,
+            "12": 1,
+            "13": 1,
+            "14": 1,
+            "15": 1,
+            "16": 2,
+            "17": 2,
+            "18": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "libre handicap plus",
+      "matchFormat": null,
+      "allowancePercentage": 100,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [
+        {
+          "color": "YELLOW",
+          "gender": "MALE",
+          "courseRating": 73.1,
+          "slopeRating": 140
+        },
+        {
+          "color": "YELLOW",
+          "gender": "FEMALE",
+          "courseRating": 79.4,
+          "slopeRating": 147
+        },
+        {
+          "color": "WHITE",
+          "gender": null,
+          "courseRating": 74.0,
+          "slopeRating": 142
+        }
+      ],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "ec7e9d69-cfb1-4220-b3d9-61eee8a9176e",
+          "handicap": -2.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        }
+      ],
+      "expected": {
+        "ec7e9d69-cfb1-4220-b3d9-61eee8a9176e": {
+          "playingHandicap": -1,
+          "strokesByHole": {
+            "15": -1
+          }
+        }
+      }
+    },
+    {
+      "name": "scratch",
+      "matchFormat": "SINGLES",
+      "allowancePercentage": 100,
+      "playMode": "SCRATCH",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [
+        {
+          "color": "YELLOW",
+          "gender": "MALE",
+          "courseRating": 73.1,
+          "slopeRating": 140
+        },
+        {
+          "color": "YELLOW",
+          "gender": "FEMALE",
+          "courseRating": 79.4,
+          "slopeRating": 147
+        },
+        {
+          "color": "WHITE",
+          "gender": null,
+          "courseRating": 74.0,
+          "slopeRating": 142
+        }
+      ],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "3473f0fb-b689-4366-9a9b-af7b890c6e6b",
+          "handicap": 5.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        },
+        {
+          "participantId": "3a63ea66-e805-4e2c-88ab-1304afb41cad",
+          "handicap": 30.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        }
+      ],
+      "expected": {
+        "3473f0fb-b689-4366-9a9b-af7b890c6e6b": {
+          "playingHandicap": 0,
+          "strokesByHole": {}
+        },
+        "3a63ea66-e805-4e2c-88ab-1304afb41cad": {
+          "playingHandicap": 0,
+          "strokesByHole": {}
+        }
+      }
+    },
+    {
+      "name": "sin barra valorable 95%",
+      "matchFormat": null,
+      "allowancePercentage": 95,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "412f0064-3d7d-4559-a3bf-969f1241b493",
+          "handicap": 20.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        }
+      ],
+      "expected": {
+        "412f0064-3d7d-4559-a3bf-969f1241b493": {
+          "playingHandicap": 19,
+          "strokesByHole": {
+            "1": 1,
+            "2": 2,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 1,
+            "12": 1,
+            "13": 1,
+            "14": 1,
+            "15": 1,
+            "16": 1,
+            "17": 1,
+            "18": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "handicap .5 sin barra",
+      "matchFormat": null,
+      "allowancePercentage": 100,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "13bbc14d-125a-4941-93ed-2f42b8062d7e",
+          "handicap": 20.5,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        }
+      ],
+      "expected": {
+        "13bbc14d-125a-4941-93ed-2f42b8062d7e": {
+          "playingHandicap": 21,
+          "strokesByHole": {
+            "1": 1,
+            "2": 2,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 2,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 2,
+            "12": 1,
+            "13": 1,
+            "14": 1,
+            "15": 1,
+            "16": 1,
+            "17": 1,
+            "18": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "barra sin genero",
+      "matchFormat": null,
+      "allowancePercentage": 100,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [
+        {
+          "color": "YELLOW",
+          "gender": "MALE",
+          "courseRating": 73.1,
+          "slopeRating": 140
+        },
+        {
+          "color": "YELLOW",
+          "gender": "FEMALE",
+          "courseRating": 79.4,
+          "slopeRating": 147
+        },
+        {
+          "color": "WHITE",
+          "gender": null,
+          "courseRating": 74.0,
+          "slopeRating": 142
+        }
+      ],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "30dbddd3-e072-4cee-902f-c75cd377ce6a",
+          "handicap": 18.0,
+          "color": "WHITE",
+          "teeGender": "MALE",
+          "team": null
+        }
+      ],
+      "expected": {
+        "30dbddd3-e072-4cee-902f-c75cd377ce6a": {
+          "playingHandicap": 25,
+          "strokesByHole": {
+            "1": 2,
+            "2": 2,
+            "3": 1,
+            "4": 2,
+            "5": 1,
+            "6": 1,
+            "7": 2,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 2,
+            "12": 1,
+            "13": 1,
+            "14": 1,
+            "15": 1,
+            "16": 2,
+            "17": 2,
+            "18": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "fourball 90%",
+      "matchFormat": "FOURBALL",
+      "allowancePercentage": 90,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [
+        {
+          "color": "YELLOW",
+          "gender": "MALE",
+          "courseRating": 73.1,
+          "slopeRating": 140
+        },
+        {
+          "color": "YELLOW",
+          "gender": "FEMALE",
+          "courseRating": 79.4,
+          "slopeRating": 147
+        },
+        {
+          "color": "WHITE",
+          "gender": null,
+          "courseRating": 74.0,
+          "slopeRating": 142
+        }
+      ],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "a310047c-3de9-45c7-9508-2577ae3f286a",
+          "handicap": 5.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "A"
+        },
+        {
+          "participantId": "0cd5a9db-0bc0-4f0c-a438-5fa74a80b6c7",
+          "handicap": 15.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "A"
+        },
+        {
+          "participantId": "09057e80-f88a-4ebf-8436-36bb8e7783f7",
+          "handicap": 20.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "B"
+        },
+        {
+          "participantId": "e765603e-d0d9-4ff3-b11b-517388abfae7",
+          "handicap": 25.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "B"
+        }
+      ],
+      "expected": {
+        "a310047c-3de9-45c7-9508-2577ae3f286a": {
+          "playingHandicap": 7,
+          "strokesByHole": {}
+        },
+        "0cd5a9db-0bc0-4f0c-a438-5fa74a80b6c7": {
+          "playingHandicap": 18,
+          "strokesByHole": {
+            "1": 1,
+            "2": 1,
+            "4": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "11": 1,
+            "13": 1,
+            "14": 1,
+            "16": 1,
+            "17": 1,
+            "18": 1
+          }
+        },
+        "09057e80-f88a-4ebf-8436-36bb8e7783f7": {
+          "playingHandicap": 23,
+          "strokesByHole": {
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 1,
+            "12": 1,
+            "13": 1,
+            "14": 1,
+            "16": 1,
+            "17": 1,
+            "18": 1
+          }
+        },
+        "e765603e-d0d9-4ff3-b11b-517388abfae7": {
+          "playingHandicap": 29,
+          "strokesByHole": {
+            "1": 1,
+            "2": 2,
+            "3": 1,
+            "4": 2,
+            "5": 1,
+            "6": 1,
+            "7": 2,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 2,
+            "12": 1,
+            "13": 1,
+            "14": 1,
+            "15": 1,
+            "16": 1,
+            "17": 2,
+            "18": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "foursomes 50%",
+      "matchFormat": "FOURSOMES",
+      "allowancePercentage": 50,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [
+        {
+          "color": "YELLOW",
+          "gender": "MALE",
+          "courseRating": 73.1,
+          "slopeRating": 140
+        },
+        {
+          "color": "YELLOW",
+          "gender": "FEMALE",
+          "courseRating": 79.4,
+          "slopeRating": 147
+        },
+        {
+          "color": "WHITE",
+          "gender": null,
+          "courseRating": 74.0,
+          "slopeRating": 142
+        }
+      ],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "02b30e10-8d60-436a-9e35-c7c48945b49e",
+          "handicap": 10.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "A"
+        },
+        {
+          "participantId": "3f2e288c-aeb9-4fd7-98e7-7bdea940c957",
+          "handicap": 12.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "A"
+        },
+        {
+          "participantId": "8fcb0e75-ec46-4989-9d5b-59a2291e9dc8",
+          "handicap": 20.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "B"
+        },
+        {
+          "participantId": "166f0266-29b5-4119-8cfe-1d932ce0b206",
+          "handicap": 24.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "B"
+        }
+      ],
+      "expected": {
+        "02b30e10-8d60-436a-9e35-c7c48945b49e": {
+          "playingHandicap": 7,
+          "strokesByHole": {}
+        },
+        "3f2e288c-aeb9-4fd7-98e7-7bdea940c957": {
+          "playingHandicap": 8,
+          "strokesByHole": {}
+        },
+        "8fcb0e75-ec46-4989-9d5b-59a2291e9dc8": {
+          "playingHandicap": 13,
+          "strokesByHole": {
+            "1": 1,
+            "2": 1,
+            "4": 1,
+            "7": 1,
+            "11": 1,
+            "16": 1,
+            "17": 1
+          }
+        },
+        "166f0266-29b5-4119-8cfe-1d932ce0b206": {
+          "playingHandicap": 15,
+          "strokesByHole": {
+            "1": 1,
+            "2": 1,
+            "4": 1,
+            "7": 1,
+            "11": 1,
+            "16": 1,
+            "17": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "tarjeta propia de la barra",
+      "matchFormat": null,
+      "allowancePercentage": 100,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [
+        {
+          "color": "YELLOW",
+          "gender": "MALE",
+          "courseRating": 73.1,
+          "slopeRating": 140
+        },
+        {
+          "color": "YELLOW",
+          "gender": "FEMALE",
+          "courseRating": 79.4,
+          "slopeRating": 147
+        },
+        {
+          "color": "WHITE",
+          "gender": null,
+          "courseRating": 74.0,
+          "slopeRating": 142
+        }
+      ],
+      "teeCards": {
+        "YELLOW|FEMALE": [
+          18,
+          17,
+          16,
+          15,
+          14,
+          13,
+          12,
+          11,
+          10,
+          9,
+          8,
+          7,
+          6,
+          5,
+          4,
+          3,
+          2,
+          1
+        ]
+      },
+      "participants": [
+        {
+          "participantId": "6b241c24-f782-4baa-894f-8db263dff754",
+          "handicap": 20.0,
+          "color": "YELLOW",
+          "teeGender": "FEMALE",
+          "team": null
+        }
+      ],
+      "expected": {
+        "6b241c24-f782-4baa-894f-8db263dff754": {
+          "playingHandicap": 33,
+          "strokesByHole": {
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 2,
+            "5": 2,
+            "6": 2,
+            "7": 2,
+            "8": 2,
+            "9": 2,
+            "10": 2,
+            "11": 2,
+            "12": 2,
+            "13": 2,
+            "14": 2,
+            "15": 2,
+            "16": 2,
+            "17": 2,
+            "18": 2
+          }
+        }
+      }
+    },
+    {
+      "name": "campo corto",
+      "matchFormat": "SINGLES",
+      "allowancePercentage": 100,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 3,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 2,
+          "par": 3,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 3,
+          "par": 3,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 4,
+          "par": 3,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 6,
+          "par": 3,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 7,
+          "par": 3,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 8,
+          "par": 3,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 10
+        },
+        {
+          "holeNumber": 11,
+          "par": 3,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 12,
+          "par": 3,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 13,
+          "par": 3,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 14,
+          "par": 3,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 15,
+          "par": 4,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 17,
+          "par": 4,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 18
+        }
+      ],
+      "tees": [
+        {
+          "color": "ORANGE",
+          "gender": "MALE",
+          "courseRating": 54.9,
+          "slopeRating": 91
+        }
+      ],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "01a3dc6a-9206-4318-b711-7af6139c322b",
+          "handicap": 18.0,
+          "color": "ORANGE",
+          "teeGender": "MALE",
+          "team": null
+        },
+        {
+          "participantId": "e94c89d3-6daf-4596-a426-080ef015d67c",
+          "handicap": 30.0,
+          "color": "ORANGE",
+          "teeGender": "MALE",
+          "team": null
+        }
+      ],
+      "expected": {
+        "01a3dc6a-9206-4318-b711-7af6139c322b": {
+          "playingHandicap": 11,
+          "strokesByHole": {}
+        },
+        "e94c89d3-6daf-4596-a426-080ef015d67c": {
+          "playingHandicap": 21,
+          "strokesByHole": {
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "9": 1,
+            "10": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "singles plus contra 10",
+      "matchFormat": "SINGLES",
+      "allowancePercentage": 100,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [
+        {
+          "color": "YELLOW",
+          "gender": "MALE",
+          "courseRating": 73.1,
+          "slopeRating": 140
+        },
+        {
+          "color": "YELLOW",
+          "gender": "FEMALE",
+          "courseRating": 79.4,
+          "slopeRating": 147
+        },
+        {
+          "color": "WHITE",
+          "gender": null,
+          "courseRating": 74.0,
+          "slopeRating": 142
+        }
+      ],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "1d6b1e3b-3af0-4f02-8ff4-e6c668818df8",
+          "handicap": -2.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        },
+        {
+          "participantId": "2118ae28-bd85-4127-9240-f0573ecf787d",
+          "handicap": 10.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        }
+      ],
+      "expected": {
+        "1d6b1e3b-3af0-4f02-8ff4-e6c668818df8": {
+          "playingHandicap": -1,
+          "strokesByHole": {}
+        },
+        "2118ae28-bd85-4127-9240-f0573ecf787d": {
+          "playingHandicap": 13,
+          "strokesByHole": {
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "11": 1,
+            "12": 1,
+            "13": 1,
+            "14": 1,
+            "16": 1,
+            "17": 1,
+            "18": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "fourball con plus 90%",
+      "matchFormat": "FOURBALL",
+      "allowancePercentage": 90,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [
+        {
+          "color": "YELLOW",
+          "gender": "MALE",
+          "courseRating": 73.1,
+          "slopeRating": 140
+        },
+        {
+          "color": "YELLOW",
+          "gender": "FEMALE",
+          "courseRating": 79.4,
+          "slopeRating": 147
+        },
+        {
+          "color": "WHITE",
+          "gender": null,
+          "courseRating": 74.0,
+          "slopeRating": 142
+        }
+      ],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "92fa0186-a6d6-416e-bd25-1800ee360756",
+          "handicap": -2.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "A"
+        },
+        {
+          "participantId": "d090b18f-b8a6-40f7-bef3-493e969eeae2",
+          "handicap": 10.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "A"
+        },
+        {
+          "participantId": "6ffc8453-d831-4412-98b2-0acc05d58116",
+          "handicap": 14.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "B"
+        },
+        {
+          "participantId": "7a8ed8ba-ab9d-4925-bc5c-bcf30a383e11",
+          "handicap": 6.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "B"
+        }
+      ],
+      "expected": {
+        "92fa0186-a6d6-416e-bd25-1800ee360756": {
+          "playingHandicap": -1,
+          "strokesByHole": {}
+        },
+        "d090b18f-b8a6-40f7-bef3-493e969eeae2": {
+          "playingHandicap": 12,
+          "strokesByHole": {
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "11": 1,
+            "13": 1,
+            "14": 1,
+            "16": 1,
+            "17": 1,
+            "18": 1
+          }
+        },
+        "6ffc8453-d831-4412-98b2-0acc05d58116": {
+          "playingHandicap": 17,
+          "strokesByHole": {
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 1,
+            "12": 1,
+            "13": 1,
+            "14": 1,
+            "16": 1,
+            "17": 1,
+            "18": 1
+          }
+        },
+        "7a8ed8ba-ab9d-4925-bc5c-bcf30a383e11": {
+          "playingHandicap": 8,
+          "strokesByHole": {
+            "1": 1,
+            "2": 1,
+            "4": 1,
+            "6": 1,
+            "7": 1,
+            "11": 1,
+            "14": 1,
+            "16": 1,
+            "17": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "foursomes con plus 50%",
+      "matchFormat": "FOURSOMES",
+      "allowancePercentage": 50,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [
+        {
+          "color": "YELLOW",
+          "gender": "MALE",
+          "courseRating": 73.1,
+          "slopeRating": 140
+        },
+        {
+          "color": "YELLOW",
+          "gender": "FEMALE",
+          "courseRating": 79.4,
+          "slopeRating": 147
+        },
+        {
+          "color": "WHITE",
+          "gender": null,
+          "courseRating": 74.0,
+          "slopeRating": 142
+        }
+      ],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "d35248f4-1248-42ed-bdfe-d8bcfceaef28",
+          "handicap": -2.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "A"
+        },
+        {
+          "participantId": "54d7f73a-b725-4688-b23a-ac17930fc810",
+          "handicap": 10.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "A"
+        },
+        {
+          "participantId": "9c204e6a-b476-4a2c-9ac1-e958890fc31d",
+          "handicap": 6.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "B"
+        },
+        {
+          "participantId": "92a90572-0009-4740-a390-86fcd97a194f",
+          "handicap": 8.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "B"
+        }
+      ],
+      "expected": {
+        "d35248f4-1248-42ed-bdfe-d8bcfceaef28": {
+          "playingHandicap": -1,
+          "strokesByHole": {}
+        },
+        "54d7f73a-b725-4688-b23a-ac17930fc810": {
+          "playingHandicap": 7,
+          "strokesByHole": {}
+        },
+        "9c204e6a-b476-4a2c-9ac1-e958890fc31d": {
+          "playingHandicap": 4,
+          "strokesByHole": {
+            "2": 1,
+            "11": 1
+          }
+        },
+        "92a90572-0009-4740-a390-86fcd97a194f": {
+          "playingHandicap": 6,
+          "strokesByHole": {
+            "2": 1,
+            "11": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "singles plus sin barra",
+      "matchFormat": "SINGLES",
+      "allowancePercentage": 100,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "fbb32fc4-348b-4795-b060-f035313df6c1",
+          "handicap": -2.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        },
+        {
+          "participantId": "1c1b517f-9cd2-430b-ae45-367264f9aac4",
+          "handicap": 10.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        }
+      ],
+      "expected": {
+        "fbb32fc4-348b-4795-b060-f035313df6c1": {
+          "playingHandicap": -2,
+          "strokesByHole": {}
+        },
+        "1c1b517f-9cd2-430b-ae45-367264f9aac4": {
+          "playingHandicap": 10,
+          "strokesByHole": {
+            "1": 1,
+            "2": 1,
+            "4": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "11": 1,
+            "13": 1,
+            "14": 1,
+            "16": 1,
+            "17": 1,
+            "18": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "fourball con plus sin barra",
+      "matchFormat": "FOURBALL",
+      "allowancePercentage": 100,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "1cd61bd3-afcd-4396-8fd0-8ba92012436b",
+          "handicap": -2.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "A"
+        },
+        {
+          "participantId": "5edbc357-5298-4c72-a7db-be3383acfbe0",
+          "handicap": 10.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "A"
+        },
+        {
+          "participantId": "91bed658-9b98-4f38-b706-599c4749273f",
+          "handicap": 14.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "B"
+        },
+        {
+          "participantId": "f41eb292-a887-4c86-b15b-e953b8073e21",
+          "handicap": 6.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": "B"
+        }
+      ],
+      "expected": {
+        "1cd61bd3-afcd-4396-8fd0-8ba92012436b": {
+          "playingHandicap": -2,
+          "strokesByHole": {}
+        },
+        "5edbc357-5298-4c72-a7db-be3383acfbe0": {
+          "playingHandicap": 10,
+          "strokesByHole": {
+            "1": 1,
+            "2": 1,
+            "4": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "11": 1,
+            "13": 1,
+            "14": 1,
+            "16": 1,
+            "17": 1,
+            "18": 1
+          }
+        },
+        "91bed658-9b98-4f38-b706-599c4749273f": {
+          "playingHandicap": 14,
+          "strokesByHole": {
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "10": 1,
+            "11": 1,
+            "12": 1,
+            "13": 1,
+            "14": 1,
+            "16": 1,
+            "17": 1,
+            "18": 1
+          }
+        },
+        "f41eb292-a887-4c86-b15b-e953b8073e21": {
+          "playingHandicap": 6,
+          "strokesByHole": {
+            "1": 1,
+            "2": 1,
+            "4": 1,
+            "7": 1,
+            "11": 1,
+            "14": 1,
+            "16": 1,
+            "17": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "campo corto handicap bajo",
+      "matchFormat": "SINGLES",
+      "allowancePercentage": 100,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 3,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 2,
+          "par": 3,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 3,
+          "par": 3,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 4,
+          "par": 3,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 6,
+          "par": 3,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 7,
+          "par": 3,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 8,
+          "par": 3,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 10
+        },
+        {
+          "holeNumber": 11,
+          "par": 3,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 12,
+          "par": 3,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 13,
+          "par": 3,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 14,
+          "par": 3,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 15,
+          "par": 4,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 17,
+          "par": 4,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 18
+        }
+      ],
+      "tees": [
+        {
+          "color": "ORANGE",
+          "gender": "MALE",
+          "courseRating": 54.9,
+          "slopeRating": 91
+        }
+      ],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "1ab4db3d-eff3-4f84-b92e-fb99aa6edd9b",
+          "handicap": 1.0,
+          "color": "ORANGE",
+          "teeGender": "MALE",
+          "team": null
+        },
+        {
+          "participantId": "54835ff8-1c4c-4301-b1fb-16873b5381ac",
+          "handicap": 10.0,
+          "color": "ORANGE",
+          "teeGender": "MALE",
+          "team": null
+        }
+      ],
+      "expected": {
+        "1ab4db3d-eff3-4f84-b92e-fb99aa6edd9b": {
+          "playingHandicap": -2,
+          "strokesByHole": {}
+        },
+        "54835ff8-1c4c-4301-b1fb-16873b5381ac": {
+          "playingHandicap": 5,
+          "strokesByHole": {
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "sin handicap",
+      "matchFormat": "SINGLES",
+      "allowancePercentage": 100,
+      "playMode": "HANDICAP",
+      "holes": [
+        {
+          "holeNumber": 1,
+          "par": 4,
+          "strokeIndex": 7
+        },
+        {
+          "holeNumber": 2,
+          "par": 5,
+          "strokeIndex": 1
+        },
+        {
+          "holeNumber": 3,
+          "par": 4,
+          "strokeIndex": 13
+        },
+        {
+          "holeNumber": 4,
+          "par": 4,
+          "strokeIndex": 5
+        },
+        {
+          "holeNumber": 5,
+          "par": 3,
+          "strokeIndex": 15
+        },
+        {
+          "holeNumber": 6,
+          "par": 4,
+          "strokeIndex": 9
+        },
+        {
+          "holeNumber": 7,
+          "par": 5,
+          "strokeIndex": 3
+        },
+        {
+          "holeNumber": 8,
+          "par": 4,
+          "strokeIndex": 11
+        },
+        {
+          "holeNumber": 9,
+          "par": 3,
+          "strokeIndex": 17
+        },
+        {
+          "holeNumber": 10,
+          "par": 3,
+          "strokeIndex": 16
+        },
+        {
+          "holeNumber": 11,
+          "par": 4,
+          "strokeIndex": 2
+        },
+        {
+          "holeNumber": 12,
+          "par": 5,
+          "strokeIndex": 14
+        },
+        {
+          "holeNumber": 13,
+          "par": 4,
+          "strokeIndex": 12
+        },
+        {
+          "holeNumber": 14,
+          "par": 4,
+          "strokeIndex": 8
+        },
+        {
+          "holeNumber": 15,
+          "par": 3,
+          "strokeIndex": 18
+        },
+        {
+          "holeNumber": 16,
+          "par": 4,
+          "strokeIndex": 6
+        },
+        {
+          "holeNumber": 17,
+          "par": 5,
+          "strokeIndex": 4
+        },
+        {
+          "holeNumber": 18,
+          "par": 4,
+          "strokeIndex": 10
+        }
+      ],
+      "tees": [
+        {
+          "color": "YELLOW",
+          "gender": "MALE",
+          "courseRating": 73.1,
+          "slopeRating": 140
+        },
+        {
+          "color": "YELLOW",
+          "gender": "FEMALE",
+          "courseRating": 79.4,
+          "slopeRating": 147
+        },
+        {
+          "color": "WHITE",
+          "gender": null,
+          "courseRating": 74.0,
+          "slopeRating": 142
+        }
+      ],
+      "teeCards": {},
+      "participants": [
+        {
+          "participantId": "d4997853-efea-4a83-9bcd-cc7003b790b2",
+          "handicap": 18.0,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        },
+        {
+          "participantId": "12ac1656-3d7f-47fc-b93f-4c83bc403544",
+          "handicap": null,
+          "color": "YELLOW",
+          "teeGender": "MALE",
+          "team": null
+        }
+      ],
+      "expected": {
+        "d4997853-efea-4a83-9bcd-cc7003b790b2": {
+          "playingHandicap": 23,
+          "strokesByHole": {
+            "1": 1,
+            "2": 2,
+            "3": 1,
+            "4": 2,
+            "5": 1,
+            "6": 1,
+            "7": 2,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 2,
+            "12": 1,
+            "13": 1,
+            "14": 1,
+            "15": 1,
+            "16": 1,
+            "17": 2,
+            "18": 1
+          }
+        },
+        "12ac1656-3d7f-47fc-b93f-4c83bc403544": {
+          "playingHandicap": 0,
+          "strokesByHole": {}
+        }
+      }
+    }
+  ]
+}

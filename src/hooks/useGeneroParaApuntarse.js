@@ -1,0 +1,42 @@
+import { useAuth } from './useAuth';
+import { updateUserProfileUseCase } from '../composition';
+import { faltaElGenero } from '../utils/datosQueFaltanSinConexion';
+
+/**
+ * El género para apuntarse a una competición (#710, 24 sep).
+ *
+ * Las barras de salida se valoran por género, así que el servidor lo exige al
+ * pedir plaza, aceptar una invitación o crear una competición. Se pregunta solo
+ * a quien no lo tiene, en el momento, y se guarda en su perfil.
+ *
+ * La sesión se refresca aparte y AL TERMINAR la operación: refrescarla crea un
+ * `user` nuevo, y las páginas que dependen de él se recargaban en mitad de
+ * pedir plaza o aceptar (revisión local de la #710).
+ *
+ * @returns {{
+ *   falta: boolean,
+ *   genero: string|null,
+ *   guardar: (genero: string|null) => Promise<void>,
+ *   refrescar: () => Promise<void>,
+ * }}
+ */
+export const useGeneroParaApuntarse = () => {
+  const { user, refetch, sinConfirmar } = useAuth();
+
+  const guardar = async (genero) => {
+    if (!genero || !user?.id) return;
+    await updateUserProfileUseCase.execute(user.id, { gender: genero });
+  };
+
+  // Para que no se le vuelva a preguntar
+  const refrescar = () => refetch();
+
+  // Sin red no se sabe (la copia del dispositivo no guarda el género): no se
+  // pregunta. `genero`, para marcar la barra habitual (barras por campo)
+  return {
+    falta: faltaElGenero(user, sinConfirmar),
+    genero: user?.gender ?? null,
+    guardar,
+    refrescar,
+  };
+};

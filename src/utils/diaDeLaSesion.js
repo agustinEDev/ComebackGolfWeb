@@ -1,0 +1,71 @@
+/**
+ * Una fecha sin hora (YYYY-MM-DD), como el día de una sesión, leída como ese
+ * día en el huso de quien mira.
+ *
+ * `new Date('2026-09-26')` la toma como medianoche UTC, y por detrás de UTC
+ * —toda América— se pinta el 25.
+ *
+ * @param {string} iso - YYYY-MM-DD
+ * @returns {Date|null} null si no es una fecha sin hora
+ */
+export const diaDeLaSesion = (iso) => {
+  if (typeof iso !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+
+/**
+ * El día de una tarjeta, corto y sin comas: «Jue 24 sept», «Thu Sep 24»
+ * (FE #845, #846). Cada idioma en su orden; con mayúscula, que abre la línea.
+ *
+ * @param {string} iso - YYYY-MM-DD
+ * @param {string} idioma
+ * @returns {string|null} null si no es una fecha sin hora
+ */
+export const diaCorto = (iso, idioma) => {
+  const dia = diaDeLaSesion(iso);
+  if (!dia) return null;
+  // Un idioma mal escrito («es_ES») hace lanzar a `Intl`: el de por defecto
+  let formato;
+  try {
+    formato = new Intl.DateTimeFormat(idioma, {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
+  } catch {
+    formato = new Intl.DateTimeFormat(undefined, {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
+  }
+  const texto = formato
+    .formatToParts(dia)
+    .filter((parte) => parte.type !== 'literal')
+    .map((parte) => parte.value)
+    .join(' ');
+  return (
+    texto.charAt(0).toLocaleUpperCase(formato.resolvedOptions().locale) +
+    texto.slice(1)
+  );
+};
+
+/**
+ * Un día sin hora en el idioma que se pide, no en el del navegador (FE #1238).
+ * Un idioma que `Intl` no entiende («es_ES») lanza: entonces, el del navegador.
+ *
+ * @param {string} iso - YYYY-MM-DD
+ * @param {string|undefined} idioma - el de i18n
+ * @param {Intl.DateTimeFormatOptions} formato
+ * @returns {string|null} null si no es una fecha sin hora
+ */
+export const diaEnElIdioma = (iso, idioma, formato) => {
+  const fecha = diaDeLaSesion(iso);
+  if (!fecha) return null;
+  try {
+    return fecha.toLocaleDateString(idioma, formato);
+  } catch {
+    return fecha.toLocaleDateString(undefined, formato);
+  }
+};

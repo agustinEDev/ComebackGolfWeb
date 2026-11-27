@@ -1,0 +1,1160 @@
+// La respuesta de la interfaz al transporte, registrada antes que los repositorios
+// que lo usan (infrastructure/http/interfazDelTransporte)
+import './interfazDelTransporte';
+import { puedeDarUnPartido } from './proximosPorSaber';
+import ApiUserRepository from '../infrastructure/repositories/ApiUserRepository';
+// User Use Cases
+import UpdateUserProfileUseCase from '../application/use_cases/user/UpdateUserProfileUseCase';
+import AcceptTermsUseCase from '../application/use_cases/user/AcceptTermsUseCase';
+import CancelEmailChangeUseCase from '../application/use_cases/user/CancelEmailChangeUseCase';
+import ConfirmEmailChangeUseCase from '../application/use_cases/user/ConfirmEmailChangeUseCase';
+import UpdateUserSecurityUseCase from '../application/use_cases/user/UpdateUserSecurityUseCase';
+import GetUserRolesUseCase from '../application/use_cases/user/GetUserRolesUseCase';
+import SearchUsersUseCase from '../application/use_cases/user/SearchUsersUseCase';
+import ApiAuthRepository from '../infrastructure/repositories/ApiAuthRepository';
+import LoginUseCase from '../application/use_cases/user/LoginUseCase';
+import RegisterUseCase from '../application/use_cases/user/RegisterUseCase';
+import VerifyEmailUseCase from '../application/use_cases/user/VerifyEmailUseCase';
+import RequestPasswordResetUseCase from '../application/use_cases/user/RequestPasswordResetUseCase';
+import ValidateResetTokenUseCase from '../application/use_cases/user/ValidateResetTokenUseCase';
+import ResetPasswordUseCase from '../application/use_cases/user/ResetPasswordUseCase';
+import GoogleLoginUseCase from '../application/use_cases/user/GoogleLoginUseCase';
+import LinkGoogleAccountUseCase from '../application/use_cases/user/LinkGoogleAccountUseCase';
+import UnlinkGoogleAccountUseCase from '../application/use_cases/user/UnlinkGoogleAccountUseCase';
+import ReauthenticateUseCase from '../application/use_cases/user/ReauthenticateUseCase';
+import LogoutUseCase from '../application/use_cases/user/LogoutUseCase';
+import ResendVerificationEmailUseCase from '../application/use_cases/user/ResendVerificationEmailUseCase';
+import ResendVerificationLinkUseCase from '../application/use_cases/user/ResendVerificationLinkUseCase';
+
+// Handicap Use Cases
+import ApiHandicapRepository from '../infrastructure/repositories/ApiHandicapRepository';
+import UpdateManualHandicapUseCase from '../application/use_cases/handicap/UpdateManualHandicapUseCase';
+import UpdateRfegHandicapUseCase from '../application/use_cases/handicap/UpdateRfegHandicapUseCase';
+import RefreshOwnHandicapUseCase from '../application/use_cases/handicap/RefreshOwnHandicapUseCase';
+
+// Country Use Cases
+import ApiCountryRepository from '../infrastructure/repositories/ApiCountryRepository';
+import FetchCountriesUseCase from '../application/use_cases/country/FetchCountriesUseCase';
+import GetAdjacentCountriesUseCase from '../application/use_cases/country/GetAdjacentCountriesUseCase';
+
+// Golf Course Use Cases (v2.1.0 - Sprint 1)
+import ApiGolfCourseRepository from '../infrastructure/repositories/ApiGolfCourseRepository';
+import ListGolfCoursesUseCase from '../application/use_cases/golf_course/ListGolfCoursesUseCase';
+import GetGolfCourseUseCase from '../application/use_cases/golf_course/GetGolfCourseUseCase';
+import GetHoleMapUseCase from '../application/use_cases/golf_course/GetHoleMapUseCase';
+import {
+  DeleteHoleSampleUseCase,
+  DiscardHoleReportUseCase,
+  GetHoleReviewUseCase,
+  ListHoleReviewsUseCase,
+  ReopenHoleUseCase,
+  SaveHoleLineUseCase,
+} from '../application/use_cases/golf_course/HoleReviewUseCases';
+import LocalStorageHoleMapCache from '../infrastructure/repositories/LocalStorageHoleMapCache';
+import LocalStorageHoleSampleStore from '../infrastructure/repositories/LocalStorageHoleSampleStore';
+import LocalStorageCourseLocationCache from '../infrastructure/repositories/LocalStorageCourseLocationCache';
+import GetCourseLocationUseCase from '../application/use_cases/golf_course/GetCourseLocationUseCase';
+import SendHoleSampleUseCase from '../application/use_cases/golf_course/SendHoleSampleUseCase';
+import SendPendingHoleSamplesUseCase from '../application/use_cases/golf_course/SendPendingHoleSamplesUseCase';
+import SendHoleReportUseCase from '../application/use_cases/golf_course/SendHoleReportUseCase';
+import SendPendingHoleReportsUseCase from '../application/use_cases/golf_course/SendPendingHoleReportsUseCase';
+import HoleMarkingGuideUseCase from '../application/use_cases/golf_course/HoleMarkingGuideUseCase';
+import LocalStorageHoleReportStore from '../infrastructure/repositories/LocalStorageHoleReportStore';
+import LocalStorageHoleMarkingGuideStore from '../infrastructure/repositories/LocalStorageHoleMarkingGuideStore';
+import GetHoleSamplesUseCase from '../application/use_cases/golf_course/GetHoleSamplesUseCase';
+import { crearRecienEnviadas } from '../application/use_cases/golf_course/recienEnviadas';
+import { captureError } from '../utils/sentryHelpers';
+import CreateGolfCourseAdminUseCase from '../application/use_cases/golf_course/CreateGolfCourseAdminUseCase';
+import CreateGolfCourseRequestUseCase from '../application/use_cases/golf_course/CreateGolfCourseRequestUseCase';
+import UpdateGolfCourseUseCase from '../application/use_cases/golf_course/UpdateGolfCourseUseCase';
+import ApproveGolfCourseUseCase from '../application/use_cases/golf_course/ApproveGolfCourseUseCase';
+import RejectGolfCourseUseCase from '../application/use_cases/golf_course/RejectGolfCourseUseCase';
+import ApproveGolfCourseUpdateUseCase from '../application/use_cases/golf_course/ApproveGolfCourseUpdateUseCase';
+import RejectGolfCourseUpdateUseCase from '../application/use_cases/golf_course/RejectGolfCourseUpdateUseCase';
+import ListPendingGolfCoursesUseCase from '../application/use_cases/golf_course/ListPendingGolfCoursesUseCase';
+
+// Admin Panel Use Cases (v2.4.0)
+import ApiAdminRepository from '../infrastructure/repositories/ApiAdminRepository';
+import GetAdminStatsUseCase from '../application/use_cases/admin/GetAdminStatsUseCase';
+import ListAdminUsersUseCase from '../application/use_cases/admin/ListAdminUsersUseCase';
+import UpdateAdminUserUseCase from '../application/use_cases/admin/UpdateAdminUserUseCase';
+import SetAdminUserActiveUseCase from '../application/use_cases/admin/SetAdminUserActiveUseCase';
+import DeleteAdminUserUseCase from '../application/use_cases/admin/DeleteAdminUserUseCase';
+
+// Device Management Use Cases (v1.13.0)
+import ApiDeviceRepository from '../infrastructure/repositories/ApiDeviceRepository';
+import GetActiveDevicesUseCase from '../application/use_cases/device/GetActiveDevicesUseCase';
+import RevokeDeviceUseCase from '../application/use_cases/device/RevokeDeviceUseCase';
+import CheckDeviceStatusUseCase from '../application/use_cases/device/CheckDeviceStatusUseCase';
+
+// Competition Use Cases
+import ApiCompetitionRepository from '../infrastructure/repositories/ApiCompetitionRepository';
+import CreateCompetitionWithGolfCoursesUseCase from '../application/use_cases/competition/CreateCompetitionWithGolfCoursesUseCase';
+import UpdateCompetitionUseCase from '../application/use_cases/competition/UpdateCompetitionUseCase';
+import UpdateStrokePlaySettingsUseCase from '../application/use_cases/competition/UpdateStrokePlaySettingsUseCase';
+import LaunchHandicapUpdateUseCase from '../application/use_cases/competition/LaunchHandicapUpdateUseCase';
+import ScheduleHandicapUpdateUseCase from '../application/use_cases/competition/ScheduleHandicapUpdateUseCase';
+import CancelScheduledHandicapUpdateUseCase from '../application/use_cases/competition/CancelScheduledHandicapUpdateUseCase';
+import ListUserCompetitionsUseCase from '../application/use_cases/competition/ListUserCompetitionsUseCase';
+import GetCompetitionDetailUseCase from '../application/use_cases/competition/GetCompetitionDetailUseCase';
+import GetCompetitionSummaryUseCase from '../application/use_cases/competition/GetCompetitionSummaryUseCase';
+import ActivateCompetitionUseCase from '../application/use_cases/competition/ActivateCompetitionUseCase';
+import CloseEnrollmentsUseCase from '../application/use_cases/competition/CloseEnrollmentsUseCase';
+import NameCaptainsUseCase from '../application/use_cases/competition/NameCaptainsUseCase';
+import FillCaptainUseCase from '../application/use_cases/competition/FillCaptainUseCase';
+import StartCompetitionUseCase from '../application/use_cases/competition/StartCompetitionUseCase';
+import CompleteCompetitionUseCase from '../application/use_cases/competition/CompleteCompetitionUseCase';
+import CancelCompetitionUseCase from '../application/use_cases/competition/CancelCompetitionUseCase';
+import DeleteCompetitionUseCase from '../application/use_cases/competition/DeleteCompetitionUseCase';
+import ReopenEnrollmentsUseCase from '../application/use_cases/competition/ReopenEnrollmentsUseCase';
+import RevertCompetitionStatusUseCase from '../application/use_cases/competition/RevertCompetitionStatusUseCase';
+import RevertCompetitionToInProgressUseCase from '../application/use_cases/competition/RevertCompetitionToInProgressUseCase';
+import BrowseJoinableCompetitionsUseCase from '../application/use_cases/competition/BrowseJoinableCompetitionsUseCase';
+import BrowseExploreCompetitionsUseCase from '../application/use_cases/competition/BrowseExploreCompetitionsUseCase';
+import AdminListCompetitionsUseCase from '../application/use_cases/competition/AdminListCompetitionsUseCase';
+import AdminUpdateCompetitionUseCase from '../application/use_cases/competition/AdminUpdateCompetitionUseCase';
+import AddGolfCourseToCompetitionUseCase from '../application/use_cases/competition/AddGolfCourseToCompetitionUseCase';
+import RemoveGolfCourseFromCompetitionUseCase from '../application/use_cases/competition/RemoveGolfCourseFromCompetitionUseCase';
+import ReorderGolfCoursesUseCase from '../application/use_cases/competition/ReorderGolfCoursesUseCase';
+import GetCompetitionGolfCoursesUseCase from '../application/use_cases/competition/GetCompetitionGolfCoursesUseCase';
+
+// Schedule Use Cases (v2.1.0 - Sprint 2)
+import ApiScheduleRepository from '../infrastructure/repositories/ApiScheduleRepository';
+import ApiDraftRepository from '../infrastructure/repositories/ApiDraftRepository';
+import GetScheduleUseCase from '../application/use_cases/schedule/GetScheduleUseCase';
+import ConfigureScheduleUseCase from '../application/use_cases/schedule/ConfigureScheduleUseCase';
+import AssignTeamsUseCase from '../application/use_cases/schedule/AssignTeamsUseCase';
+import UndoTeamsUseCase from '../application/use_cases/schedule/UndoTeamsUseCase';
+import StartDraftUseCase from '../application/use_cases/draft/StartDraftUseCase';
+import GetDraftUseCase from '../application/use_cases/draft/GetDraftUseCase';
+import MakeDraftPickUseCase from '../application/use_cases/draft/MakeDraftPickUseCase';
+import ApiEnvelopeRepository from '../infrastructure/repositories/ApiEnvelopeRepository';
+import SubmitEnvelopeUseCase from '../application/use_cases/envelope/SubmitEnvelopeUseCase';
+import GetEnvelopesUseCase from '../application/use_cases/envelope/GetEnvelopesUseCase';
+import RevealEnvelopesUseCase from '../application/use_cases/envelope/RevealEnvelopesUseCase';
+import ResetEnvelopesUseCase from '../application/use_cases/envelope/ResetEnvelopesUseCase';
+import ListMyPendingEnvelopesUseCase from '../application/use_cases/envelope/ListMyPendingEnvelopesUseCase';
+import ListMySessionsWithoutMatchesUseCase from '../application/use_cases/envelope/ListMySessionsWithoutMatchesUseCase';
+import CreateRoundUseCase from '../application/use_cases/schedule/CreateRoundUseCase';
+import TakeTeeWindowPlaceUseCase from '../application/use_cases/schedule/TakeTeeWindowPlaceUseCase';
+import ReleaseTeeWindowPlaceUseCase from '../application/use_cases/schedule/ReleaseTeeWindowPlaceUseCase';
+import JoinWaitingListUseCase from '../application/use_cases/schedule/JoinWaitingListUseCase';
+import LeaveWaitingListUseCase from '../application/use_cases/schedule/LeaveWaitingListUseCase';
+import ListMyHandicapsNotUpdatedUseCase from '../application/use_cases/competition/ListMyHandicapsNotUpdatedUseCase';
+import ListMyAssignedPlacesUseCase from '../application/use_cases/schedule/ListMyAssignedPlacesUseCase';
+import AcknowledgeAssignedPlaceUseCase from '../application/use_cases/schedule/AcknowledgeAssignedPlaceUseCase';
+// Partidas de las franjas (FE #824, PR 6)
+import GetTeeGroupsUseCase from '../application/use_cases/schedule/GetTeeGroupsUseCase';
+import GetMyTeeGroupsUseCase from '../application/use_cases/schedule/GetMyTeeGroupsUseCase';
+import GetUpcomingTeeGroupsUseCase from '../application/use_cases/schedule/GetUpcomingTeeGroupsUseCase';
+import GenerateTeeGroupsUseCase from '../application/use_cases/schedule/GenerateTeeGroupsUseCase';
+import MoveTeeGroupPlayerUseCase from '../application/use_cases/schedule/MoveTeeGroupPlayerUseCase';
+import ReorderTeeGroupsUseCase from '../application/use_cases/schedule/ReorderTeeGroupsUseCase';
+import SetTeeGroupMarkersUseCase from '../application/use_cases/schedule/SetTeeGroupMarkersUseCase';
+import DeleteTeeGroupsUseCase from '../application/use_cases/schedule/DeleteTeeGroupsUseCase';
+import UpdateRoundUseCase from '../application/use_cases/schedule/UpdateRoundUseCase';
+import DeleteRoundUseCase from '../application/use_cases/schedule/DeleteRoundUseCase';
+import GenerateMatchesUseCase from '../application/use_cases/schedule/GenerateMatchesUseCase';
+import GetMatchDetailUseCase from '../application/use_cases/schedule/GetMatchDetailUseCase';
+import UpdateMatchStatusUseCase from '../application/use_cases/schedule/UpdateMatchStatusUseCase';
+import DeclareWalkoverUseCase from '../application/use_cases/schedule/DeclareWalkoverUseCase';
+import ReassignPlayersUseCase from '../application/use_cases/schedule/ReassignPlayersUseCase';
+
+// Support Use Cases
+import ApiSupportRepository from '../infrastructure/repositories/ApiSupportRepository';
+import SubmitContactFormUseCase from '../application/use_cases/support/SubmitContactFormUseCase';
+
+// Invitation Use Cases (Sprint 3)
+import ApiInvitationRepository from '../infrastructure/repositories/ApiInvitationRepository';
+import SendInvitationUseCase from '../application/use_cases/invitation/SendInvitationUseCase';
+import SendInvitationByEmailUseCase from '../application/use_cases/invitation/SendInvitationByEmailUseCase';
+import ListMyInvitationsUseCase from '../application/use_cases/invitation/ListMyInvitationsUseCase';
+import RespondToInvitationUseCase from '../application/use_cases/invitation/RespondToInvitationUseCase';
+import CancelInvitationUseCase from '../application/use_cases/invitation/CancelInvitationUseCase';
+import ListCompetitionInvitationsUseCase from '../application/use_cases/invitation/ListCompetitionInvitationsUseCase';
+
+// Avatar Use Cases
+import ApiAvatarRepository from '../infrastructure/repositories/ApiAvatarRepository';
+import ListAvatarPresetsUseCase from '../application/use_cases/avatar/ListAvatarPresetsUseCase';
+import SetAvatarPresetUseCase from '../application/use_cases/avatar/SetAvatarPresetUseCase';
+import UploadAvatarUseCase from '../application/use_cases/avatar/UploadAvatarUseCase';
+import ListMyAvatarUploadsUseCase from '../application/use_cases/avatar/ListMyAvatarUploadsUseCase';
+import ActivateUploadedAvatarUseCase from '../application/use_cases/avatar/ActivateUploadedAvatarUseCase';
+import RemoveAvatarUseCase from '../application/use_cases/avatar/RemoveAvatarUseCase';
+
+// Friend Use Cases
+import ApiFriendRepository from '../infrastructure/repositories/ApiFriendRepository';
+import ApiSocialFeedRepository from '../infrastructure/repositories/ApiSocialFeedRepository';
+import GetFriendsFeedUseCase from '../application/use_cases/social/GetFriendsFeedUseCase';
+import MarkFeedAsSeenUseCase from '../application/use_cases/social/MarkFeedAsSeenUseCase';
+import GetFeedUnseenCountUseCase from '../application/use_cases/social/GetFeedUnseenCountUseCase';
+import GetPlayerProfileUseCase from '../application/use_cases/social/GetPlayerProfileUseCase';
+import GetPlayerActivityUseCase from '../application/use_cases/social/GetPlayerActivityUseCase';
+import GetGamesTogetherUseCase from '../application/use_cases/social/GetGamesTogetherUseCase';
+import SetActivitySharingUseCase from '../application/use_cases/social/SetActivitySharingUseCase';
+import SendFriendRequestUseCase from '../application/use_cases/friend/SendFriendRequestUseCase';
+import RespondFriendRequestUseCase from '../application/use_cases/friend/RespondFriendRequestUseCase';
+import RemoveFriendUseCase from '../application/use_cases/friend/RemoveFriendUseCase';
+import BlockUserUseCase from '../application/use_cases/friend/BlockUserUseCase';
+import ListFriendsUseCase from '../application/use_cases/friend/ListFriendsUseCase';
+import ListPendingFriendRequestsUseCase from '../application/use_cases/friend/ListPendingFriendRequestsUseCase';
+
+// Player Stats Use Cases (FE #306)
+import ApiPlayerStatsRepository from '../infrastructure/repositories/ApiPlayerStatsRepository';
+import GetPlayerStatsUseCase from '../application/use_cases/player_stats/GetPlayerStatsUseCase';
+import GetRecentMatchesUseCase from '../application/use_cases/player_stats/GetRecentMatchesUseCase';
+import GetUpcomingMatchesUseCase from '../application/use_cases/schedule/GetUpcomingMatchesUseCase';
+import GetPlayerStatsByGolfCourseUseCase from '../application/use_cases/player_stats/GetPlayerStatsByGolfCourseUseCase';
+import GetScoringBreakdownUseCase from '../application/use_cases/player_stats/GetScoringBreakdownUseCase';
+
+// Scoring Use Cases (Sprint 4)
+import ApiScoringRepository from '../infrastructure/repositories/ApiScoringRepository';
+import ApiTeeGroupScoringRepository from '../infrastructure/repositories/ApiTeeGroupScoringRepository';
+import GetScoringViewUseCase from '../application/use_cases/scoring/GetScoringViewUseCase';
+import SubmitHoleScoreUseCase from '../application/use_cases/scoring/SubmitHoleScoreUseCase';
+import SubmitScorecardUseCase from '../application/use_cases/scoring/SubmitScorecardUseCase';
+import GetLeaderboardUseCase from '../application/use_cases/scoring/GetLeaderboardUseCase';
+import ConcedeMatchUseCase from '../application/use_cases/scoring/ConcedeMatchUseCase';
+import WithdrawMatchPlayerUseCase from '../application/use_cases/scoring/WithdrawMatchPlayerUseCase';
+// Anotar las partidas de stroke play (FE #824, PR 7)
+import RetireFromTeeGroupUseCase from '../application/use_cases/scoring/RetireFromTeeGroupUseCase';
+import CorrectTeeGroupHoleUseCase from '../application/use_cases/scoring/CorrectTeeGroupHoleUseCase';
+import ReopenTeeGroupCardUseCase from '../application/use_cases/scoring/ReopenTeeGroupCardUseCase';
+import MarkTeeGroupNoShowUseCase from '../application/use_cases/scoring/MarkTeeGroupNoShowUseCase';
+import RetireTeeGroupPlayerUseCase from '../application/use_cases/scoring/RetireTeeGroupPlayerUseCase';
+import DeleteTeeGroupHoleUseCase from '../application/use_cases/scoring/DeleteTeeGroupHoleUseCase';
+import ValidateTeeGroupScoredHolesUseCase from '../application/use_cases/scoring/ValidateTeeGroupScoredHolesUseCase';
+import CloseTeeWindowUseCase from '../application/use_cases/scoring/CloseTeeWindowUseCase';
+import GetTeeWindowStandingsUseCase from '../application/use_cases/scoring/GetTeeWindowStandingsUseCase';
+import GetCompetitionStandingsUseCase from '../application/use_cases/scoring/GetCompetitionStandingsUseCase';
+import GetScratchStandingsUseCase from '../application/use_cases/scoring/GetScratchStandingsUseCase';
+
+// Enrollment Use Cases
+import ApiEnrollmentRepository from '../infrastructure/repositories/ApiEnrollmentRepository';
+import RequestEnrollmentUseCase from '../application/use_cases/enrollment/RequestEnrollmentUseCase';
+import ListEnrollmentsUseCase from '../application/use_cases/enrollment/ListEnrollmentsUseCase';
+import ApproveEnrollmentUseCase from '../application/use_cases/enrollment/ApproveEnrollmentUseCase';
+import RejectEnrollmentUseCase from '../application/use_cases/enrollment/RejectEnrollmentUseCase';
+import RemoveEnrolledPlayerUseCase from '../application/use_cases/enrollment/RemoveEnrolledPlayerUseCase';
+import SetCustomHandicapUseCase from '../application/use_cases/enrollment/SetCustomHandicapUseCase';
+import RemoveCustomHandicapUseCase from '../application/use_cases/enrollment/RemoveCustomHandicapUseCase';
+import SetNamePreferenceUseCase from '../application/use_cases/enrollment/SetNamePreferenceUseCase';
+
+// Quick Match Use Cases (FE #236)
+import ApiQuickMatchRepository from '../infrastructure/repositories/ApiQuickMatchRepository';
+import CreateAndStartQuickMatchUseCase from '../application/use_cases/quick_match/CreateAndStartQuickMatchUseCase';
+import CompleteQuickMatchUseCase from '../application/use_cases/quick_match/CompleteQuickMatchUseCase';
+import CancelQuickMatchUseCase from '../application/use_cases/quick_match/CancelQuickMatchUseCase';
+import HideQuickMatchUseCase from '../application/use_cases/quick_match/HideQuickMatchUseCase';
+import ExcludeQuickMatchFromStatsUseCase from '../application/use_cases/quick_match/ExcludeQuickMatchFromStatsUseCase';
+import IncludeQuickMatchInStatsUseCase from '../application/use_cases/quick_match/IncludeQuickMatchInStatsUseCase';
+import GetQuickMatchUseCase from '../application/use_cases/quick_match/GetQuickMatchUseCase';
+import GetSharedQuickMatchUseCase from '../application/use_cases/quick_match/GetSharedQuickMatchUseCase';
+import ListMyQuickMatchesUseCase from '../application/use_cases/quick_match/ListMyQuickMatchesUseCase';
+import SubmitQuickMatchHoleScoreUseCase from '../application/use_cases/quick_match/SubmitQuickMatchHoleScoreUseCase';
+import SubmitQuickMatchProxyHoleScoreUseCase from '../application/use_cases/quick_match/SubmitQuickMatchProxyHoleScoreUseCase';
+
+// --- Repositorios (implementaciones concretas) ---
+// Con httpOnly cookies ya no necesitamos authTokenProvider
+const apiUserRepository = new ApiUserRepository();
+const apiHandicapRepository = new ApiHandicapRepository();
+const apiAuthRepository = new ApiAuthRepository();
+const apiCompetitionRepository = new ApiCompetitionRepository();
+const apiEnrollmentRepository = new ApiEnrollmentRepository();
+const apiDeviceRepository = new ApiDeviceRepository();
+const apiGolfCourseRepository = new ApiGolfCourseRepository();
+const apiAdminRepository = new ApiAdminRepository();
+const apiScheduleRepository = new ApiScheduleRepository();
+const apiDraftRepository = new ApiDraftRepository();
+const apiEnvelopeRepository = new ApiEnvelopeRepository();
+const apiSupportRepository = new ApiSupportRepository();
+const apiCountryRepository = new ApiCountryRepository();
+const apiInvitationRepository = new ApiInvitationRepository();
+const apiScoringRepository = new ApiScoringRepository();
+const apiTeeGroupScoringRepository = new ApiTeeGroupScoringRepository();
+const apiQuickMatchRepository = new ApiQuickMatchRepository();
+
+// --- Casos de Uso ---
+const updateUserProfileUseCase = new UpdateUserProfileUseCase({
+  userRepository: apiUserRepository,
+});
+const acceptTermsUseCase = new AcceptTermsUseCase({
+  userRepository: apiUserRepository,
+});
+const confirmEmailChangeUseCase = new ConfirmEmailChangeUseCase({
+  userRepository: apiUserRepository,
+});
+const cancelEmailChangeUseCase = new CancelEmailChangeUseCase({
+  userRepository: apiUserRepository,
+});
+const updateUserSecurityUseCase = new UpdateUserSecurityUseCase({
+  userRepository: apiUserRepository,
+});
+const getUserRolesUseCase = new GetUserRolesUseCase({
+  userRepository: apiUserRepository,
+});
+const searchUsersUseCase = new SearchUsersUseCase({
+  userRepository: apiUserRepository,
+});
+const updateManualHandicapUseCase = new UpdateManualHandicapUseCase({
+  handicapRepository: apiHandicapRepository,
+});
+const updateRfegHandicapUseCase = new UpdateRfegHandicapUseCase({
+  handicapRepository: apiHandicapRepository,
+  userRepository: apiUserRepository,
+});
+const refreshOwnHandicapUseCase = new RefreshOwnHandicapUseCase({
+  handicapRepository: apiHandicapRepository,
+});
+const loginUseCase = new LoginUseCase({ authRepository: apiAuthRepository });
+const registerUseCase = new RegisterUseCase({
+  authRepository: apiAuthRepository,
+});
+const verifyEmailUseCase = new VerifyEmailUseCase({
+  authRepository: apiAuthRepository,
+});
+const requestPasswordResetUseCase = new RequestPasswordResetUseCase({
+  authRepository: apiAuthRepository,
+});
+const validateResetTokenUseCase = new ValidateResetTokenUseCase({
+  authRepository: apiAuthRepository,
+});
+const resetPasswordUseCase = new ResetPasswordUseCase({
+  authRepository: apiAuthRepository,
+});
+const googleLoginUseCase = new GoogleLoginUseCase({
+  authRepository: apiAuthRepository,
+});
+const linkGoogleAccountUseCase = new LinkGoogleAccountUseCase({
+  authRepository: apiAuthRepository,
+});
+const unlinkGoogleAccountUseCase = new UnlinkGoogleAccountUseCase({
+  authRepository: apiAuthRepository,
+});
+const reauthenticateUseCase = new ReauthenticateUseCase({
+  authRepository: apiAuthRepository,
+});
+const logoutUseCase = new LogoutUseCase({ authRepository: apiAuthRepository });
+const resendVerificationEmailUseCase = new ResendVerificationEmailUseCase({
+  authRepository: apiAuthRepository,
+});
+const resendVerificationLinkUseCase = new ResendVerificationLinkUseCase({
+  authRepository: apiAuthRepository,
+});
+const createCompetitionWithGolfCoursesUseCase =
+  new CreateCompetitionWithGolfCoursesUseCase({
+    competitionRepository: apiCompetitionRepository,
+  });
+const updateCompetitionUseCase = new UpdateCompetitionUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const updateStrokePlaySettingsUseCase = new UpdateStrokePlaySettingsUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const launchHandicapUpdateUseCase = new LaunchHandicapUpdateUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const scheduleHandicapUpdateUseCase = new ScheduleHandicapUpdateUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const cancelScheduledHandicapUpdateUseCase =
+  new CancelScheduledHandicapUpdateUseCase({
+    competitionRepository: apiCompetitionRepository,
+  });
+const listMyHandicapsNotUpdatedUseCase = new ListMyHandicapsNotUpdatedUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const listUserCompetitionsUseCase = new ListUserCompetitionsUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const getCompetitionDetailUseCase = new GetCompetitionDetailUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const getCompetitionSummaryUseCase = new GetCompetitionSummaryUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const activateCompetitionUseCase = new ActivateCompetitionUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const closeEnrollmentsUseCase = new CloseEnrollmentsUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const nameCaptainsUseCase = new NameCaptainsUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const fillCaptainUseCase = new FillCaptainUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const startCompetitionUseCase = new StartCompetitionUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const completeCompetitionUseCase = new CompleteCompetitionUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const cancelCompetitionUseCase = new CancelCompetitionUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const deleteCompetitionUseCase = new DeleteCompetitionUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const reopenEnrollmentsUseCase = new ReopenEnrollmentsUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const revertCompetitionStatusUseCase = new RevertCompetitionStatusUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const revertCompetitionToInProgressUseCase =
+  new RevertCompetitionToInProgressUseCase({
+    competitionRepository: apiCompetitionRepository,
+  });
+const browseJoinableCompetitionsUseCase = new BrowseJoinableCompetitionsUseCase(
+  apiCompetitionRepository,
+);
+const browseExploreCompetitionsUseCase = new BrowseExploreCompetitionsUseCase(
+  apiCompetitionRepository,
+);
+const adminListCompetitionsUseCase = new AdminListCompetitionsUseCase(
+  apiCompetitionRepository,
+);
+const adminUpdateCompetitionUseCase = new AdminUpdateCompetitionUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const addGolfCourseToCompetitionUseCase = new AddGolfCourseToCompetitionUseCase(
+  { competitionRepository: apiCompetitionRepository },
+);
+const removeGolfCourseFromCompetitionUseCase =
+  new RemoveGolfCourseFromCompetitionUseCase({
+    competitionRepository: apiCompetitionRepository,
+  });
+const reorderGolfCoursesUseCase = new ReorderGolfCoursesUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const getCompetitionGolfCoursesUseCase = new GetCompetitionGolfCoursesUseCase({
+  competitionRepository: apiCompetitionRepository,
+});
+const fetchCountriesUseCase = new FetchCountriesUseCase({
+  countryRepository: apiCountryRepository,
+});
+const getAdjacentCountriesUseCase = new GetAdjacentCountriesUseCase({
+  countryRepository: apiCountryRepository,
+});
+
+// Schedule Use Cases (v2.1.0 - Sprint 2)
+const getScheduleUseCase = new GetScheduleUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const configureScheduleUseCase = new ConfigureScheduleUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const assignTeamsUseCase = new AssignTeamsUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const undoTeamsUseCase = new UndoTeamsUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const createRoundUseCase = new CreateRoundUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const takeTeeWindowPlaceUseCase = puedeDarUnPartido(
+  new TakeTeeWindowPlaceUseCase({
+    scheduleRepository: apiScheduleRepository,
+  }),
+);
+const releaseTeeWindowPlaceUseCase = new ReleaseTeeWindowPlaceUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const joinWaitingListUseCase = puedeDarUnPartido(
+  new JoinWaitingListUseCase({
+    scheduleRepository: apiScheduleRepository,
+  }),
+);
+const leaveWaitingListUseCase = new LeaveWaitingListUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const listMyAssignedPlacesUseCase = new ListMyAssignedPlacesUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const acknowledgeAssignedPlaceUseCase = puedeDarUnPartido(
+  new AcknowledgeAssignedPlaceUseCase({
+    scheduleRepository: apiScheduleRepository,
+  }),
+);
+const getTeeGroupsUseCase = new GetTeeGroupsUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const getMyTeeGroupsUseCase = new GetMyTeeGroupsUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const generateTeeGroupsUseCase = puedeDarUnPartido(
+  new GenerateTeeGroupsUseCase({
+    scheduleRepository: apiScheduleRepository,
+  }),
+);
+const moveTeeGroupPlayerUseCase = puedeDarUnPartido(
+  new MoveTeeGroupPlayerUseCase({
+    scheduleRepository: apiScheduleRepository,
+  }),
+);
+const reorderTeeGroupsUseCase = new ReorderTeeGroupsUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const setTeeGroupMarkersUseCase = new SetTeeGroupMarkersUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const deleteTeeGroupsUseCase = new DeleteTeeGroupsUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const updateRoundUseCase = new UpdateRoundUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const deleteRoundUseCase = new DeleteRoundUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const generateMatchesUseCase = puedeDarUnPartido(
+  new GenerateMatchesUseCase({
+    scheduleRepository: apiScheduleRepository,
+  }),
+);
+const getMatchDetailUseCase = new GetMatchDetailUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const updateMatchStatusUseCase = new UpdateMatchStatusUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const declareWalkoverUseCase = new DeclareWalkoverUseCase({
+  scheduleRepository: apiScheduleRepository,
+});
+const reassignPlayersUseCase = puedeDarUnPartido(
+  new ReassignPlayersUseCase({
+    scheduleRepository: apiScheduleRepository,
+  }),
+);
+
+// Sala de draft (FE #653)
+const startDraftUseCase = new StartDraftUseCase({
+  draftRepository: apiDraftRepository,
+});
+const getDraftUseCase = new GetDraftUseCase({
+  draftRepository: apiDraftRepository,
+});
+const makeDraftPickUseCase = new MakeDraftPickUseCase({
+  draftRepository: apiDraftRepository,
+});
+// Los sobres de los capitanes (FE #655)
+const submitEnvelopeUseCase = new SubmitEnvelopeUseCase({
+  envelopeRepository: apiEnvelopeRepository,
+});
+const getEnvelopesUseCase = new GetEnvelopesUseCase({
+  envelopeRepository: apiEnvelopeRepository,
+});
+const revealEnvelopesUseCase = new RevealEnvelopesUseCase({
+  envelopeRepository: apiEnvelopeRepository,
+});
+const resetEnvelopesUseCase = new ResetEnvelopesUseCase({
+  envelopeRepository: apiEnvelopeRepository,
+});
+const listMyPendingEnvelopesUseCase = new ListMyPendingEnvelopesUseCase({
+  envelopeRepository: apiEnvelopeRepository,
+});
+const listMySessionsWithoutMatchesUseCase =
+  new ListMySessionsWithoutMatchesUseCase({
+    envelopeRepository: apiEnvelopeRepository,
+  });
+
+// Support Use Cases
+const submitContactFormUseCase = new SubmitContactFormUseCase({
+  supportRepository: apiSupportRepository,
+});
+
+// Invitation Use Cases (Sprint 3)
+const sendInvitationUseCase = new SendInvitationUseCase({
+  invitationRepository: apiInvitationRepository,
+});
+const sendInvitationByEmailUseCase = new SendInvitationByEmailUseCase({
+  invitationRepository: apiInvitationRepository,
+});
+const listMyInvitationsUseCase = new ListMyInvitationsUseCase({
+  invitationRepository: apiInvitationRepository,
+});
+const respondToInvitationUseCase = puedeDarUnPartido(
+  new RespondToInvitationUseCase({
+    invitationRepository: apiInvitationRepository,
+  }),
+);
+const cancelInvitationUseCase = new CancelInvitationUseCase({
+  invitationRepository: apiInvitationRepository,
+});
+const listCompetitionInvitationsUseCase = new ListCompetitionInvitationsUseCase(
+  { invitationRepository: apiInvitationRepository },
+);
+
+// Avatar Use Cases
+const apiAvatarRepository = new ApiAvatarRepository();
+const listAvatarPresetsUseCase = new ListAvatarPresetsUseCase({
+  avatarRepository: apiAvatarRepository,
+});
+const setAvatarPresetUseCase = new SetAvatarPresetUseCase({
+  avatarRepository: apiAvatarRepository,
+});
+const uploadAvatarUseCase = new UploadAvatarUseCase({
+  avatarRepository: apiAvatarRepository,
+});
+const listMyAvatarUploadsUseCase = new ListMyAvatarUploadsUseCase({
+  avatarRepository: apiAvatarRepository,
+});
+const activateUploadedAvatarUseCase = new ActivateUploadedAvatarUseCase({
+  avatarRepository: apiAvatarRepository,
+});
+const removeAvatarUseCase = new RemoveAvatarUseCase({
+  avatarRepository: apiAvatarRepository,
+});
+
+// Friend Use Cases
+const apiFriendRepository = new ApiFriendRepository();
+const apiSocialFeedRepository = new ApiSocialFeedRepository();
+export const getFriendsFeedUseCase = new GetFriendsFeedUseCase({
+  socialFeedRepository: apiSocialFeedRepository,
+});
+export const markFeedAsSeenUseCase = new MarkFeedAsSeenUseCase({
+  socialFeedRepository: apiSocialFeedRepository,
+});
+export const getFeedUnseenCountUseCase = new GetFeedUnseenCountUseCase({
+  socialFeedRepository: apiSocialFeedRepository,
+});
+export const getPlayerProfileUseCase = new GetPlayerProfileUseCase({
+  socialFeedRepository: apiSocialFeedRepository,
+});
+export const getPlayerActivityUseCase = new GetPlayerActivityUseCase({
+  socialFeedRepository: apiSocialFeedRepository,
+});
+export const getGamesTogetherUseCase = new GetGamesTogetherUseCase({
+  socialFeedRepository: apiSocialFeedRepository,
+});
+export const setActivitySharingUseCase = new SetActivitySharingUseCase({
+  socialFeedRepository: apiSocialFeedRepository,
+});
+const sendFriendRequestUseCase = new SendFriendRequestUseCase({
+  friendRepository: apiFriendRepository,
+});
+const respondFriendRequestUseCase = new RespondFriendRequestUseCase({
+  friendRepository: apiFriendRepository,
+});
+const removeFriendUseCase = new RemoveFriendUseCase({
+  friendRepository: apiFriendRepository,
+});
+const blockUserUseCase = new BlockUserUseCase({
+  friendRepository: apiFriendRepository,
+});
+const listFriendsUseCase = new ListFriendsUseCase({
+  friendRepository: apiFriendRepository,
+});
+const listPendingFriendRequestsUseCase = new ListPendingFriendRequestsUseCase({
+  friendRepository: apiFriendRepository,
+});
+
+// Player Stats Use Cases (FE #306)
+const apiPlayerStatsRepository = new ApiPlayerStatsRepository();
+const getPlayerStatsUseCase = new GetPlayerStatsUseCase({
+  playerStatsRepository: apiPlayerStatsRepository,
+});
+const getRecentMatchesUseCase = new GetRecentMatchesUseCase({
+  playerStatsRepository: apiPlayerStatsRepository,
+});
+const getPlayerStatsByGolfCourseUseCase = new GetPlayerStatsByGolfCourseUseCase(
+  { playerStatsRepository: apiPlayerStatsRepository },
+);
+const getScoringBreakdownUseCase = new GetScoringBreakdownUseCase({
+  playerStatsRepository: apiPlayerStatsRepository,
+});
+
+// Scoring Use Cases (Sprint 4)
+const getScoringViewUseCase = new GetScoringViewUseCase({
+  scoringRepository: apiScoringRepository,
+});
+const submitHoleScoreUseCase = new SubmitHoleScoreUseCase({
+  scoringRepository: apiScoringRepository,
+});
+const submitScorecardUseCase = new SubmitScorecardUseCase({
+  scoringRepository: apiScoringRepository,
+});
+const getLeaderboardUseCase = new GetLeaderboardUseCase({
+  scoringRepository: apiScoringRepository,
+});
+const concedeMatchUseCase = new ConcedeMatchUseCase({
+  scoringRepository: apiScoringRepository,
+});
+const withdrawMatchPlayerUseCase = new WithdrawMatchPlayerUseCase({
+  scoringRepository: apiScoringRepository,
+});
+// Las partidas de stroke play se anotan con los MISMOS casos de uso que el
+// partido de la Ryder, sobre su repositorio: misma validación de lo que se manda
+// (omitir no es raya) y mismo `useScoring` con su cola (FE #824, PR 7)
+const getTeeGroupScoringViewUseCase = new GetScoringViewUseCase({
+  scoringRepository: apiTeeGroupScoringRepository,
+});
+const submitTeeGroupHoleScoreUseCase = new SubmitHoleScoreUseCase({
+  scoringRepository: apiTeeGroupScoringRepository,
+});
+const submitTeeGroupScorecardUseCase = new SubmitScorecardUseCase({
+  scoringRepository: apiTeeGroupScoringRepository,
+});
+const retireFromTeeGroupUseCase = new RetireFromTeeGroupUseCase({
+  teeGroupScoringRepository: apiTeeGroupScoringRepository,
+});
+const correctTeeGroupHoleUseCase = new CorrectTeeGroupHoleUseCase({
+  teeGroupScoringRepository: apiTeeGroupScoringRepository,
+});
+const reopenTeeGroupCardUseCase = new ReopenTeeGroupCardUseCase({
+  teeGroupScoringRepository: apiTeeGroupScoringRepository,
+});
+const markTeeGroupNoShowUseCase = new MarkTeeGroupNoShowUseCase({
+  teeGroupScoringRepository: apiTeeGroupScoringRepository,
+});
+const retireTeeGroupPlayerUseCase = new RetireTeeGroupPlayerUseCase({
+  teeGroupScoringRepository: apiTeeGroupScoringRepository,
+});
+const deleteTeeGroupHoleUseCase = new DeleteTeeGroupHoleUseCase({
+  teeGroupScoringRepository: apiTeeGroupScoringRepository,
+});
+const validateTeeGroupScoredHolesUseCase =
+  new ValidateTeeGroupScoredHolesUseCase({
+    teeGroupScoringRepository: apiTeeGroupScoringRepository,
+  });
+const closeTeeWindowUseCase = new CloseTeeWindowUseCase({
+  teeGroupScoringRepository: apiTeeGroupScoringRepository,
+});
+const getTeeWindowStandingsUseCase = new GetTeeWindowStandingsUseCase({
+  teeGroupScoringRepository: apiTeeGroupScoringRepository,
+});
+const getCompetitionStandingsUseCase = new GetCompetitionStandingsUseCase({
+  teeGroupScoringRepository: apiTeeGroupScoringRepository,
+});
+const getScratchStandingsUseCase = new GetScratchStandingsUseCase({
+  teeGroupScoringRepository: apiTeeGroupScoringRepository,
+});
+
+// Enrollment Use Cases
+const requestEnrollmentUseCase = puedeDarUnPartido(
+  new RequestEnrollmentUseCase(apiEnrollmentRepository),
+);
+const listEnrollmentsUseCase = new ListEnrollmentsUseCase(
+  apiEnrollmentRepository,
+);
+
+// Próximos partidos del jugador (FE #306): compone competiciones + calendario +
+// inscripciones, porque no hay un endpoint que lo responda de una vez
+const getUpcomingMatchesUseCase = new GetUpcomingMatchesUseCase({
+  listUserCompetitionsUseCase,
+  getScheduleUseCase,
+  listEnrollmentsUseCase,
+});
+// Y las partidas de stroke play, aparte: el banner del panel enseña la más
+// cercana de las dos (FE #824, PR 7)
+const getUpcomingTeeGroupsUseCase = new GetUpcomingTeeGroupsUseCase({
+  listUserCompetitionsUseCase,
+  getMyTeeGroupsUseCase,
+});
+const approveEnrollmentUseCase = new ApproveEnrollmentUseCase(
+  apiEnrollmentRepository,
+);
+const rejectEnrollmentUseCase = new RejectEnrollmentUseCase(
+  apiEnrollmentRepository,
+);
+const removeEnrolledPlayerUseCase = new RemoveEnrolledPlayerUseCase(
+  apiEnrollmentRepository,
+);
+const setCustomHandicapUseCase = new SetCustomHandicapUseCase(
+  apiEnrollmentRepository,
+);
+const removeCustomHandicapUseCase = new RemoveCustomHandicapUseCase(
+  apiEnrollmentRepository,
+);
+const setNamePreferenceUseCase = new SetNamePreferenceUseCase(
+  apiEnrollmentRepository,
+);
+
+// Quick Match Use Cases (FE #236)
+const createAndStartQuickMatchUseCase = puedeDarUnPartido(
+  new CreateAndStartQuickMatchUseCase({
+    quickMatchRepository: apiQuickMatchRepository,
+  }),
+);
+const completeQuickMatchUseCase = new CompleteQuickMatchUseCase({
+  quickMatchRepository: apiQuickMatchRepository,
+});
+const cancelQuickMatchUseCase = new CancelQuickMatchUseCase({
+  quickMatchRepository: apiQuickMatchRepository,
+});
+const hideQuickMatchUseCase = new HideQuickMatchUseCase({
+  quickMatchRepository: apiQuickMatchRepository,
+});
+const excludeQuickMatchFromStatsUseCase = new ExcludeQuickMatchFromStatsUseCase(
+  { quickMatchRepository: apiQuickMatchRepository },
+);
+const includeQuickMatchInStatsUseCase = new IncludeQuickMatchInStatsUseCase({
+  quickMatchRepository: apiQuickMatchRepository,
+});
+const getQuickMatchUseCase = new GetQuickMatchUseCase({
+  quickMatchRepository: apiQuickMatchRepository,
+});
+const getSharedQuickMatchUseCase = new GetSharedQuickMatchUseCase({
+  quickMatchRepository: apiQuickMatchRepository,
+});
+const listMyQuickMatchesUseCase = new ListMyQuickMatchesUseCase({
+  quickMatchRepository: apiQuickMatchRepository,
+});
+const submitQuickMatchHoleScoreUseCase = new SubmitQuickMatchHoleScoreUseCase({
+  quickMatchRepository: apiQuickMatchRepository,
+});
+const submitQuickMatchProxyHoleScoreUseCase =
+  new SubmitQuickMatchProxyHoleScoreUseCase({
+    quickMatchRepository: apiQuickMatchRepository,
+  });
+
+// Device Management Use Cases (v1.13.0)
+const getActiveDevicesUseCase = new GetActiveDevicesUseCase({
+  deviceRepository: apiDeviceRepository,
+});
+const revokeDeviceUseCase = new RevokeDeviceUseCase({
+  deviceRepository: apiDeviceRepository,
+});
+const checkDeviceStatusUseCase = new CheckDeviceStatusUseCase({
+  deviceRepository: apiDeviceRepository,
+});
+
+// Golf Course Use Cases (v2.1.0 - Sprint 1)
+const listGolfCoursesUseCase = new ListGolfCoursesUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+const getGolfCourseUseCase = new GetGolfCourseUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+// Dónde está cada campo, con su copia en el móvil para el mapa sin cobertura (BE #532)
+const getCourseLocationUseCase = new GetCourseLocationUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+  courseLocationCache: new LocalStorageCourseLocationCache(),
+});
+// El mapa de hoyos para la anotación, con su copia para jugar sin cobertura (BE #532)
+// Revisar los hoyos (admin, BE #575)
+const listHoleReviewsUseCase = new ListHoleReviewsUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+const getHoleReviewUseCase = new GetHoleReviewUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+const saveHoleLineUseCase = new SaveHoleLineUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+const reopenHoleUseCase = new ReopenHoleUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+const deleteHoleSampleUseCase = new DeleteHoleSampleUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+const discardHoleReportUseCase = new DiscardHoleReportUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+
+const getHoleMapUseCase = new GetHoleMapUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+  holeMapCache: new LocalStorageHoleMapCache(),
+  reportarFallo: (error, contexto) =>
+    captureError(error, { tags: { modulo: 'mapa-de-hoyos' }, extra: contexto }),
+});
+// Las muestras de hoyo, anónimas (BE #532, marcado por par): a la cola del
+// móvil antes de nada y se envían cuando haya cobertura, sin decir nada al
+// jugador. Lo que el servidor no quiere es un fallo nuestro: a Sentry
+const holeSampleStore = new LocalStorageHoleSampleStore();
+const reportarFalloDeMuestra = (error, contexto) =>
+  captureError(error, {
+    tags: { modulo: 'muestras-de-hoyos' },
+    extra: contexto,
+  });
+// Las que van de camino, compartidas: la cola de fondo no manda otra vez la que está saliendo
+const muestrasEnVuelo = new Set();
+// Las que llegaron y el resumen aún no trae: se siguen viendo en el mapa
+const muestrasRecienEnviadas = crearRecienEnviadas();
+const sendHoleSampleUseCase = new SendHoleSampleUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+  holeSampleStore,
+  reportarFallo: reportarFalloDeMuestra,
+  enVuelo: muestrasEnVuelo,
+  recienEnviadas: muestrasRecienEnviadas,
+});
+const sendPendingHoleSamplesUseCase = new SendPendingHoleSamplesUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+  holeSampleStore,
+  reportarFallo: reportarFalloDeMuestra,
+  enVuelo: muestrasEnVuelo,
+  recienEnviadas: muestrasRecienEnviadas,
+});
+// Los reportes de hoyo (entrega 7): la misma cola en el móvil, aparte de las muestras
+const holeReportStore = new LocalStorageHoleReportStore();
+const reportarFalloDeReporte = (error, contexto) =>
+  captureError(error, {
+    tags: { modulo: 'reportes-de-hoyos' },
+    extra: contexto,
+  });
+const reportesEnVuelo = new Set();
+const sendHoleReportUseCase = new SendHoleReportUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+  holeReportStore,
+  reportarFallo: reportarFalloDeReporte,
+  enVuelo: reportesEnVuelo,
+});
+const sendPendingHoleReportsUseCase = new SendPendingHoleReportsUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+  holeReportStore,
+  reportarFallo: reportarFalloDeReporte,
+  enVuelo: reportesEnVuelo,
+});
+// La guía para marcar un hoyo, vista o no por cada jugador en este móvil
+const holeMarkingGuideUseCase = new HoleMarkingGuideUseCase({
+  holeMarkingGuideStore: new LocalStorageHoleMarkingGuideStore(),
+});
+const getHoleSamplesUseCase = new GetHoleSamplesUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+  holeSampleStore,
+  recienEnviadas: muestrasRecienEnviadas,
+});
+const createGolfCourseAdminUseCase = new CreateGolfCourseAdminUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+const createGolfCourseRequestUseCase = new CreateGolfCourseRequestUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+const updateGolfCourseUseCase = new UpdateGolfCourseUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+const approveGolfCourseUseCase = new ApproveGolfCourseUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+const rejectGolfCourseUseCase = new RejectGolfCourseUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+const approveGolfCourseUpdateUseCase = new ApproveGolfCourseUpdateUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+const rejectGolfCourseUpdateUseCase = new RejectGolfCourseUpdateUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+const listPendingGolfCoursesUseCase = new ListPendingGolfCoursesUseCase({
+  golfCourseRepository: apiGolfCourseRepository,
+});
+
+// Admin Panel Use Cases (v2.4.0)
+const getAdminStatsUseCase = new GetAdminStatsUseCase({
+  adminRepository: apiAdminRepository,
+});
+const listAdminUsersUseCase = new ListAdminUsersUseCase({
+  adminRepository: apiAdminRepository,
+});
+const updateAdminUserUseCase = new UpdateAdminUserUseCase({
+  adminRepository: apiAdminRepository,
+});
+const setAdminUserActiveUseCase = new SetAdminUserActiveUseCase({
+  adminRepository: apiAdminRepository,
+});
+const deleteAdminUserUseCase = new DeleteAdminUserUseCase({
+  adminRepository: apiAdminRepository,
+});
+
+// Exportar los casos de uso y otros servicios que la capa de presentación necesite
+export {
+  updateUserProfileUseCase,
+  acceptTermsUseCase,
+  confirmEmailChangeUseCase,
+  cancelEmailChangeUseCase,
+  updateUserSecurityUseCase,
+  getUserRolesUseCase,
+  searchUsersUseCase,
+  updateManualHandicapUseCase,
+  updateRfegHandicapUseCase,
+  refreshOwnHandicapUseCase,
+  loginUseCase,
+  registerUseCase,
+  verifyEmailUseCase,
+  requestPasswordResetUseCase,
+  validateResetTokenUseCase,
+  resetPasswordUseCase,
+  googleLoginUseCase,
+  linkGoogleAccountUseCase,
+  unlinkGoogleAccountUseCase,
+  reauthenticateUseCase,
+  logoutUseCase,
+  resendVerificationEmailUseCase,
+  resendVerificationLinkUseCase,
+  createCompetitionWithGolfCoursesUseCase,
+  updateCompetitionUseCase,
+  updateStrokePlaySettingsUseCase,
+  launchHandicapUpdateUseCase,
+  scheduleHandicapUpdateUseCase,
+  cancelScheduledHandicapUpdateUseCase,
+  listMyHandicapsNotUpdatedUseCase,
+  listUserCompetitionsUseCase,
+  getCompetitionDetailUseCase,
+  getCompetitionSummaryUseCase,
+  activateCompetitionUseCase,
+  closeEnrollmentsUseCase,
+  nameCaptainsUseCase,
+  fillCaptainUseCase,
+  startCompetitionUseCase,
+  completeCompetitionUseCase,
+  cancelCompetitionUseCase,
+  deleteCompetitionUseCase,
+  reopenEnrollmentsUseCase,
+  revertCompetitionStatusUseCase,
+  revertCompetitionToInProgressUseCase,
+  browseJoinableCompetitionsUseCase,
+  browseExploreCompetitionsUseCase,
+  addGolfCourseToCompetitionUseCase,
+  removeGolfCourseFromCompetitionUseCase,
+  reorderGolfCoursesUseCase,
+  getCompetitionGolfCoursesUseCase,
+  // Country Use Cases
+  fetchCountriesUseCase,
+  getAdjacentCountriesUseCase,
+  // Enrollment Use Cases
+  requestEnrollmentUseCase,
+  listEnrollmentsUseCase,
+  approveEnrollmentUseCase,
+  rejectEnrollmentUseCase,
+  removeEnrolledPlayerUseCase,
+  setCustomHandicapUseCase,
+  removeCustomHandicapUseCase,
+  setNamePreferenceUseCase,
+  // Device Management Use Cases (v1.13.0)
+  getActiveDevicesUseCase,
+  revokeDeviceUseCase,
+  checkDeviceStatusUseCase,
+  // Golf Course Use Cases (v2.1.0 - Sprint 1)
+  listGolfCoursesUseCase,
+  getGolfCourseUseCase,
+  getHoleMapUseCase,
+  listHoleReviewsUseCase,
+  getHoleReviewUseCase,
+  saveHoleLineUseCase,
+  reopenHoleUseCase,
+  deleteHoleSampleUseCase,
+  discardHoleReportUseCase,
+  getCourseLocationUseCase,
+  sendHoleSampleUseCase,
+  sendPendingHoleSamplesUseCase,
+  sendHoleReportUseCase,
+  sendPendingHoleReportsUseCase,
+  holeMarkingGuideUseCase,
+  getHoleSamplesUseCase,
+  createGolfCourseAdminUseCase,
+  createGolfCourseRequestUseCase,
+  updateGolfCourseUseCase,
+  approveGolfCourseUseCase,
+  rejectGolfCourseUseCase,
+  approveGolfCourseUpdateUseCase,
+  rejectGolfCourseUpdateUseCase,
+  listPendingGolfCoursesUseCase,
+  // Admin Panel Use Cases (v2.4.0)
+  getAdminStatsUseCase,
+  listAdminUsersUseCase,
+  updateAdminUserUseCase,
+  setAdminUserActiveUseCase,
+  deleteAdminUserUseCase,
+  adminListCompetitionsUseCase,
+  adminUpdateCompetitionUseCase,
+  // Support Use Cases
+  submitContactFormUseCase,
+  // Schedule Use Cases (v2.1.0 - Sprint 2)
+  getScheduleUseCase,
+  configureScheduleUseCase,
+  assignTeamsUseCase,
+  undoTeamsUseCase,
+  startDraftUseCase,
+  getDraftUseCase,
+  makeDraftPickUseCase,
+  submitEnvelopeUseCase,
+  getEnvelopesUseCase,
+  revealEnvelopesUseCase,
+  resetEnvelopesUseCase,
+  listMyPendingEnvelopesUseCase,
+  listMySessionsWithoutMatchesUseCase,
+  createRoundUseCase,
+  takeTeeWindowPlaceUseCase,
+  releaseTeeWindowPlaceUseCase,
+  joinWaitingListUseCase,
+  leaveWaitingListUseCase,
+  listMyAssignedPlacesUseCase,
+  acknowledgeAssignedPlaceUseCase,
+  getTeeGroupsUseCase,
+  getMyTeeGroupsUseCase,
+  generateTeeGroupsUseCase,
+  moveTeeGroupPlayerUseCase,
+  reorderTeeGroupsUseCase,
+  setTeeGroupMarkersUseCase,
+  deleteTeeGroupsUseCase,
+  updateRoundUseCase,
+  deleteRoundUseCase,
+  generateMatchesUseCase,
+  getMatchDetailUseCase,
+  updateMatchStatusUseCase,
+  declareWalkoverUseCase,
+  reassignPlayersUseCase,
+  // Invitation Use Cases (Sprint 3)
+  sendInvitationUseCase,
+  sendInvitationByEmailUseCase,
+  listMyInvitationsUseCase,
+  respondToInvitationUseCase,
+  cancelInvitationUseCase,
+  listCompetitionInvitationsUseCase,
+  // Avatar Use Cases
+  listAvatarPresetsUseCase,
+  setAvatarPresetUseCase,
+  uploadAvatarUseCase,
+  listMyAvatarUploadsUseCase,
+  activateUploadedAvatarUseCase,
+  removeAvatarUseCase,
+  // Friend Use Cases
+  sendFriendRequestUseCase,
+  respondFriendRequestUseCase,
+  removeFriendUseCase,
+  blockUserUseCase,
+  listFriendsUseCase,
+  getPlayerStatsUseCase,
+  getScoringBreakdownUseCase,
+  getRecentMatchesUseCase,
+  getUpcomingMatchesUseCase,
+  getUpcomingTeeGroupsUseCase,
+  getPlayerStatsByGolfCourseUseCase,
+  listPendingFriendRequestsUseCase,
+  // Scoring Use Cases (Sprint 4)
+  getScoringViewUseCase,
+  submitHoleScoreUseCase,
+  submitScorecardUseCase,
+  getLeaderboardUseCase,
+  concedeMatchUseCase,
+  withdrawMatchPlayerUseCase,
+  getTeeGroupScoringViewUseCase,
+  submitTeeGroupHoleScoreUseCase,
+  submitTeeGroupScorecardUseCase,
+  retireFromTeeGroupUseCase,
+  correctTeeGroupHoleUseCase,
+  reopenTeeGroupCardUseCase,
+  markTeeGroupNoShowUseCase,
+  retireTeeGroupPlayerUseCase,
+  deleteTeeGroupHoleUseCase,
+  validateTeeGroupScoredHolesUseCase,
+  closeTeeWindowUseCase,
+  getTeeWindowStandingsUseCase,
+  getCompetitionStandingsUseCase,
+  getScratchStandingsUseCase,
+  // Quick Match Use Cases (FE #236)
+  createAndStartQuickMatchUseCase,
+  completeQuickMatchUseCase,
+  cancelQuickMatchUseCase,
+  hideQuickMatchUseCase,
+  excludeQuickMatchFromStatsUseCase,
+  includeQuickMatchInStatsUseCase,
+  getQuickMatchUseCase,
+  getSharedQuickMatchUseCase,
+  listMyQuickMatchesUseCase,
+  submitQuickMatchHoleScoreUseCase,
+  submitQuickMatchProxyHoleScoreUseCase,
+};

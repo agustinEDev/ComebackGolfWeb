@@ -1,0 +1,69 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environment variables
+.env
+.env.local
+.env.production.local
+.env.development.local
+.env.test.local
+
+# Testing
+# Test results
+/test-results/
+/playwright-report/
+/coverage/
+*.lcov
+
+# Build
+build
+.cache
+
+# Misc
+.vercel
+.netlify
+
+# Visual Studio Code settings
+.vscode
+
+BACKEND_API_SPEC.md
+GEMINI.md
+docs/INVITATIONS_API_CONTRACT.md
+docs/SCORING_API_CONTRACT.md
+
+# Herramienta local para medir en móvil (va en su propia rama)
+scripts/movil/
+
+# Python de los scripts del CI
+__pycache__/
+
+
+# El material de la marca (dossier, logos originales del diseñador en todos sus
+# formatos, brief, capturas del rediseño): vive en el disco de quien diseña, no en
+# el repositorio (Agustín, 25 nov 2026). Lo que usa la web está en public/brand y
+# public/icons, y un test vigila que esos ficheros sean solo dibujo y lleven las
+# tintas del dossier
+brand/

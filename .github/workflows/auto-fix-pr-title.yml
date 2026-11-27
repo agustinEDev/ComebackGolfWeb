@@ -1,0 +1,73 @@
+name: Auto-fix PR Title
+
+on:
+  pull_request:
+    types: [opened, reopened, edited]
+
+jobs:
+  fix-pr-title:
+    name: 🔧 Auto-fix PR Title for Conventional Commits
+    runs-on: ubuntu-24.04
+    # Only run for Dependabot PRs
+    if: github.actor == 'dependabot[bot]' || github.actor == 'dependabot-preview[bot]'
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Capitalize PR title
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        with:
+          script: |
+            const prTitle = context.payload.pull_request.title;
+            console.log(`Original PR title: ${prTitle}`);
+
+            // Check if title follows conventional commits format
+            const conventionalCommitRegex = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?:\s*.+$/;
+
+            if (!conventionalCommitRegex.test(prTitle)) {
+              console.log('❌ PR title does not follow Conventional Commits format');
+              return;
+            }
+
+            // Extract type, scope, and subject
+            const match = prTitle.match(/^([a-z]+)(\([a-z0-9-]+\))?:\s*(.+)$/);
+
+            if (!match) {
+              console.log('❌ Could not parse PR title');
+              return;
+            }
+
+            const [, type, scope, subject] = match;
+
+            // Capitalize first letter of subject
+            const capitalizedSubject = subject.charAt(0).toUpperCase() + subject.slice(1);
+
+            // Build new title
+            const newTitle = `${type}${scope || ''}: ${capitalizedSubject}`;
+
+            // Only update if title changed
+            if (newTitle === prTitle) {
+              console.log('✅ PR title already capitalized correctly');
+              return;
+            }
+
+            console.log(`🔧 Updating PR title to: ${newTitle}`);
+
+            // Update PR title
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              title: newTitle
+            });
+
+            // Add a comment explaining the change
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: `🤖 **Auto-fix applied**: PR title capitalized to comply with [Conventional Commits](https://www.conventionalcommits.org/).\n\n` +
+                    `- **Before**: \`${prTitle}\`\n` +
+                    `- **After**: \`${newTitle}\``
+            });
+
+            console.log('✅ PR title updated successfully');

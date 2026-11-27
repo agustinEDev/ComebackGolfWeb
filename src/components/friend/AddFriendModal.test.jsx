@@ -1,0 +1,650 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { useState } from 'react';
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from '@testing-library/react';
+import { MemoryRouter, Routes, Route } from 'react-router';
+import AddFriendModal from './AddFriendModal';
+
+const navigate = vi.fn();
+
+// Con `deVerdad.activo` además navega de verdad: para ver adónde va el foco
+// cuando elegir a alguien lleva a su perfil
+const deVerdad = vi.hoisted(() => ({ activo: false }));
+
+vi.mock('react-router', async (importOriginal) => {
+  const original = await importOriginal();
+  return {
+    ...original,
+    useNavigate: () => {
+      const navegar = original.useNavigate();
+      return (...destino) => {
+        navigate(...destino);
+        if (deVerdad.activo) navegar(...destino);
+      };
+    },
+  };
+});
+
+vi.mock('../ui/Avatar', () => ({
+  default: ({ userId }) => <div data-testid={`avatar-${userId}`} />,
+}));
+
+const RESULTADOS = [
+  { id: 'u-1', firstName: 'Ana', lastName: 'García' },
+  { id: 'u-2', firstName: 'Luis', lastName: 'Pérez' },
+];
+
+const pintar = (props = {}) => {
+  const onClose = vi.fn();
+  const onSearchUsers = vi.fn().mockResolvedValue(RESULTADOS);
+  render(
+    <MemoryRouter>
+      <AddFriendModal
+        isOpen
+        onClose={onClose}
+        onSearchUsers={onSearchUsers}
+        t={(k) => k}
+        {...props}
+      />
+    </MemoryRouter>,
+  );
+  return { onClose, onSearchUsers };
+};
+
+const buscar = async (texto = 'ana') => {
+  fireEvent.change(screen.getByTestId('user-search-input'), {
+    target: { value: texto },
+  });
+  await waitFor(
+    () =>
+      expect(screen.getByTestId('search-results-dropdown')).toBeInTheDocument(),
+    {
+      timeout: 2000,
+    },
+  );
+};
+
+// Como en Amigos: el boton que lo abre y el modal, con su estado
+const ConDisparadorSinRouter = () => {
+  const [abierto, setAbierto] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setAbierto(true)}>
+        Añadir amigo
+      </button>
+      <AddFriendModal
+        isOpen={abierto}
+        onClose={() => setAbierto(false)}
+        onSearchUsers={vi.fn().mockResolvedValue(RESULTADOS)}
+        t={(k) => k}
+      />
+    </>
+  );
+};
+
+const ConDisparador = () => (
+  <MemoryRouter>
+    <ConDisparadorSinRouter />
+  </MemoryRouter>
+);
+
+// Cerrar por el fondo es el gesto entero, pulsar y soltar ahí, como en el armazón
+const pulsarElFondo = (fondo) => {
+  fireEvent.mouseDown(fondo);
+  fireEvent.mouseUp(fondo);
+  fireEvent.click(fondo);
+};
+
+const abrirDesdeElBoton = () => {
+  render(<ConDisparador />);
+  const disparador = screen.getByRole('button', { name: 'Añadir amigo' });
+  disparador.focus();
+  fireEvent.click(disparador);
+  return disparador;
+};
+
+/**
+ * El modal ya no envia nada: elegir a alguien lleva a su perfil, que es donde
+ * vive el boton de enviar la solicitud.
+ */
+describe('AddFriendModal', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    deVerdad.activo = false;
+  });
+
+  // QA del 20 oct: la lista flotaba (`absolute`) y no ocupaba sitio, asi que
+  // asomaba por debajo de la caja. jsdom no mide: se vigila el contrato de
+  // clases, y que de verdad quepa se mira en el navegador a 360 px
+  describe('la lista de resultados cabe en el modal', () => {
+    it('A1: va dentro de la caja y ocupa su sitio, sin flotar sobre el borde', async () => {
+      pintar();
+      await buscar();
+
+      const lista = screen.getByTestId('search-results-dropdown');
+      expect(screen.getByRole('dialog')).toContainElement(lista);
+      expect(lista).not.toHaveClass('absolute');
+    });
+
+    it('A1b: con muchos resultados la lista se desplaza dentro, con su alto maximo', async () => {
+      pintar();
+      await buscar();
+
+      expect(screen.getByTestId('search-results-dropdown')).toHaveClass(
+        'max-h-48',
+        'overflow-y-auto',
+      );
+    });
+
+    it('A1c: la caja nunca pasa del alto de la pantalla: se desplaza por dentro', () => {
+      pintar();
+
+      // El diálogo es el fondo del armazón; la caja, lo que lleva el título
+      const caja = screen
+        .getByRole('heading', { name: 'add.title' })
+        .closest('[tabindex="-1"]');
+      expect(caja).toHaveClass(
+        'bg-fondo',
+        'max-w-md',
+        'max-h-[calc(100dvh-2rem)]',
+        'overflow-y-auto',
+      );
+    });
+  });
+
+  // Revision del 20 oct: con la lista en el flujo, cerrarla en el `mousedown`
+  // encogia la caja antes del `click`, y el clic caia en lo que subia a ocupar
+  // su sitio. Se cierra en el `click`, cuando el destino ya esta decidido
+  describe('la lista no se mueve bajo el dedo', () => {
+    it('M1a: pulsar la X con la lista abierta cierra el modal', async () => {
+      const { onClose } = pintar();
+      await buscar();
+      const cerrar = screen.getByRole('button', { name: 'cancel' });
+
+      fireEvent.mouseDown(cerrar);
+      expect(screen.getByTestId('search-results-dropdown')).toBeInTheDocument();
+      fireEvent.click(cerrar);
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('M1b: un clic fuera de la lista la sigue cerrando, sin cerrar el modal', async () => {
+      const { onClose } = pintar();
+      await buscar();
+
+      fireEvent.click(screen.getByText('add.opensProfileHint'));
+
+      expect(
+        screen.queryByTestId('search-results-dropdown'),
+      ).not.toBeInTheDocument();
+      expect(onClose).not.toHaveBeenCalled();
+    });
+  });
+
+  // Revisión del 23 nov: con la lista abierta, tocar fuera es de la lista,
+  // como su Escape
+  it('M1c: con la lista abierta, tocar fuera cierra solo la lista; el siguiente toque, el modal', async () => {
+    const { onClose } = pintar();
+    await buscar();
+    pulsarElFondo(screen.getByTestId('add-friend-backdrop'));
+    expect(
+      screen.queryByTestId('search-results-dropdown'),
+    ).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    pulsarElFondo(screen.getByTestId('add-friend-backdrop'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the profile of the player you pick', async () => {
+    const { onClose } = pintar();
+    await buscar();
+
+    fireEvent.click(screen.getByTestId('search-result-u-2'));
+
+    expect(navigate).toHaveBeenCalledWith('/players/u-2', {
+      state: { from: 'friends' },
+    });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('opens the profile from the keyboard too', async () => {
+    // La navegacion con flechas y Enter ya existia para seleccionar; llevaba a
+    // un estado que ya no hay, asi que tenia que ir al mismo sitio que el raton
+    pintar();
+    await buscar();
+
+    fireEvent.keyDown(document, { key: 'ArrowDown' });
+    fireEvent.keyDown(document, { key: 'Enter' });
+
+    expect(navigate).toHaveBeenCalledWith('/players/u-1', {
+      state: { from: 'friends' },
+    });
+  });
+
+  it('opens the highlighted result even if Enter arrives before React re-renders', async () => {
+    // Las dos teclas en el MISMO acto: React no llega a pintar entre una y
+    // otra, que es justo lo que pasa cuando alguien teclea rapido. Con el
+    // indice copiado a la ref por un efecto posterior al render, el `Enter`
+    // leia todavia -1 y no abria nada. Separadas en dos `fireEvent`, cada
+    // una hace su propio commit y el fallo depende de lo rapida que sea la
+    // maquina: por eso el test de arriba se caia en CI y aqui no.
+    pintar();
+    await buscar();
+
+    act(() => {
+      fireEvent.keyDown(document, { key: 'ArrowDown' });
+      fireEvent.keyDown(document, { key: 'Enter' });
+    });
+
+    expect(navigate).toHaveBeenCalledWith('/players/u-1', {
+      state: { from: 'friends' },
+    });
+  });
+
+  it('closes the modal on the second Escape, without needing a third', async () => {
+    // El primer Escape cierra el desplegable; el segundo debe cerrar el modal.
+    // Con `showDropdownRef` copiada despues del render, el segundo Escape lo
+    // veia todavia abierto y volvia a cerrarlo: hacian falta tres.
+    const { onClose } = pintar();
+    await buscar();
+
+    act(() => {
+      fireEvent.keyDown(document, { key: 'Escape' });
+      fireEvent.keyDown(document, { key: 'Escape' });
+    });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not pass off a failed search as an empty one', async () => {
+    // Con la busqueda rota, dejar el desplegable abierto y vacio enseñaba
+    // «no se ha encontrado a nadie», que es mentira: no es que no haya nadie,
+    // es que no se ha podido preguntar.
+    // Hace falta una busqueda buena antes: si la que falla es la primera, el
+    // desplegable no llego a abrirse nunca y no se distingue un caso del otro.
+    const onSearchUsers = vi
+      .fn()
+      .mockResolvedValueOnce(RESULTADOS)
+      .mockRejectedValueOnce(new Error('API caida'));
+    pintar({ onSearchUsers });
+
+    fireEvent.change(screen.getByTestId('user-search-input'), {
+      target: { value: 'ana' },
+    });
+    await waitFor(
+      () =>
+        expect(
+          screen.getByTestId('search-results-dropdown'),
+        ).toBeInTheDocument(),
+      {
+        timeout: 2000,
+      },
+    );
+
+    fireEvent.change(screen.getByTestId('user-search-input'), {
+      target: { value: 'anas' },
+    });
+    await waitFor(() => expect(onSearchUsers).toHaveBeenCalledTimes(2), {
+      timeout: 2000,
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('search-results-dropdown'),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('no-users-found')).not.toBeInTheDocument();
+    // Y lo dice: sin mensaje, la pantalla se queda igual que si no hubieras
+    // buscado, y lo natural es reescribir y volver a fallar en silencio.
+    expect(screen.getByTestId('search-error')).toBeInTheDocument();
+  });
+
+  it('clears the failure notice when a new search starts', async () => {
+    // Si se queda pegado, el usuario ve un error viejo sobre resultados buenos.
+    const onSearchUsers = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('API caida'))
+      .mockResolvedValueOnce(RESULTADOS);
+    pintar({ onSearchUsers });
+
+    fireEvent.change(screen.getByTestId('user-search-input'), {
+      target: { value: 'ana' },
+    });
+    await waitFor(
+      () => expect(screen.getByTestId('search-error')).toBeInTheDocument(),
+      {
+        timeout: 2000,
+      },
+    );
+
+    fireEvent.change(screen.getByTestId('user-search-input'), {
+      target: { value: 'anas' },
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('search-error')).not.toBeInTheDocument();
+    });
+    expect(
+      await screen.findByTestId('search-results-dropdown'),
+    ).toBeInTheDocument();
+  });
+
+  it('drops the failure notice when the field is emptied', async () => {
+    // Si no, el aviso rojo se queda debajo de un buscador vacio, denunciando
+    // un fallo de una busqueda que ya no existe.
+    const onSearchUsers = vi.fn().mockRejectedValue(new Error('API caida'));
+    pintar({ onSearchUsers });
+
+    fireEvent.change(screen.getByTestId('user-search-input'), {
+      target: { value: 'ana' },
+    });
+    await waitFor(
+      () => expect(screen.getByTestId('search-error')).toBeInTheDocument(),
+      {
+        timeout: 2000,
+      },
+    );
+
+    fireEvent.change(screen.getByTestId('user-search-input'), {
+      target: { value: '' },
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('search-error')).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not let a late failure land on an already-emptied field', async () => {
+    // La rama de menos de dos caracteres no invalidaba la peticion en vuelo,
+    // asi que el rechazo llegaba despues y plantaba el aviso rojo debajo de un
+    // buscador vacio.
+    let rechazar;
+    const onSearchUsers = vi.fn(
+      () =>
+        new Promise((_, reject) => {
+          rechazar = reject;
+        }),
+    );
+    pintar({ onSearchUsers });
+
+    fireEvent.change(screen.getByTestId('user-search-input'), {
+      target: { value: 'ana' },
+    });
+    await waitFor(() => expect(onSearchUsers).toHaveBeenCalled(), {
+      timeout: 2000,
+    });
+
+    fireEvent.change(screen.getByTestId('user-search-input'), {
+      target: { value: '' },
+    });
+
+    // El rechazo se deja correr del todo ANTES de comprobar: una asercion
+    // negativa dentro de `waitFor` se cumple en la primera pasada —antes de que
+    // el `catch` haya llegado a ejecutarse— y bendecia el fallo que vigila.
+    await act(async () => {
+      rechazar(new Error('API caida'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByTestId('search-error')).not.toBeInTheDocument();
+  });
+
+  it('stops pointing at an option that is no longer there when the field is emptied', async () => {
+    // `putResults([])` desmonta las opciones, pero sin limpiar el resaltado el
+    // `aria-activedescendant` seguia nombrando una que ya no existe, y un lector
+    // de pantalla anuncia algo que no esta.
+    pintar();
+    await buscar();
+
+    fireEvent.keyDown(document, { key: 'ArrowDown' });
+    const input = screen.getByTestId('user-search-input');
+    expect(input.getAttribute('aria-activedescendant')).toBeTruthy();
+
+    fireEvent.change(input, { target: { value: '' } });
+
+    await waitFor(() => {
+      expect(input.getAttribute('aria-activedescendant')).toBeFalsy();
+    });
+  });
+
+  it('closes only the dropdown on the first Escape, leaving the modal open', async () => {
+    // La otra mitad del contrato: sin esto, alguien podria simplificar el
+    // manejador a un `onClose()` incondicional y el test de arriba seguiria
+    // en verde mientras el primer Escape se lleva el modal por delante.
+    const { onClose } = pintar();
+    await buscar();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(
+      screen.queryByTestId('search-results-dropdown'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('no longer offers a way to send from here', async () => {
+    pintar();
+    await buscar();
+
+    expect(screen.queryByTestId('send-request-button')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('selected-user-chip')).not.toBeInTheDocument();
+  });
+
+  it('can be dismissed by the backdrop, not only by a 20px icon', async () => {
+    // Al quitar el pie con Cancelar, la X de la cabecera quedo como unica
+    // salida. En un telefono no hay tecla de escape a la que recurrir
+    const { onClose } = pintar();
+
+    pulsarElFondo(screen.getByTestId('add-friend-backdrop'));
+
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('does not close when the click lands inside the dialog', async () => {
+    // El cierre por fondo no puede tragarse los clics del propio contenido
+    const { onClose } = pintar();
+
+    const titulo = screen.getByRole('heading', { name: 'add.title' });
+    fireEvent.mouseDown(titulo);
+    fireEvent.mouseUp(titulo);
+    fireEvent.click(titulo);
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('says where picking someone takes you', async () => {
+    // Sin el boton de enviar, nada mas explica que la fila navega
+    pintar();
+
+    expect(screen.getByText('add.opensProfileHint')).toBeInTheDocument();
+  });
+
+  it('does not search until there are two characters', async () => {
+    const { onSearchUsers } = pintar();
+
+    fireEvent.change(screen.getByTestId('user-search-input'), {
+      target: { value: 'a' },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText('add.searchMinChars')).toBeInTheDocument(),
+    );
+    expect(onSearchUsers).not.toHaveBeenCalled();
+  });
+
+  it('T3-6: con resultados, borrar hasta dejar una letra cierra la lista, sin espera ni petición', async () => {
+    const { onSearchUsers } = pintar();
+    await buscar('ana');
+    expect(onSearchUsers).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByTestId('user-search-input'), {
+      target: { value: 'a' },
+    });
+
+    expect(
+      screen.queryByTestId('search-results-dropdown'),
+    ).not.toBeInTheDocument();
+    expect(document.querySelector('.animate-spin')).toBeNull();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    expect(onSearchUsers).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByTestId('search-results-dropdown'),
+    ).not.toBeInTheDocument();
+    expect(document.querySelector('.animate-spin')).toBeNull();
+  });
+
+  it('T3-6: con una búsqueda esperando, borrar hasta una letra quita la espera', async () => {
+    const { onSearchUsers } = pintar();
+    fireEvent.change(screen.getByTestId('user-search-input'), {
+      target: { value: 'ana' },
+    });
+    expect(document.querySelector('.animate-spin')).not.toBeNull();
+
+    fireEvent.change(screen.getByTestId('user-search-input'), {
+      target: { value: 'a' },
+    });
+
+    expect(document.querySelector('.animate-spin')).toBeNull();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    expect(onSearchUsers).not.toHaveBeenCalled();
+  });
+
+  it('T3-6: mientras se teclea una búsqueda válida sale la espera y la lista anterior sigue', async () => {
+    const { onSearchUsers } = pintar();
+    await buscar('ana');
+
+    fireEvent.change(screen.getByTestId('user-search-input'), {
+      target: { value: 'anab' },
+    });
+
+    expect(document.querySelector('.animate-spin')).not.toBeNull();
+    expect(screen.getByTestId('search-results-dropdown')).toBeInTheDocument();
+    await waitFor(() => expect(onSearchUsers).toHaveBeenCalledWith('anab'));
+    await waitFor(() =>
+      expect(document.querySelector('.animate-spin')).toBeNull(),
+    );
+  });
+  // Pasó a `ModalShell` (QA del 21 oct 2026): el bloqueo del desplazamiento y
+  // la pila de diálogos vienen con él
+  describe('sobre el armazón comun', () => {
+    it('S1: la página de debajo no se desplaza mientras está abierto, y vuelve al cerrarlo', () => {
+      abrirDesdeElBoton();
+      expect(document.body.style.overflow).toBe('hidden');
+
+      fireEvent.click(screen.getByRole('button', { name: 'cancel' }));
+      expect(document.body.style.overflow).toBe('');
+    });
+
+    it('S2: Escape llama a onClose UNA vez, no la del armazón y la propia', () => {
+      const { onClose } = pintar();
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('S3: con la lista abierta, Escape no llama a onClose', async () => {
+      const { onClose } = pintar();
+      await buscar();
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('search-results-dropdown')).toBeNull();
+    });
+  });
+
+  // QA del 21 oct 2026 (F1): al cerrar, el foco volvia al `body` y el
+  // tabulador empezaba otra vez desde la cabecera
+  describe('el foco vuelve al boton que lo abrio', () => {
+    it('F1a: al abrir, el foco entra en el buscador', () => {
+      abrirDesdeElBoton();
+
+      expect(screen.getByTestId('user-search-input')).toHaveFocus();
+    });
+
+    it('F1b: con la X', () => {
+      const disparador = abrirDesdeElBoton();
+      fireEvent.click(screen.getByRole('button', { name: 'cancel' }));
+
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(disparador).toHaveFocus();
+    });
+
+    it('F1c: pulsando fuera', () => {
+      const disparador = abrirDesdeElBoton();
+      pulsarElFondo(screen.getByTestId('add-friend-backdrop'));
+
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(disparador).toHaveFocus();
+    });
+
+    it('F1d: con Escape', () => {
+      const disparador = abrirDesdeElBoton();
+      fireEvent.keyDown(document, { key: 'Escape' });
+
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(disparador).toHaveFocus();
+    });
+
+    it('F1e: con la lista abierta, el primer Escape solo la cierra; el segundo cierra y devuelve el foco', async () => {
+      const disparador = abrirDesdeElBoton();
+      await buscar();
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(screen.getByTestId('user-search-input')).toHaveFocus();
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(disparador).toHaveFocus();
+    });
+
+    it('F1g: elegir a alguien lleva a su perfil sin devolverle el foco a Amigos', async () => {
+      deVerdad.activo = true;
+      render(
+        <MemoryRouter initialEntries={['/friends']}>
+          <Routes>
+            <Route path="/friends" element={<ConDisparadorSinRouter />} />
+            <Route path="/players/:id" element={<h1>Perfil</h1>} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      const disparador = screen.getByRole('button', { name: 'Añadir amigo' });
+      disparador.focus();
+      fireEvent.click(disparador);
+      await buscar();
+
+      fireEvent.click(screen.getByTestId('search-result-u-1'));
+
+      expect(
+        await screen.findByRole('heading', { name: 'Perfil' }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(disparador).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(document.body);
+    });
+
+    it('F1f: el tabulador no se sale del modal: de lo ultimo vuelve a la X', () => {
+      abrirDesdeElBoton();
+      const input = screen.getByTestId('user-search-input');
+
+      fireEvent.keyDown(document, { key: 'Tab' });
+      expect(screen.getByRole('button', { name: 'cancel' })).toHaveFocus();
+
+      fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+      expect(input).toHaveFocus();
+    });
+  });
+});

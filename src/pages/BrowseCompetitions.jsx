@@ -1,0 +1,759 @@
+// src/pages/BrowseCompetitions.jsx
+
+import { AL_PASAR, ELEGIDO } from '../components/ui/clasesDeComportamiento';
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router';
+import customToast from '../utils/toast';
+import { useTranslation } from 'react-i18next';
+import { Search, Calendar, Users, Target, TrendingUp } from 'lucide-react';
+import HeaderAuth from '../components/layout/HeaderAuth';
+import {
+  browseJoinableCompetitionsUseCase,
+  browseExploreCompetitionsUseCase,
+  requestEnrollmentUseCase,
+} from '../composition';
+import { CountryFlag } from '../components/ui/CountryFlag';
+import { useAuth } from '../hooks/useAuth';
+import { useGeneroParaApuntarse } from '../hooks/useGeneroParaApuntarse';
+import { mensajeDeError } from '../utils/sinCobertura';
+import EnrollmentRequestModal from '../components/enrollment/EnrollmentRequestModal';
+import BarrasPendientesModal from '../components/enrollment/BarrasPendientesModal';
+import { useBarrasPendientes } from '../hooks/useBarrasPendientes';
+import { entraConPlaza } from '../utils/entraConPlaza';
+import BlockLoader from '../components/ui/BlockLoader';
+import { formatDateRange } from '../services/competitions';
+import { PANTALLA_MENOS_BARRA_INFERIOR } from '../utils/barraInferior';
+import { MOTIVOS_PARA_NO_APUNTARSE } from '../utils/fichaDeLaCompeticion';
+import { nombrePequeno } from '../utils/nombreVisible';
+import { registraElFallo } from '../utils/registraElFallo';
+import { CompetitionStatusEnum } from '../domain/value_objects/CompetitionStatus';
+import { Visibility } from '../domain/value_objects/Visibility';
+import { marcaDeAgua } from '../utils/marcaDeAgua';
+
+const BrowseCompetitions = () => {
+  // El género para apuntarse, solo a quien le falta (#710)
+  const generoParaApuntarse = useGeneroParaApuntarse();
+  // Tras apuntarse, la barra de los campos que no tienen la suya
+  const barrasPendientes = useBarrasPendientes();
+  const navigate = useNavigate();
+  const { t } = useTranslation('competitions');
+  const { t: tComun } = useTranslation('common');
+  // Por qué no se pudo pedir plaza: se lee en el modal, que sigue abierto (#710)
+  const [errorAlApuntarse, setErrorAlApuntarse] = useState(null);
+  // De qué competición es el modal abierto, para no mezclar resultados
+  const modalAbiertoPara = useRef(null);
+
+  // User state
+  const { user, loading: isLoading } = useAuth();
+
+  // Joinable competitions state
+  const [joinableCompetitions, setJoinableCompetitions] = useState([]);
+  const [joinableSearch, setJoinableSearch] = useState('');
+  const [joinableSearchType, setJoinableSearchType] = useState('name'); // 'name' or 'creator'
+  const [isLoadingJoinable, setIsLoadingJoinable] = useState(true);
+
+  // Explore competitions state
+  const [exploreCompetitions, setExploreCompetitions] = useState([]);
+  const [exploreSearch, setExploreSearch] = useState('');
+  const [exploreSearchType, setExploreSearchType] = useState('name'); // 'name' or 'creator'
+  const [isLoadingExplore, setIsLoadingExplore] = useState(true);
+
+  // Request enrollment state
+  const [requestingEnrollment, setRequestingEnrollment] = useState({});
+  const [enrollModalOpen, setEnrollModalOpen] = useState(false);
+  const [enrollTargetId, setEnrollTargetId] = useState(null);
+
+  // Por el id y no por el objeto: refrescar la sesión crea un `user` nuevo con
+  // el mismo id, y la lista se recargaba tras apuntarse (CodeRabbit, #720)
+  const userId = user?.id;
+
+  // Load joinable competitions
+  useEffect(() => {
+    if (!userId) return;
+
+    const loadJoinableCompetitions = async () => {
+      try {
+        setIsLoadingJoinable(true);
+        const competitions = await browseJoinableCompetitionsUseCase.execute();
+
+        // SAFETY FILTER: Filter out competitions where user already has enrollment
+        // This compensates for backend bug where my_competitions=false still returns
+        // competitions with existing enrollments
+        const safeCompetitions = competitions.filter((comp) => {
+          // Exclude if user has any enrollment status
+          return !comp.enrollment_status;
+        });
+
+        setJoinableCompetitions(safeCompetitions);
+      } catch (error) {
+        registraElFallo(
+          'BrowseCompetitions.error-loading-joinable-competitions',
+          'Error loading joinable competitions:',
+          error,
+        );
+        customToast.error(t('browse.errors.failedToLoadJoinable'));
+      } finally {
+        setIsLoadingJoinable(false);
+      }
+    };
+
+    loadJoinableCompetitions();
+  }, [userId, t]);
+
+  // Load explore competitions
+  useEffect(() => {
+    if (!userId) return;
+
+    const loadExploreCompetitions = async () => {
+      try {
+        setIsLoadingExplore(true);
+        const competitions = await browseExploreCompetitionsUseCase.execute();
+        setExploreCompetitions(competitions);
+      } catch (error) {
+        registraElFallo(
+          'BrowseCompetitions.error-loading-explore-competitions',
+          'Error loading explore competitions:',
+          error,
+        );
+        customToast.error(t('browse.errors.failedToLoadExplore'));
+      } finally {
+        setIsLoadingExplore(false);
+      }
+    };
+
+    loadExploreCompetitions();
+  }, [userId, t]);
+
+  // Filter joinable competitions by search AND exclude user's own competitions
+  const filteredJoinableCompetitions = joinableCompetitions.filter((comp) => {
+    // CRITICAL: Exclude competitions where current user is the creator (client-side safety filter)
+    // Backend should already exclude these via my_competitions=false, but this is a safety net
+    if (comp.creatorId === user?.id) {
+      return false;
+    }
+
+    // Apply search filter
+    if (!joinableSearch) return true;
+
+    const searchLower = joinableSearch.toLowerCase();
+
+    if (joinableSearchType === 'name') {
+      return comp.name.toLowerCase().includes(searchLower);
+    } else if (joinableSearchType === 'creator') {
+      // Por cualquiera de sus nombres: el visible, el alias (pública) y, a quien le
+      // llega (admin), el real
+      const creatorName = [
+        comp.creator?.displayName,
+        comp.creator?.alias,
+        comp.creator?.firstName,
+        comp.creator?.lastName,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return creatorName.includes(searchLower);
+    }
+
+    return true;
+  });
+
+  // Filter explore competitions by search
+  const filteredExploreCompetitions = exploreCompetitions.filter((comp) => {
+    if (!exploreSearch) return true;
+
+    const searchLower = exploreSearch.toLowerCase();
+
+    if (exploreSearchType === 'name') {
+      return comp.name.toLowerCase().includes(searchLower);
+    } else if (exploreSearchType === 'creator') {
+      // Por cualquiera de sus nombres: el visible, el alias (pública) y, a quien le
+      // llega (admin), el real
+      const creatorName = [
+        comp.creator?.displayName,
+        comp.creator?.alias,
+        comp.creator?.firstName,
+        comp.creator?.lastName,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return creatorName.includes(searchLower);
+    }
+
+    return true;
+  });
+
+  // Open modal to request enrollment
+  const competicionDe = (competitionId) =>
+    [...exploreCompetitions, ...joinableCompetitions].find(
+      (c) => c.id === competitionId,
+    );
+  const openEnrollModal = (competitionId) => {
+    // En un stroke play la franja se elige en la ficha (release social 3)
+    if (competicionDe(competitionId)?.hasTeams === false) {
+      navigate(`/competitions/${competitionId}`, { state: { from: 'browse' } });
+      return;
+    }
+    setErrorAlApuntarse(null);
+    modalAbiertoPara.current = competitionId;
+    setEnrollTargetId(competitionId);
+    setEnrollModalOpen(true);
+  };
+
+  // Handle request enrollment
+  const handleRequestEnrollment = async (
+    competitionId,
+    color = null,
+    genero = null,
+  ) => {
+    // El resultado es de ESTA competición: si mientras tanto se cerró su modal
+    // y se abrió el de otra, no se toca el de la otra (CodeRabbit en la #721)
+    const esSuModal = () => modalAbiertoPara.current === competitionId;
+    setErrorAlApuntarse(null);
+    let generoGuardado = false;
+    try {
+      setRequestingEnrollment((prev) => ({ ...prev, [competitionId]: true }));
+
+      // Antes que la plaza: sin género el servidor la rechaza (#710)
+      if (genero) {
+        await generoParaApuntarse.guardar(genero);
+        generoGuardado = true;
+      }
+
+      // Call RequestEnrollmentUseCase
+      const hecho = await requestEnrollmentUseCase.execute(
+        competitionId,
+        null,
+        { color },
+      );
+
+      // Se cierra solo si ha ido bien (#710): cerrarlo antes dejaba un fallo
+      // con cara de éxito. Y solo si sigue siendo el suyo (CodeRabbit, #721)
+      if (esSuModal()) setEnrollModalOpen(false);
+      // Los campos que no tienen su barra, en el mismo flujo (barras por
+      // campo). Solo si sigue siendo su modal: si no, la pregunta saldría
+      // encima del de otra competición (CodeRabbit)
+      if (esSuModal() && entraConPlaza(hecho))
+        // Con su modalidad, para nombrar lo pendiente en un fallo (hoy siempre
+        // una Ryder: un stroke play se apunta en la ficha)
+        barrasPendientes.comprobar(hecho.id, {
+          conEquipos: competicionDe(competitionId)?.hasTeams !== false,
+        });
+      customToast.success(
+        t(
+          hecho?.waiting
+            ? 'detail.success.joinedWaitingList'
+            : 'browse.success.enrolled',
+        ),
+      );
+
+      // Remove competition from UI immediately (optimistic update)
+      setJoinableCompetitions((prev) =>
+        prev.filter((comp) => comp.id !== competitionId),
+      );
+
+      // Reload in background to sync with backend
+      setTimeout(async () => {
+        try {
+          const updatedJoinableCompetitions =
+            await browseJoinableCompetitionsUseCase.execute();
+
+          // Apply same safety filter as initial load
+          const safeCompetitions = updatedJoinableCompetitions.filter(
+            (comp) => {
+              if (comp.enrollment_status) {
+                console.warn(
+                  `⚠️ [Reload] Filtering out competition ${comp.id} - enrollment status: ${comp.enrollment_status}`,
+                );
+                return false;
+              }
+              return true;
+            },
+          );
+
+          setJoinableCompetitions(safeCompetitions);
+        } catch (err) {
+          registraElFallo(
+            'BrowseCompetitions.error-reloading-competitions',
+            'Error reloading competitions:',
+            err,
+          );
+        }
+      }, 1000);
+    } catch (error) {
+      registraElFallo(
+        'BrowseCompetitions.error-requesting-enrollment',
+        '❌ Error requesting enrollment:',
+        error,
+      );
+
+      // Con la sala de draft abierta, pasado el plazo (15 nov 2026) o con la
+      // franja que ya no vale, no entra: se dice en el diálogo, que sigue
+      // abierto, con los mismos textos que la ficha, y la tarjeta se queda
+      const motivo = MOTIVOS_PARA_NO_APUNTARSE[error?.errorCode];
+      if (motivo) {
+        if (esSuModal()) setErrorAlApuntarse(t(motivo));
+        return;
+      }
+      // Check if it's a duplicate enrollment error (409 Conflict)
+      // Por el estado: el texto del servidor no lleva «409» (revisión local).
+      // Con los equipos formados, igual pero diciendo por qué (29 oct 2026):
+      // ya no se puede entrar y la tarjeta se va
+      if (error?.status === 409) {
+        if (esSuModal()) setEnrollModalOpen(false);
+        customToast.error(
+          t(
+            error?.errorCode === 'TEAMS_FORMED'
+              ? 'detail.errors.teamsFormed'
+              : 'browse.errors.alreadyEnrolled',
+          ),
+        );
+        // Remove from list since user already has enrollment
+        setJoinableCompetitions((prev) =>
+          prev.filter((comp) => comp.id !== competitionId),
+        );
+      } else {
+        // En el modal, que sigue abierto: el motivo del servidor, o «sin
+        // conexión», y no el error crudo del navegador (#710)
+        if (esSuModal()) {
+          setErrorAlApuntarse(
+            mensajeDeError(error, {
+              sinConexion: tComun('sinConexion.mensaje'),
+              generico: t('browse.errors.failedToEnroll'),
+            }),
+          );
+        }
+      }
+    } finally {
+      setRequestingEnrollment((prev) => ({ ...prev, [competitionId]: false }));
+      // Al final, aunque la plaza falle: el género ya quedó guardado (#710)
+      if (generoGuardado) generoParaApuntarse.refrescar();
+    }
+  };
+
+  // Handle view competition details
+  const handleViewDetails = (competitionId) => {
+    navigate(`/competitions/${competitionId}`, { state: { from: 'browse' } });
+  };
+
+  // Early returns
+  if (isLoading) {
+    // Con el fondo de la pagina, no el blanco de serie: esta es la unica de las
+    // migradas que trae `bg-*` propio, y sin esto la pantalla pasaba de blanco
+    // a gris en el instante en que llegan los datos
+    return (
+      <div
+        className={`${PANTALLA_MENOS_BARRA_INFERIOR} bg-fondo flex items-center justify-center ${marcaDeAgua('arbol-calle')}`}
+      >
+        <BlockLoader texto={t('common:loading')} />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return null;
+  }
+
+  // Prepare content for joinable competitions
+  let joinableContent;
+  if (isLoadingJoinable) {
+    joinableContent = <BlockLoader texto={t('common:loading')} />;
+  } else if (filteredJoinableCompetitions.length === 0) {
+    joinableContent = (
+      <div className="bg-tarjeta rounded-lg border border-linea p-12 text-center">
+        <Target className="w-16 h-16 text-tinta-suave mx-auto mb-4" />
+        <h3 className="text-xl font-semibold text-tinta mb-2">
+          {joinableSearch
+            ? t('browse.joinCompetition.noCompetitionsFound')
+            : t('browse.joinCompetition.noCompetitionsAvailable')}
+        </h3>
+        <p className="text-tinta-suave">
+          {joinableSearch
+            ? t('browse.joinCompetition.tryAdjustingSearch')
+            : t('browse.joinCompetition.noActiveCompetitions')}
+        </p>
+      </div>
+    );
+  } else {
+    joinableContent = (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredJoinableCompetitions.map((competition) => (
+          <CompetitionCard
+            key={competition.id}
+            competition={competition}
+            mode="joinable"
+            onRequestEnrollment={openEnrollModal}
+            onViewDetails={handleViewDetails}
+            isRequesting={requestingEnrollment[competition.id]}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  // Prepare content for explore competitions
+  let exploreContent;
+  if (isLoadingExplore) {
+    // Silenciosa: las dos secciones cargan a la vez y se anunciaban dos
+    // «Cargando...» seguidos, sin nada que los distinguiera
+    exploreContent = <BlockLoader silencioso texto={t('common:loading')} />;
+  } else if (filteredExploreCompetitions.length === 0) {
+    exploreContent = (
+      <div className="bg-tarjeta rounded-lg border border-linea p-12 text-center">
+        <TrendingUp className="w-16 h-16 text-tinta-suave mx-auto mb-4" />
+        <h3 className="text-xl font-semibold text-tinta mb-2">
+          {exploreSearch
+            ? t('browse.joinCompetition.noCompetitionsFound')
+            : t('browse.exploreCompetitions.noCompetitionsToExplore')}
+        </h3>
+        <p className="text-tinta-suave">
+          {exploreSearch
+            ? t('browse.joinCompetition.tryAdjustingSearch')
+            : t('browse.exploreCompetitions.noOngoingCompetitions')}
+        </p>
+      </div>
+    );
+  } else {
+    exploreContent = (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredExploreCompetitions.map((competition) => (
+          <CompetitionCard
+            key={competition.id}
+            competition={competition}
+            mode="explore"
+            onViewDetails={handleViewDetails}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`${PANTALLA_MENOS_BARRA_INFERIOR} bg-fondo text-tinta ${marcaDeAgua('arbol-calle')}`}
+    >
+      <HeaderAuth user={user} />
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Page Header */}
+        <div className="mb-8">
+          <h1 className="hidden md:block text-3xl font-bold text-tinta mb-2">
+            {t('browse.title')}
+          </h1>
+          <p className="text-tinta-suave">{t('browse.subtitle')}</p>
+        </div>
+
+        {/* Section 1: Join a Competition */}
+        <div className="mb-12">
+          <div className="flex items-center gap-3 mb-6">
+            <Target className="w-6 h-6 text-tinta" />
+            <h2 className="text-2xl font-bold text-tinta">
+              {t('browse.joinCompetition.title')}
+            </h2>
+          </div>
+
+          <p className="text-tinta-suave mb-4">
+            {t('browse.joinCompetition.description')}
+          </p>
+
+          {/* Search Bar - Joinable */}
+          <div className="bg-tarjeta rounded-lg border border-linea p-4 mb-6">
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-tinta-suave w-5 h-5" />
+                <input
+                  type="text"
+                  placeholder={t('browse.joinCompetition.searchPlaceholder', {
+                    type:
+                      joinableSearchType === 'name'
+                        ? t('browse.joinCompetition.searchByName')
+                        : t('browse.joinCompetition.searchByCreator'),
+                  })}
+                  value={joinableSearch}
+                  onChange={(e) => setJoinableSearch(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-linea rounded-lg focus:outline-none focus:ring-2 focus:ring-tinta focus:border-transparent"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setJoinableSearchType('name')}
+                  className={`px-4 py-2 rounded-lg font-medium transition ${
+                    joinableSearchType === 'name'
+                      ? ELEGIDO
+                      : `border border-borde text-tinta ${AL_PASAR}`
+                  }`}
+                >
+                  {t('browse.joinCompetition.byName')}
+                </button>
+                <button
+                  onClick={() => setJoinableSearchType('creator')}
+                  className={`px-4 py-2 rounded-lg font-medium transition ${
+                    joinableSearchType === 'creator'
+                      ? ELEGIDO
+                      : `border border-borde text-tinta ${AL_PASAR}`
+                  }`}
+                >
+                  {t('browse.joinCompetition.byCreator')}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Competitions Grid - Joinable */}
+          {joinableContent}
+        </div>
+
+        {/* Divider */}
+        <div className="border-t border-linea my-12"></div>
+
+        {/* Section 2: Explore Competitions */}
+        <div>
+          <div className="flex items-center gap-3 mb-6">
+            <TrendingUp className="w-6 h-6 text-tinta" />
+            <h2 className="text-2xl font-bold text-tinta">
+              {t('browse.exploreCompetitions.title')}
+            </h2>
+          </div>
+
+          <p className="text-tinta-suave mb-4">
+            {t('browse.exploreCompetitions.description')}
+          </p>
+
+          {/* Search Bar - Explore */}
+          <div className="bg-tarjeta rounded-lg border border-linea p-4 mb-6">
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-tinta-suave w-5 h-5" />
+                <input
+                  type="text"
+                  placeholder={t('browse.joinCompetition.searchPlaceholder', {
+                    type:
+                      exploreSearchType === 'name'
+                        ? t('browse.joinCompetition.searchByName')
+                        : t('browse.joinCompetition.searchByCreator'),
+                  })}
+                  value={exploreSearch}
+                  onChange={(e) => setExploreSearch(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-linea rounded-lg focus:outline-none focus:ring-2 focus:ring-tinta focus:border-transparent"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setExploreSearchType('name')}
+                  className={`px-4 py-2 rounded-lg font-medium transition ${
+                    exploreSearchType === 'name'
+                      ? ELEGIDO
+                      : `border border-borde text-tinta ${AL_PASAR}`
+                  }`}
+                >
+                  {t('browse.joinCompetition.byName')}
+                </button>
+                <button
+                  onClick={() => setExploreSearchType('creator')}
+                  className={`px-4 py-2 rounded-lg font-medium transition ${
+                    exploreSearchType === 'creator'
+                      ? ELEGIDO
+                      : `border border-borde text-tinta ${AL_PASAR}`
+                  }`}
+                >
+                  {t('browse.joinCompetition.byCreator')}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Competitions Grid - Explore */}
+          {exploreContent}
+        </div>
+      </div>
+
+      <EnrollmentRequestModal
+        isOpen={enrollModalOpen}
+        onClose={() => {
+          modalAbiertoPara.current = null;
+          setEnrollModalOpen(false);
+        }}
+        onConfirm={(tee, genero) =>
+          handleRequestEnrollment(enrollTargetId, tee, genero)
+        }
+        isProcessing={!!requestingEnrollment[enrollTargetId]}
+        pideGenero={generoParaApuntarse.falta}
+        // Para marcar la barra habitual de su género (barras por campo)
+        generoDelJugador={generoParaApuntarse.genero}
+        // Un stroke play no abre este diálogo: se apunta en su ficha, que pide el
+        // hándicap (release social 3)
+        error={errorAlApuntarse}
+      />
+      <BarrasPendientesModal
+        campo={barrasPendientes.campo}
+        guardando={barrasPendientes.guardando}
+        aviso={barrasPendientes.aviso}
+        onElegir={barrasPendientes.limpiarAviso}
+        onGuardar={barrasPendientes.guardar}
+        onSaltar={barrasPendientes.saltar}
+        onClose={barrasPendientes.cerrar}
+      />
+    </div>
+  );
+};
+
+// Competition Card Component
+const CompetitionCard = ({
+  competition,
+  mode,
+  onRequestEnrollment,
+  onViewDetails,
+  isRequesting,
+}) => {
+  const { t, i18n } = useTranslation('competitions');
+  const {
+    id,
+    name,
+    startDate,
+    endDate,
+    status,
+    creator,
+    enrolledCount,
+    maxPlayers,
+    countries,
+    visibility,
+  } = competition;
+  const otroNombreDelCreador = nombrePequeno(creator);
+  // En un stroke play el cupo es de sus franjas, que se ven en la ficha (release social 3)
+  const llena = competition.hasTeams !== false && enrolledCount >= maxPlayers;
+  // Solo en una pública se pide plaza: un admin ve también las privadas en esta
+  // lista, y en ellas se entra por invitación (FE #734)
+  const sePidePlaza = mode === 'joinable' && visibility === Visibility.PUBLIC;
+
+  // Get status badge
+  const getStatusBadge = () => {
+    const badges = {
+      [CompetitionStatusEnum.ACTIVE]: 'border border-linea text-tinta',
+      [CompetitionStatusEnum.CLOSED]: 'border border-linea text-tinta',
+      [CompetitionStatusEnum.IN_PROGRESS]: 'border border-linea text-tinta',
+      [CompetitionStatusEnum.COMPLETED]: 'border border-linea text-tinta',
+      [CompetitionStatusEnum.DRAFT]: 'border border-linea text-tinta',
+      [CompetitionStatusEnum.CANCELLED]: 'bg-tarjeta text-error',
+    };
+
+    return (
+      <span
+        className={`inline-block px-2 py-1 rounded-full text-xs font-semibold ${badges[status] || 'bg-tarjeta text-tinta'}`}
+      >
+        {status && t(`status.${status}`)}
+      </span>
+    );
+  };
+
+  return (
+    <div className="bg-tarjeta rounded-lg border border-linea overflow-hidden transition">
+      {/* Card Header - Clickable */}
+      <button
+        className="w-full p-4 border-b border-linea cursor-pointer hover:bg-fondo transition text-left"
+        onClick={() => onViewDetails(id)}
+      >
+        <div className="flex justify-between items-start mb-2">
+          <h3 className="text-lg font-bold text-tinta flex-1">{name}</h3>
+          {getStatusBadge()}
+        </div>
+
+        {/* Countries */}
+        {countries && countries.length > 0 && (
+          <div className="flex gap-1 flex-wrap">
+            {countries.map((country) => (
+              <span key={country.code} className="inline-flex">
+                <CountryFlag countryCode={country.code} className="w-5 h-5" />
+              </span>
+            ))}
+          </div>
+        )}
+      </button>
+
+      {/* Card Body - Clickable */}
+      <button
+        className="w-full p-4 space-y-3 cursor-pointer hover:bg-fondo transition text-left"
+        onClick={() => onViewDetails(id)}
+      >
+        {/* Dates */}
+        <div className="flex items-center text-sm text-tinta-suave">
+          <Calendar className="w-4 h-4 mr-2 text-tinta-suave" />
+          <span>{formatDateRange(startDate, endDate, i18n.language)}</span>
+        </div>
+
+        {/* Creator */}
+        <div className="flex items-center text-sm text-tinta-suave">
+          <Users className="w-4 h-4 mr-2 text-tinta-suave" />
+          <span>
+            {t('browse.card.created-by')}{' '}
+            <span className="font-medium text-tinta">
+              {creator?.displayName || t('detail.unknownUser')}
+            </span>
+            {/* El otro nombre, entre paréntesis: en la tarjeta no cabe otra línea */}
+            {otroNombreDelCreador && (
+              <span className="text-tinta-suave">
+                {' '}
+                ({otroNombreDelCreador})
+              </span>
+            )}
+          </span>
+        </div>
+
+        {/* Players Count */}
+        <div className="flex items-center text-sm text-tinta-suave">
+          <Users className="w-4 h-4 mr-2 text-tinta-suave" />
+          <span>
+            {t('browse.card.players')}{' '}
+            <span className="font-medium text-tinta">
+              {/* En un stroke play el cupo es de sus franjas (release social 3) */}
+              {competition.hasTeams === false
+                ? enrolledCount
+                : `${enrolledCount} / ${maxPlayers}`}
+            </span>
+            {llena && (
+              <span className="ml-2 text-error font-semibold">
+                {t('browse.card.full')}
+              </span>
+            )}
+          </span>
+        </div>
+      </button>
+
+      {/* Card Footer */}
+      <div className="p-4 bg-tarjeta border-t border-linea">
+        {sePidePlaza ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation(); // Prevent card click when clicking button
+              onRequestEnrollment(id);
+            }}
+            disabled={isRequesting || llena}
+            className={`w-full py-2 px-4 rounded-lg font-medium transition ${
+              isRequesting || llena
+                ? 'bg-linea text-tinta-suave cursor-not-allowed'
+                : 'bg-contraste text-sobre-contraste hover:opacity-90'
+            }`}
+          >
+            {/* Get button text */}
+            {(() => {
+              if (isRequesting) return t('browse.card.requesting');
+              if (llena) return t('browse.card.full');
+              return t('browse.card.request-to-join');
+            })()}
+          </button>
+        ) : (
+          <button
+            onClick={(e) => {
+              e.stopPropagation(); // Prevent card click when clicking button
+              onViewDetails(id);
+            }}
+            className={`w-full py-2 px-4 rounded-lg font-medium bg-tarjeta text-tinta ${AL_PASAR}`}
+          >
+            {t('browse.card.view-details')}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default BrowseCompetitions;

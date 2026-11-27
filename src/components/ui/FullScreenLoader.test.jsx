@@ -1,0 +1,207 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen } from '@testing-library/react';
+
+/**
+ * Este componente es tambien el fallback del `Suspense` raiz, donde se pinta
+ * antes de que baje el namespace `common`: ahi `t()` no resuelve y manda el
+ * respaldo. Por eso el mock devuelve el `defaultValue` en vez de la clave.
+ */
+const estadoI18n = { language: 'es', resolvedLanguage: 'es' };
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (_clave, opciones) => opciones?.defaultValue ?? _clave,
+    i18n: estadoI18n,
+  }),
+}));
+
+const { terminaElArranque, reiniciaLaCortina } =
+  await import('../../utils/cortinaDeArranque');
+const FullScreenLoader = (await import('./FullScreenLoader')).default;
+
+describe('FullScreenLoader', () => {
+  beforeEach(() => {
+    estadoI18n.language = 'es';
+    estadoI18n.resolvedLanguage = 'es';
+    reiniciaLaCortina();
+  });
+
+  it('espera en español mientras el namespace no ha bajado', () => {
+    render(<FullScreenLoader />);
+    expect(screen.getByRole('status')).toHaveTextContent('Cargando...');
+  });
+
+  it('espera en ingles cuando ese es el idioma activo', () => {
+    estadoI18n.resolvedLanguage = 'en';
+    render(<FullScreenLoader />);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading...');
+  });
+
+  it('acepta la etiqueta con region', () => {
+    estadoI18n.resolvedLanguage = 'es-ES';
+    render(<FullScreenLoader />);
+    expect(screen.getByRole('status')).toHaveTextContent('Cargando...');
+  });
+
+  it('acepta la etiqueta con region en su forma con guion bajo', () => {
+    // `es_ES` es la forma que ya hizo estallar `localeCompare` en este proyecto
+    estadoI18n.resolvedLanguage = 'es_ES';
+    render(<FullScreenLoader />);
+    expect(screen.getByRole('status')).toHaveTextContent('Cargando...');
+  });
+
+  it('cae en ingles ante una etiqueta heredada de Object', () => {
+    // `i18nextLng` es texto libre: en un objeto, `constructor` habria devuelto
+    // una funcion y React no sabe pintarla —pantalla en blanco al arrancar—
+    estadoI18n.resolvedLanguage = 'constructor';
+    render(<FullScreenLoader />);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading...');
+  });
+
+  it('cae en ingles ante una etiqueta que no reconoce', () => {
+    // El idioma sale de `i18nextLng`, que no pasa por ninguna lista cerrada
+    estadoI18n.resolvedLanguage = 'zz';
+    render(<FullScreenLoader />);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading...');
+  });
+});
+
+/**
+ * Las dos caras de la espera (FE #492). El verde de la marca es la pantalla con
+ * la que la aplicacion se abre: volver a verlo al pulsar «Inicio» en la barra
+ * inferior se lee como si la aplicacion se reiniciara, cuando eso es una simple
+ * transicion. Dentro de la aplicacion se pinta la cara sobria, la misma que en
+ * el navegador.
+ */
+describe('las dos caras de la espera', () => {
+  const monograma = () => document.querySelector('img[src*="stamp"]');
+
+  beforeEach(() => {
+    estadoI18n.language = 'es';
+    estadoI18n.resolvedLanguage = 'es';
+    reiniciaLaCortina();
+  });
+
+  it('durante el arranque va sin marcar', () => {
+    render(<FullScreenLoader />);
+
+    expect(screen.getByRole('status')).not.toHaveClass(
+      'pantalla-de-espera--transicion',
+    );
+    expect(screen.getByRole('status')).toHaveClass('pantalla-de-espera');
+  });
+
+  it('durante el arranque el stamp va en la tinta del tema, sin media query', () => {
+    // La marca anterior lo elegia por `display-mode`, porque instalada el
+    // arranque iba en otro color. Ya van las dos caras sobre el mismo fondo
+    render(<FullScreenLoader />);
+
+    // Sin encadenar opcionales: `expect(undefined).not.toBeNull()` pasa, y este
+    // test se quedaria en verde sin monograma ninguno
+    const img = monograma();
+    expect(img).not.toBeNull();
+    expect(img.closest('picture')).toBeNull();
+    expect(img.getAttribute('src')).toContain('stamp-deep');
+    expect(img).toHaveClass('solo-claro');
+  });
+
+  it('terminado el arranque se marca como transicion', () => {
+    terminaElArranque();
+
+    render(<FullScreenLoader />);
+
+    expect(screen.getByRole('status')).toHaveClass(
+      'pantalla-de-espera--transicion',
+    );
+  });
+
+  it('en la transicion el stamp va tambien en la tinta del tema', () => {
+    terminaElArranque();
+
+    render(<FullScreenLoader />);
+
+    const img = monograma();
+    expect(img).not.toBeNull();
+    expect(img.getAttribute('src')).toContain('stamp-deep');
+    expect(img).toHaveClass('solo-claro');
+    expect(img.closest('picture')).toBeNull();
+    // Y su pareja para el oscuro, que el CSS esconde en claro
+    const oscura = screen.getByRole('status').querySelector('img.solo-oscuro');
+    expect(oscura.getAttribute('src')).toContain('stamp-acid');
+  });
+});
+
+/**
+ * La cara se decide al MONTAR, no en cada render. La bandera vive en un modulo
+ * y cambia sola, y este componente se vuelve a pintar sin desmontarse
+ * —react-i18next lo fuerza al bajar el namespace `common`, que va perezoso—:
+ * leerla en el render hacia que una espera EN CURSO pasara de verde a blanco
+ * delante de los ojos. Un parpadeo nuevo, en la saga de los parpadeos.
+ */
+describe('la cara no cambia a media espera', () => {
+  beforeEach(() => {
+    estadoI18n.language = 'es';
+    estadoI18n.resolvedLanguage = 'es';
+    reiniciaLaCortina();
+  });
+
+  it('la espera que empezo como arranque sigue siendo arranque', () => {
+    const { rerender } = render(<FullScreenLoader />);
+    const antes = screen.getByRole('status');
+    expect(antes).not.toHaveClass('pantalla-de-espera--transicion');
+
+    // El arranque termina mientras esta espera sigue en pantalla
+    terminaElArranque();
+    rerender(<FullScreenLoader />);
+
+    // El MISMO nodo, y con la misma cara
+    expect(screen.getByRole('status')).toBe(antes);
+    expect(screen.getByRole('status')).not.toHaveClass(
+      'pantalla-de-espera--transicion',
+    );
+  });
+});
+
+/**
+ * El anillo no solo gira a la misma velocidad que el de la capa de
+ * `index.html`: arranca en la misma FASE. El reloj de una animacion CSS empieza
+ * cuando nace su elemento, asi que sin esto el arco saltaba a otro angulo justo
+ * en el relevo.
+ */
+describe('la fase del anillo', () => {
+  beforeEach(() => {
+    estadoI18n.language = 'es';
+    estadoI18n.resolvedLanguage = 'es';
+    reiniciaLaCortina();
+  });
+
+  it('cuando la capa sigue puesta, copia SU fase, no la del documento', () => {
+    // Aproximar con `performance.now()` deja fuera lo que el navegador tarda en
+    // analizar la pagina: son las decenas de milisegundos que separan el
+    // arranque del documento del nacimiento de la capa
+    document.body.innerHTML =
+      '<div id="arranque"><span id="arranque-anillo"></span></div>';
+    const capa = document.getElementById('arranque-anillo');
+    capa.getAnimations = () => [{ currentTime: 250 }];
+
+    render(<FullScreenLoader />);
+
+    expect(document.querySelector('.espera-anillo').style.animationDelay).toBe(
+      '-250ms',
+    );
+    document.body.innerHTML = '';
+  });
+
+  it('arranca donde estaria si llevara girando desde el principio', () => {
+    render(<FullScreenLoader />);
+
+    const anillo = document.querySelector('.espera-anillo');
+    expect(anillo).not.toBeNull();
+    const retraso = anillo.style.animationDelay;
+    expect(retraso, 'sin retraso negativo, el arco salta en el relevo').toMatch(
+      /^-\d+(\.\d+)?ms$/,
+    );
+    // Dentro de la vuelta: un desfase mayor que el ciclo no significa nada
+    expect(Math.abs(parseFloat(retraso))).toBeLessThan(1000);
+  });
+});

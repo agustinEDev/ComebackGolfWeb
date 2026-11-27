@@ -1,0 +1,319 @@
+/**
+ * Input Validation Utilities
+ */
+
+import {
+  PASSWORD_DIGIT,
+  PASSWORD_LOWERCASE,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_SPECIAL_CHARS,
+  PASSWORD_UPPERCASE,
+  fitsMaxLength,
+  passwordLength,
+  validatePassword,
+} from '../domain/services/PasswordPolicy';
+
+// La política de contraseñas vive en el dominio; aquí solo se reexporta para
+// las pantallas, que la usaban desde este módulo
+export {
+  PASSWORD_DIGIT,
+  PASSWORD_LOWERCASE,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_SPECIAL_CHARS,
+  PASSWORD_UPPERCASE,
+  fitsMaxLength,
+  hasEdgeWhitespace,
+  passwordLength,
+  validatePassword,
+} from '../domain/services/PasswordPolicy';
+
+// Los códigos con los que el backend rechaza una contraseña (BE #519), cada uno
+// con la clave que la pantalla usaría si lo hubiera detectado ella. Su texto va
+// en español; así el usuario lo lee en el idioma de la app
+const PASSWORD_ERROR_KEYS = {
+  PASSWORD_EMPTY: { key: 'validation.passwordRequired' },
+  PASSWORD_EDGE_SPACES: { key: 'validation.passwordSpaces' },
+  PASSWORD_TOO_SHORT: {
+    key: 'validation.passwordTooShort',
+    options: { min: PASSWORD_MIN_LENGTH },
+  },
+  PASSWORD_TOO_LONG: {
+    key: 'validation.passwordTooLong',
+    options: { max: PASSWORD_MAX_LENGTH },
+  },
+  PASSWORD_NO_UPPERCASE: { key: 'validation.passwordWeak' },
+  PASSWORD_NO_LOWERCASE: { key: 'validation.passwordWeak' },
+  PASSWORD_NO_DIGIT: { key: 'validation.passwordWeak' },
+  PASSWORD_NO_SYMBOL: { key: 'validation.passwordNoSymbol' },
+  PASSWORD_TOO_COMMON: { key: 'validation.passwordCommon' },
+};
+
+/**
+ * La clave (del espacio `auth`) con la que decir un rechazo de contraseña del backend.
+ * @param {?string} errorCode - `error.errorCode` del error de la API
+ * @returns {?{key: string, options?: Object}} null si no es un error de contraseña
+ */
+export const passwordErrorTranslation = (errorCode) =>
+  // `hasOwn`: un código como «constructor» no puede traer lo que hereda el objeto
+  Object.hasOwn(PASSWORD_ERROR_KEYS, errorCode ?? '')
+    ? PASSWORD_ERROR_KEYS[errorCode]
+    : null;
+
+/** Los códigos que se traducen, para que los tests los recorran todos. */
+export const PASSWORD_ERROR_CODES = Object.keys(PASSWORD_ERROR_KEYS);
+
+/**
+ * El rechazo de contraseña del backend, ya traducido; null si el error no es eso.
+ *
+ * Con el espacio de nombres `auth` puesto aquí: cada pantalla tiene el suyo por
+ * defecto (el perfil, `profile`) y repetirlo en cada una era una forma segura
+ * de que alguna enseñase la clave en crudo.
+ * @param {Error} error - El error de la API (lleva `errorCode`)
+ * @param {Function} t - El `t` de la pantalla
+ * @returns {?string}
+ */
+export const passwordErrorMessage = (error, t) => {
+  const traduccion = passwordErrorTranslation(error?.errorCode);
+  return traduccion
+    ? t(traduccion.key, { ns: 'auth', ...traduccion.options })
+    : null;
+};
+
+/**
+ * Validates password strength and returns detailed feedback
+ * Optimized for visual indicator component
+ * Updated for v1.8.0: Passwords <12 chars cannot reach green/blue (score 3-4)
+ * @param {string} password - Password to validate
+ * @returns {Object} - { score: number (0-4), feedback: string }
+ */
+export const validatePasswordStrength = (password) => {
+  if (!password) {
+    return { score: 0, feedback: '' };
+  }
+
+  const hasUpperCase = PASSWORD_UPPERCASE.test(password);
+  const hasLowerCase = PASSWORD_LOWERCASE.test(password);
+  const hasNumbers = PASSWORD_DIGIT.test(password);
+  const length = passwordLength(password);
+  const hasSpecialChar = PASSWORD_SPECIAL_CHARS.test(password);
+
+  let score = 0;
+  let feedback = '';
+
+  // CRITICAL: Passwords <12 chars are INVALID (OWASP ASVS V2.1.1)
+  // Don't show green/blue for invalid passwords
+  if (length < 12) {
+    // Score capped at 2 (yellow) for passwords <12 chars
+    if (length >= 8) score = 1;
+    if (length >= 10) score = 2; // Slightly better if approaching 12
+    feedback = `Need ${12 - length} more character${12 - length !== 1 ? 's' : ''}`;
+    return { score, feedback };
+  }
+
+  // For passwords >= 12 chars, calculate full score
+  score = 2; // Base score for meeting minimum length
+
+  // Add score for character variety
+  if (hasUpperCase && hasLowerCase) score++;
+  if (hasNumbers) score++;
+  if (hasSpecialChar) score++;
+
+  // Cap at 4. La máxima solo para lo que el formulario va a aceptar: sin
+  // símbolo el indicador salía «Excellent!» en verde y al enviar se rechazaba
+  score = Math.min(score, validatePassword(password).isValid ? 4 : 3);
+
+  // Demasiado larga: la lista de requisitos ya marca la longitud; el consejo de
+  // «añade símbolos» no tendría sentido, que los tiene (B-14, /code-review)
+  if (!fitsMaxLength(password)) {
+    return { score, feedback: '' };
+  }
+
+  // Generate feedback for valid passwords (>= 12 chars)
+  if (score === 2) {
+    feedback = 'Add uppercase, lowercase, and numbers';
+  } else if (score === 3) {
+    feedback = 'Good! Add special characters';
+  } else if (score === 4) {
+    feedback = 'Excellent!';
+  }
+
+  return { score, feedback };
+};
+
+/**
+ * Validates email format
+ * @param {string} email - Email to validate
+ * @returns {Object} - { isValid: boolean, message: string }
+ */
+export const validateEmail = (email) => {
+  if (!email || !email.trim()) {
+    return {
+      isValid: false,
+      // `messageKey` es lo que pinta la interfaz. `message` se conserva en
+      // ingles porque de el dependen los tests de esta utilidad; ningun sitio de
+      // la aplicacion lo enseña ya
+      messageKey: 'validation.emailRequired',
+      message: 'Email is required',
+    };
+  }
+
+  const maxLength = 254; // RFC 5321 maximum email address length
+
+  // Check maximum length
+  if (email.length > maxLength) {
+    return {
+      isValid: false,
+      messageKey: 'validation.emailTooLong',
+      messageOptions: { max: maxLength },
+      message: `Email must not exceed ${maxLength} characters`,
+    };
+  }
+
+  // RFC 5322 compliant regex (simplified)
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  if (!emailRegex.test(email)) {
+    return {
+      isValid: false,
+      messageKey: 'validation.emailInvalid',
+      message: 'Please enter a valid email address',
+    };
+  }
+
+  return {
+    isValid: true,
+    message: '',
+  };
+};
+
+/**
+ * Validates name (first name or last name)
+ * @param {string} name - Name to validate
+ * @param {string} fieldName - Field name for error messages
+ * @returns {Object} - { isValid: boolean, message: string }
+ */
+export const validateName = (name, fieldName = 'Name') => {
+  // La clave sale del propio `fieldName` («First name» -> «firstName») en vez de
+  // recibirse aparte: dos parametros paralelos podian divergir en silencio
+  // —`validateName(x, 'Last name', 'firstName')` no fallaba en ningun sitio— y
+  // olvidar el tercero pintaba la clave en crudo en el formulario.
+  const campoClave = fieldName
+    .trim()
+    .split(/\s+/)
+    .map((parte, i) =>
+      i === 0
+        ? parte.toLowerCase()
+        : parte.charAt(0).toUpperCase() + parte.slice(1).toLowerCase(),
+    )
+    .join('');
+
+  const trimmed = name.trim();
+
+  if (!trimmed) {
+    return {
+      isValid: false,
+      messageKey: `validation.${campoClave}Required`,
+      message: `${fieldName} is required`,
+    };
+  }
+
+  const minLength = 2;
+  const maxLength = 100; // Increased from 50 to match backend v1.8.0
+
+  if (trimmed.length < minLength) {
+    return {
+      isValid: false,
+      messageKey: `validation.${campoClave}TooShort`,
+      messageOptions: { min: minLength },
+      message: `${fieldName} must be at least ${minLength} characters`,
+    };
+  }
+
+  if (trimmed.length > maxLength) {
+    return {
+      isValid: false,
+      messageKey: `validation.${campoClave}TooLong`,
+      messageOptions: { max: maxLength },
+      message: `${fieldName} must not exceed ${maxLength} characters`,
+    };
+  }
+
+  // Allow only letters, spaces, hyphens, and apostrophes (with accents)
+  const nameRegex = /^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s'-]+$/;
+  if (!nameRegex.test(trimmed)) {
+    return {
+      isValid: false,
+      messageKey: `validation.${campoClave}Invalid`,
+      message: `${fieldName} contains invalid characters`,
+    };
+  }
+
+  return {
+    isValid: true,
+    message: '',
+  };
+};
+
+/**
+ * Rate limiting utility for form submissions
+ * @param {string} key - Unique key for the rate limiter
+ * @param {number} maxAttempts - Maximum number of attempts
+ * @param {number} windowMs - Time window in milliseconds
+ * @returns {Object} - { allowed: boolean, remainingTime: number }
+ */
+export const checkRateLimit = (key, maxAttempts = 5, windowMs = 60000) => {
+  const storageKey = `ratelimit_${key}`;
+  const now = Date.now();
+
+  let rateLimitData = localStorage.getItem(storageKey);
+  if (rateLimitData) {
+    try {
+      rateLimitData = JSON.parse(rateLimitData);
+    } catch {
+      rateLimitData = null;
+    }
+  }
+
+  if (!rateLimitData) {
+    rateLimitData = {
+      attempts: 0,
+      resetTime: now + windowMs,
+    };
+  }
+
+  // Reset if window has passed
+  if (now >= rateLimitData.resetTime) {
+    rateLimitData = {
+      attempts: 0,
+      resetTime: now + windowMs,
+    };
+  }
+
+  // Check if allowed
+  if (rateLimitData.attempts >= maxAttempts) {
+    return {
+      allowed: false,
+      remainingTime: Math.ceil((rateLimitData.resetTime - now) / 1000),
+    };
+  }
+
+  // Increment attempts
+  rateLimitData.attempts++;
+  localStorage.setItem(storageKey, JSON.stringify(rateLimitData));
+
+  return {
+    allowed: true,
+    remainingTime: 0,
+  };
+};
+
+/**
+ * Resets rate limit for a key
+ * @param {string} key - Unique key for the rate limiter
+ */
+export const resetRateLimit = (key) => {
+  const storageKey = `ratelimit_${key}`;
+  localStorage.removeItem(storageKey);
+};
