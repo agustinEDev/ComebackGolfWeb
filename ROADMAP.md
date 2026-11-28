@@ -5,7 +5,7 @@
 > that time, and some of the files it mentions no longer exist. Pull request and issue numbers from that
 > period belong to the archived repository and have been removed.
 >
-> **Today:** version **2.96.0** (November 2026). What changed in each release is in
+> **Today:** version **2.96.1** (November 2026). What changed in each release is in
 > [CHANGELOG.md](CHANGELOG.md); the current state of the project is in [README.md](README.md).
 >
 > **Note:** Some entries below (Zustand, TanStack Query, Zod) reflect early planning that was **not** implemented as written — actual state management/polling/validation is React Context + hooks with ad-hoc per-form validation. ADR-002 (useState + Context API) reflects the current architecture; ADR-009 still describes the Zustand authStore design that was never adopted.

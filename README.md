@@ -21,7 +21,7 @@ and hole-by-hole scoring that keeps working without coverage.
 
 <br>
 
-[![Version](https://img.shields.io/badge/version-2.96.0-DDF478?style=flat-square&labelColor=222D24)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.96.1-DDF478?style=flat-square&labelColor=222D24)](CHANGELOG.md)
 [![CI](https://img.shields.io/github/actions/workflow/status/agustinEDev/ComebackGolfWeb/ci-cd.yml?branch=develop&style=flat-square&label=CI&labelColor=222D24&logo=githubactions&logoColor=DDF478)](https://github.com/agustinEDev/ComebackGolfWeb/actions/workflows/ci-cd.yml)
 [![Tests](https://img.shields.io/badge/tests-15%2C257%20passing-DDF478?style=flat-square&labelColor=222D24&logo=vitest&logoColor=DDF478)](#%EF%B8%8F-quality-and-security)
 [![Coverage gate](https://img.shields.io/badge/coverage%20gate-%E2%89%A590%25%20lines-DDF478?style=flat-square&labelColor=222D24)](vite.config.js)
