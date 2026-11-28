@@ -18,7 +18,6 @@ const PasswordStrengthMeter = ({ password }) => {
       return { level: 'none', percentage: 0, label: '', color: 'bg-linea' };
     }
 
-    let score = 0;
     const checks = {
       length: password.length >= 12,
       longLength: password.length >= 15,
@@ -45,7 +44,7 @@ const PasswordStrengthMeter = ({ password }) => {
     }
 
     // Fair level (25-50%): Meets basic requirements
-    score = 25;
+    let score = 25;
     if (
       checks.length &&
       checks.hasUpperCase &&

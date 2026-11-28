@@ -77,7 +77,7 @@ export function recogeLaVueltaDeGoogleConSuCuenta() {
  */
 
 export function recogeLaVueltaDeGoogle() {
-  let ruta = null;
+  let ruta;
   try {
     ruta = sessionStorage.getItem(VUELTA_KEY);
     sessionStorage.removeItem(VUELTA_KEY);
@@ -130,7 +130,7 @@ async function retoDelVerificador(verifier) {
  * @returns {string|null}
  */
 export function recogeElVerificadorDeGoogle() {
-  let verifier = null;
+  let verifier;
   try {
     verifier = sessionStorage.getItem(VERIFIER_KEY);
     sessionStorage.removeItem(VERIFIER_KEY);

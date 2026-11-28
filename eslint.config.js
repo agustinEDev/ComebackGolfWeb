@@ -96,6 +96,10 @@ export default [
 
       // Disable prop-types (we removed PropTypes in Sprint 1)
       'react/prop-types': 'off',
+
+      // Una asignación que nadie lee suele esconder un fallo. Viene en la
+      // recomendada de ESLint 10; se activa ya en el 9 (FE #85)
+      'no-useless-assignment': 'error',
     },
   },
 

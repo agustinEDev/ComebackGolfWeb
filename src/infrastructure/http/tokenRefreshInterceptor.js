@@ -416,7 +416,7 @@ const cierraSiElServidorDijoQueNo = (refreshError) => {
  */
 const vigilaLaRepetida = async (url, opciones, repetida) => {
   if (repetida?.status !== 401) return repetida;
-  let datos = {};
+  let datos;
   try {
     datos = (await repetida.clone().json()) ?? {};
   } catch {

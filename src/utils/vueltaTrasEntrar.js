@@ -177,7 +177,7 @@ export const redirigeAlLogin = ({
  * @returns {{pathname: string, search: string, hash: string}|null}
  */
 export const leeLaVueltaTrasEntrar = () => {
-  let ruta = null;
+  let ruta;
   try {
     ruta = rutaPropia(globalThis.sessionStorage.getItem(CLAVE));
   } catch {

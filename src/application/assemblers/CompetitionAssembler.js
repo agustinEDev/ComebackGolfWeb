@@ -43,7 +43,7 @@ class CompetitionAssembler {
    */
   static toSimpleDTO(competition, extras = null) {
     // Use countries array from API if available, otherwise build from domain
-    let countries = [];
+    let countries;
 
     if (extras?.countries && Array.isArray(extras.countries)) {
       countries = extras.countries.map((country, index) => ({
