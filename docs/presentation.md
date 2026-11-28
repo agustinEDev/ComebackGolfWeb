@@ -53,6 +53,9 @@ style: |
 **Agustin Estevez Dominguez**
 v2.0.8 (BE) / v2.0.12 (FE) | February 2026
 
+<!-- Historical deck: a snapshot of February 2026, kept as it was presented. Figures, versions and roadmap are those of that date; the current state is in README.md and CHANGELOG.md. -->
+*Historical snapshot of February 2026. Current state: README.md and CHANGELOG.md.*
+
 Frontend: github.com/agustinEDev/ComebackGolfWeb
 Backend: github.com/agustinEDev/ComebackGolfApi
 
@@ -104,7 +107,7 @@ Backend: github.com/agustinEDev/ComebackGolfApi
 
 <div class="highlight">
 
-**Challenge:** Amateur golf tournaments still rely on spreadsheets, paper scorecards, and manual coordination. There is no accessible, modern platform tailored for Ryder Cup-format amateur events.
+**Challenge:** Amateur golf tournaments still rely on spreadsheets, paper scorecards, and manual coordination. There is no accessible, modern platform tailored for amateur events in a Ryder-style team format.
 
 </div>
 
