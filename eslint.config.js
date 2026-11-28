@@ -13,6 +13,15 @@ export default [
   // Base ESLint recommended rules
   js.configs.recommended,
 
+  // Una asignación que nadie lee suele esconder un fallo. Viene en la
+  // recomendada de ESLint 10; se activa ya en el 9 (FE #85), para los mismos
+  // ficheros que la recomendada
+  {
+    rules: {
+      'no-useless-assignment': 'error',
+    },
+  },
+
   // React configuration
   {
     files: ['**/*.{js,jsx}'],

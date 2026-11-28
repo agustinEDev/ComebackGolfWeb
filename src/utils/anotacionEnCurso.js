@@ -128,7 +128,7 @@ const valido = (cuenta, ahora) => {
   // Sin saber aún de quién es la sesión (un instante en la vuelta de Google) no se puede
   // comparar: no vale, pero tampoco se borra lo de la cuenta que está entrando
   if (cuenta == null) return null;
-  let guardado = null;
+  let guardado;
   try {
     const texto = globalThis.localStorage.getItem(CLAVE);
     if (texto === null) return null;

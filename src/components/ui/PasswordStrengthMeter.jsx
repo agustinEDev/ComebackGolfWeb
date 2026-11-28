@@ -18,7 +18,6 @@ const PasswordStrengthMeter = ({ password }) => {
       return { level: 'none', percentage: 0, label: '', color: 'bg-linea' };
     }
 
-    let score = 0;
     const checks = {
       length: password.length >= 12,
       longLength: password.length >= 15,
@@ -44,16 +43,9 @@ const PasswordStrengthMeter = ({ password }) => {
       };
     }
 
-    // Fair level (25-50%): Meets basic requirements
-    score = 25;
-    if (
-      checks.length &&
-      checks.hasUpperCase &&
-      checks.hasLowerCase &&
-      checks.hasNumbers
-    ) {
-      score = 40;
-    }
+    // Fair level (25-50%): Meets basic requirements (the weak return above has
+    // already ruled out a missing one)
+    let score = 40;
 
     // Good level (50-75%): Basic requirements + longer password
     if (checks.longLength) {
