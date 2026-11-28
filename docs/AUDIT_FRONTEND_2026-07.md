@@ -2,8 +2,24 @@
 
 **Date**: July 26, 2026
 **Scope**: Full frontend codebase (`ComebackGolfWeb`) — dependency security, authentication/XSS surface, and Clean-Architecture/DDD compliance as adapted for a React SPA.
-**Trigger**: Proactive audit, not a response to a known incident. Tracked as GitHub issue #237.
-**Author**: Automated audit, reviewed findings verified against source before filing.
+**Trigger**: Proactive audit, not a response to a known incident. Tracked in the archived repository.
+**Review**: every finding was verified against the source before filing.
+
+> **Historical document.** This is the audit as written in July 2026, kept for reference. The issue numbers
+> it mentioned belong to the archived repository and have been removed. Status of its findings at v2.96.0
+> (November 2026):
+>
+> - **H1, Sentry Replay unmasked PII: fixed.** Replays mask all text and block all media in every
+>   environment, and no random sessions are recorded.
+> - **M4, dead legacy service code: fixed.** `src/services/competitions.js` and `src/services/countries.js`
+>   keep only pure formatters.
+> - **Silenced `react-hooks/*` warnings:** down from 37 in 19 files to 6 in 5 files (one of them
+>   `exhaustive-deps`, outside the React Compiler family).
+> - **M1, documented vs. actual architecture:** ROADMAP.md carries a note on what was never adopted;
+>   ADR-009 is unchanged, as ADRs are never edited.
+> - The rest of the findings were not re-checked for this note.
+> - The production CSP now allows `'unsafe-inline'` in `style-src` (never in `script-src`); the reason is in
+>   [SECURITY_HEADERS.md](SECURITY_HEADERS.md).
 
 ---
 
@@ -13,9 +29,9 @@ No Critical or exploitable High-severity vulnerabilities were found. The codebas
 
 The one **High**-severity finding is a live, ongoing privacy issue rather than a classic vulnerability: Sentry Session Replay is configured to record **unmasked on-screen text** for 100% of error sessions and 10% of all sessions, shipping player names, emails, and handicap data to a third-party service well beyond what's needed for debugging.
 
-The architecture pass found no correctness bugs. It did find a meaningful **documentation/reality gap**: ROADMAP.md and ADR-009 describe a state/validation stack (Zustand, TanStack Query, Zod) that does not exist anywhere in `package.json` or `src/` — the actual patterns (React Context + local state, ad-hoc imperative validation) are reasonable but undocumented, which risks steering future contributors (human or AI) into designing against a fictional architecture. It also found ~420 lines of dead legacy API-calling code left over from the v2.0.9 Clean Architecture remediation, and two maintainability issues in `CreateCompetition.jsx` (inline validation, multi-step orchestration living in the page instead of a use case).
+The architecture pass found no correctness bugs. It did find a meaningful **documentation/reality gap**: ROADMAP.md and ADR-009 describe a state/validation stack (Zustand, TanStack Query, Zod) that does not exist anywhere in `package.json` or `src/` — the actual patterns (React Context + local state, ad-hoc imperative validation) are reasonable but undocumented, which risks steering future contributors into designing against a fictional architecture. It also found ~420 lines of dead legacy API-calling code left over from the v2.0.9 Clean Architecture remediation, and two maintainability issues in `CreateCompetition.jsx` (inline validation, multi-step orchestration living in the page instead of a use case).
 
-The already-tracked 37 silenced `react-hooks/*` lint warnings (issue #239) are **not** re-reported here; sampled hook dependency arrays outside that tracked set showed no additional issues.
+The already-tracked 37 silenced `react-hooks/*` lint warnings are **not** re-reported here; sampled hook dependency arrays outside that tracked set showed no additional issues.
 
 **Totals**: 0 Critical · 1 High · 4 Medium · 3 Low.
 
@@ -26,7 +42,7 @@ The already-tracked 37 silenced `react-hooks/*` lint warnings (issue #239) are *
 1. **Dependency scan**: `snyk test --all-projects` against `package-lock.json` (org `agustinedev`).
 2. **Static review**: targeted `grep`/manual read of `src/` for XSS sinks (`dangerouslySetInnerHTML`, `eval`, `new Function`, `document.write`, `innerHTML =`), auth/token storage (`localStorage`/`sessionStorage`), redirect targets (`navigate()`, `window.location`), CSRF/OAuth flows, and Sentry PII scrubbing (`beforeSend`/`beforeBreadcrumb`).
 3. **Config review**: `vite.config.js` security headers (prod + dev), `nginx.conf`, `public/_headers`, `.snyk` policy.
-4. **Architecture review**: component/hook boundaries in representative pages (`CreateCompetition.jsx`, `ScoringPage.jsx`, `SchedulePage.jsx`), state-management pattern consistency against documented architecture, API-layer centralization (grep for `fetch(`/`axios.` outside `src/infrastructure`), and hook dependency arrays outside the set already covered by the tracked #239 debt.
+4. **Architecture review**: component/hook boundaries in representative pages (`CreateCompetition.jsx`, `ScoringPage.jsx`, `SchedulePage.jsx`), state-management pattern consistency against documented architecture, API-layer centralization (grep for `fetch(`/`axios.` outside `src/infrastructure`), and hook dependency arrays outside the set already covered by that tracked debt.
 5. **Existing test coverage noted**: `tests/security.spec.js` already exercises XSS escaping, CSRF/SameSite cookies, CSP violation blocking, security headers presence, auth error handling, and input validation via Playwright — this audit did not duplicate that coverage, only reviewed the underlying implementation.
 
 ---
@@ -71,7 +87,7 @@ The already-tracked 37 silenced `react-hooks/*` lint warnings (issue #239) are *
 
 - **Files**: `src/services/competitions.js` (301 lines), `src/services/countries.js` (239 lines)
 - **Description**: Both files still export a full set of raw `apiRequest()`-calling functions — `activateCompetition`, `startCompetition`, `completeCompetition`, `cancelCompetition`, `createCompetition`, `updateCompetition`, `deleteCompetition`, `requestEnrollment`, `getEnrollments`, `approveEnrollment`, `rejectEnrollment`, `cancelEnrollment`, `withdrawEnrollment`, `setCustomHandicap`, `getCompetitionById`, `getCountries`, `getAdjacentCountries`, `getCommonAdjacentCountries`, `getAdjacentCountriesFallback`. Verified via grep of every import site in `src/pages` and `src/components`: **none of these mutating functions are imported anywhere** — all current call sites correctly go through `ICompetitionRepository`/`IEnrollmentRepository`/`ICountryRepository` use cases via `src/composition`. Only pure display helpers are actually used: `getStatusColor`, `getEnrollmentStatusColor`, `formatDateRange` (from `competitions.js`, confirmed imported in `Competitions.jsx` and `CompetitionDetail.jsx`) and `formatCountryName` (from `countries.js`, confirmed imported in 7 files).
-- **Risk scenario**: The exact Clean Architecture violation the v2.0.9 remediation (PR #142) already fixed is one `grep "activate competition"` away from being reintroduced — a contributor finds the old function, assumes it's the sanctioned way to call the endpoint, and bypasses the repository/use-case layer.
+- **Risk scenario**: The exact Clean Architecture violation the v2.0.9 remediation already fixed is one `grep "activate competition"` away from being reintroduced — a contributor finds the old function, assumes it's the sanctioned way to call the endpoint, and bypasses the repository/use-case layer.
 - **Suggested fix**: Delete the dead mutating exports from both files; move the surviving pure formatters (`getStatusColor`, `getEnrollmentStatusColor`, `formatDateRange`, `formatCountryName`) to `src/utils/`, since they are formatters, not API services.
 
 ---
@@ -103,7 +119,7 @@ The already-tracked 37 silenced `react-hooks/*` lint warnings (issue #239) are *
 
 ### Already tracked (not duplicated here)
 
-- **37 silenced `react-hooks/*` lint warnings** across 19 files (React Compiler rule family: `immutability`, `purity`, `refs`, `preserve-manual-memoization`, `set-state-in-effect`), introduced by the `eslint-plugin-react-hooks` 7.0.1 → 7.1.1 bump on 2026-07-24. Documented in `ROADMAP.md` and tracked as **issue #239**. Hook dependency arrays outside this tracked set were sampled during this audit and showed no additional issues.
+- **37 silenced `react-hooks/*` lint warnings** across 19 files (React Compiler rule family: `immutability`, `purity`, `refs`, `preserve-manual-memoization`, `set-state-in-effect`), introduced by the `eslint-plugin-react-hooks` 7.0.1 → 7.1.1 bump on 2026-07-24. Documented in `ROADMAP.md` and tracked in the archived repository. Hook dependency arrays outside this tracked set were sampled during this audit and showed no additional issues.
 
 ---
 
@@ -123,12 +139,14 @@ The already-tracked 37 silenced `react-hooks/*` lint warnings (issue #239) are *
 
 ## Follow-up issues opened
 
-| Finding | Issue | Priority |
-|---|---|---|
-| H1 — Sentry Replay unmasked PII | FE #240 | P1 |
-| M1 — Documented vs. actual architecture drift | FE #241 | P2 |
-| M2 — Ad-hoc form validation | FE #242 | P2 |
-| M3 — Orchestration logic in page component | FE #243 | P2 |
-| M4 — Dead legacy service code | FE #244 | P2 |
+One issue per finding was opened in the archived repository:
 
-Issue #239 (37 silenced `react-hooks/*` lint warnings) is already tracked and referenced above, not duplicated.
+| Finding | Priority |
+|---|---|
+| H1 — Sentry Replay unmasked PII | P1 |
+| M1 — Documented vs. actual architecture drift | P2 |
+| M2 — Ad-hoc form validation | P2 |
+| M3 — Orchestration logic in page component | P2 |
+| M4 — Dead legacy service code | P2 |
+
+The 37 silenced `react-hooks/*` lint warnings were already tracked and are referenced above, not duplicated.

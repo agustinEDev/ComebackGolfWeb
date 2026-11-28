@@ -1,86 +1,60 @@
-# 🚀 Sentry Setup on Render
+# Sentry on Render
 
-> Configure Sentry environment variables on Render.com
+Production is a **Render Static Site**. Vite reads the `VITE_*` variables **when it builds**, so they live in
+the Static Site's **Environment** tab and a change only takes effect after a new deploy. The production
+domains are served by two Static Sites (one per domain), and both need the same Sentry variables.
 
-## 🔑 Get Sentry DSN
+## Variables the code reads
 
-1. Go to [sentry.io](https://sentry.io/) → Settings → Projects → Your Project
-2. Navigate to **Client Keys (DSN)**
-3. Copy the DSN (format: `https://...@o...ingest.sentry.io/...`)
+| Variable | Production value | If not set |
+|---|---|---|
+| `VITE_SENTRY_DSN` | The DSN of the frontend project (Sentry → Settings → Projects → Client Keys) | Sentry is not started |
+| `VITE_SENTRY_ENVIRONMENT` | `production` | `development` |
+| `VITE_SENTRY_DEBUG` | `false` | `false` (only the exact string `true` turns it on) |
+| `VITE_SENTRY_TRACES_SAMPLE_RATE` | `0.1` | `1.0` |
+| `VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE` | Leave it unset | `0`: no random sessions are recorded |
+| `VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE` | `1.0` | `1.0`: every session with an error is recorded |
 
-## 🏛️ Configure Render Variables
+The defaults live in [`src/utils/sentrySampleRates.js`](../src/utils/sentrySampleRates.js); the rest of the
+configuration in [`src/sentry.ts`](../src/sentry.ts) and the minimal start-up in `src/main.jsx`. The release
+name comes from the version in `package.json`.
 
-1. Go to [Render Dashboard](https://dashboard.render.com/)
-2. Select your service → **Environment** tab
-3. Add these variables:
+`.env.example` also lists `VITE_SENTRY_PROFILES_SAMPLE_RATE`, `VITE_SENTRY_AUTO_SESSION_TRACKING` and
+`VITE_SENTRY_ATTACH_STACKTRACE`, but no code reads them today.
 
-```bash
-VITE_SENTRY_DSN=https://your-dsn@o...ingest.sentry.io/...
-VITE_SENTRY_ENVIRONMENT=production
-VITE_SENTRY_DEBUG=false
-VITE_SENTRY_TRACES_SAMPLE_RATE=0.1              # 10% transactions
-VITE_SENTRY_PROFILES_SAMPLE_RATE=0.1            # 10% profiles
-# VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE: not set -> 0, only error sessions are recorded (FE #792)
-VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE=1.0    # 100% error sessions
-VITE_SENTRY_AUTO_SESSION_TRACKING=true
-VITE_SENTRY_ATTACH_STACKTRACE=true
-```
+## Privacy
 
-4. Click **Manual Deploy** → **Deploy latest commit**
+Replays mask **all text** and block **all media** in every environment, request and response bodies and
+headers are never recorded (`networkDetailAllowUrls` is empty), and tokens are scrubbed from URLs, events and
+recordings ([`src/utils/sentryScrubbing.js`](../src/utils/sentryScrubbing.js)). Raising the replay rates
+records more sessions, not more content.
 
-## ✅ Verify Setup
+## Changing a value
 
-### Browser Console
-Open DevTools (F12) → Console. Look for:
-```
-🚀 Sentry Initialized
-Environment: production
-Traces Sample: 10%
-```
+1. [Render Dashboard](https://dashboard.render.com/) → the Static Site → **Environment**.
+2. Change the variable (in both Static Sites).
+3. **Manual Deploy** → **Deploy latest commit**: without a new build, nothing changes.
 
-### Sentry Dashboard
-1. Go to sentry.io → Your Project → Issues
-2. Test: Run `throw new Error('Test Sentry');` in console
-3. Error should appear in Sentry within seconds
+If a temporary debugging session needs more traces or recorded sessions, put the value back afterwards: the
+Sentry quota is shared by all events.
 
-## 🏛️ Sample Rate Scenarios
+## Checking that it works
 
-**Critical debugging (temporary):**
-```bash
-VITE_SENTRY_TRACES_SAMPLE_RATE=1.0     # 100%
-VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE=0.5  # 50%
-```
-⚠️ Revert to low values after fixing to avoid high costs.
+- Sentry → the frontend project → **Releases**: the new version shows up once users load it.
+- Sentry → **Issues**: new errors arrive tagged with `environment:production` and the release.
+- The production build strips `console.*` calls, so the browser console says nothing about Sentry.
 
-**High traffic (cost optimization):**
-```bash
-VITE_SENTRY_TRACES_SAMPLE_RATE=0.05    # 5%
-VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE=0.01  # 1%
-```
+## Troubleshooting
 
-## 🆘 Troubleshooting
+**No events at all.** Check that `VITE_SENTRY_DSN` is set in that Static Site and that a deploy ran after
+setting it. The CSP must allow the Sentry ingest host in `connect-src` (see
+[SECURITY_HEADERS.md](SECURITY_HEADERS.md)).
 
-**Sentry not initializing:**
-- Verify variables in Render Environment tab
-- Redeploy after adding variables
-- Check DSN is correct
+**The variable changed but the behaviour did not.** It is read at build time: deploy again. Returning users
+may keep the previous version until the service worker updates.
 
-**Variables not applied:**
-- Clear build cache: Service → Settings → Clear Build Cache
-- Manual Deploy
+## References
 
-**Monitor quotas:**
-- sentry.io → Settings → Subscription → Usage
-- Configure alerts when approaching limit
-
-## 🔐 Security
-
-**Rate Limiting (recommended):**
-1. Sentry.io → Settings → Projects → Client Keys
-2. Configure → Enable Rate Limiting (e.g., 1000 events/min)
-
-## 📚 Resources
-
-- [Render Environment Variables](https://render.com/docs/environment-variables)
-- [Sentry React Docs](https://docs.sentry.io/platforms/javascript/guides/react/)
-- [Sentry Sampling Guide](https://docs.sentry.io/platforms/javascript/configuration/sampling/)
+- [Render: environment variables](https://render.com/docs/environment-variables)
+- [Sentry for React](https://docs.sentry.io/platforms/javascript/guides/react/)
+- [Sentry sampling](https://docs.sentry.io/platforms/javascript/configuration/sampling/)

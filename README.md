@@ -1,488 +1,268 @@
-# 🏆 Comeback Golf - Web Frontend
-
-> Modern web application for managing amateur golf tournaments in Ryder Cup format
-
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-2.0.17-blue?style=for-the-badge&logo=semver)](.)  
-[![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=white)](.)  
-[![Vite](https://img.shields.io/badge/Vite-7.3-646CFF?style=for-the-badge&logo=vite&logoColor=white)](.)  
-[![Tailwind](https://img.shields.io/badge/Tailwind-4-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)](.)  
+<a href="https://www.comebackgolf.com">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="public/brand/wordmark-acid.svg">
+    <source media="(prefers-color-scheme: light)" srcset="public/brand/wordmark-deep.svg">
+    <img alt="Comeback Golf" src="public/brand/wordmark-deep.svg" width="260">
+  </picture>
+</a>
 
-[![Tests](https://img.shields.io/badge/tests-4873%20passing-00C853?style=for-the-badge&logo=vitest&logoColor=white)](.)
-[![Coverage](https://img.shields.io/badge/coverage-78%25%20(all%20of%20src)-success?style=for-the-badge&logo=codecov)](.)
-[![OWASP](https://img.shields.io/badge/OWASP-9.2%2F10-4CAF50?style=for-the-badge&logo=owasp)](https://owasp.org/www-project-top-ten/)
-[![Bundle](https://img.shields.io/badge/bundle-2050%20KB-blueviolet?style=for-the-badge&logo=webpack)](.)
+### Golf among friends
 
-[![Clean Architecture](https://img.shields.io/badge/architecture-Clean%20Architecture-blueviolet?style=for-the-badge)](.)
-[![DDD](https://img.shields.io/badge/design-Domain%20Driven-orange?style=for-the-badge)](.)
-[![CI/CD](https://img.shields.io/badge/CI%2FCD-passing-2088FF?style=for-the-badge&logo=github-actions&logoColor=white)](https://github.com/agustinEDev/ComebackGolfWeb/actions)
-[![License](https://img.shields.io/badge/license-All%20rights%20reserved-lightgrey?style=for-the-badge)](LICENSE)
+Amateur golf tournaments in a Ryder-style team format, quick rounds with friends<br>
+and hole-by-hole scoring that keeps working without coverage.
+
+<a href="https://www.comebackgolf.com"><strong>www.comebackgolf.com</strong></a>
+&nbsp;·&nbsp;
+<a href="https://github.com/agustinEDev/ComebackGolfApi">Backend API</a>
+&nbsp;·&nbsp;
+<a href="CHANGELOG.md">Changelog</a>
+
+<br>
+
+[![Version](https://img.shields.io/badge/version-2.96.0-DDF478?style=flat-square&labelColor=222D24)](CHANGELOG.md)
+[![CI](https://img.shields.io/github/actions/workflow/status/agustinEDev/ComebackGolfWeb/ci-cd.yml?branch=develop&style=flat-square&label=CI&labelColor=222D24&logo=githubactions&logoColor=DDF478)](https://github.com/agustinEDev/ComebackGolfWeb/actions/workflows/ci-cd.yml)
+[![Tests](https://img.shields.io/badge/tests-15%2C257%20passing-DDF478?style=flat-square&labelColor=222D24&logo=vitest&logoColor=DDF478)](#%EF%B8%8F-quality-and-security)
+[![Coverage gate](https://img.shields.io/badge/coverage%20gate-%E2%89%A590%25%20lines-DDF478?style=flat-square&labelColor=222D24)](vite.config.js)
+[![Startup budget](https://img.shields.io/badge/startup%20JS-%E2%89%A4280%20KB%20gzip-DDF478?style=flat-square&labelColor=222D24)](.github/scripts/bundle_budget.py)
+
+[![React](https://img.shields.io/badge/React-19.3-E8DDCE?style=flat-square&labelColor=222D24&logo=react&logoColor=E8DDCE)](https://react.dev)
+[![Vite](https://img.shields.io/badge/Vite-8.3-E8DDCE?style=flat-square&labelColor=222D24&logo=vite&logoColor=E8DDCE)](https://vite.dev)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-4.3-E8DDCE?style=flat-square&labelColor=222D24&logo=tailwindcss&logoColor=E8DDCE)](https://tailwindcss.com)
+[![PWA](https://img.shields.io/badge/PWA-installable-E8DDCE?style=flat-square&labelColor=222D24&logo=pwa&logoColor=E8DDCE)](#-features)
+[![License](https://img.shields.io/badge/license-all%20rights%20reserved-E8DDCE?style=flat-square&labelColor=222D24)](LICENSE)
 
 </div>
 
----
+<br>
 
-## 🌟 Overview
-
-**ComebackGolfWeb** is the frontend SPA for the Comeback Golf platform. Built with **Clean Architecture** and **Domain-Driven Design**, it provides a complete tournament management experience: from creating competitions and scheduling rounds, to real-time scoring and live leaderboards.
-
-### 🎯 Key Highlights
-
-- ✅ **74 API integrations** with the backend REST API
-- ✅ **1,550 tests** passing (100% success rate)
-- ✅ **OWASP Top 10 Score: 9.2/10** - Production-grade security
-- ✅ **Clean Architecture** - 4-layer separation with DDD patterns + Composition Root DI
-- ✅ **22 Value Objects** enforcing domain invariants
-- ✅ **79 Use Cases** covering all business operations
-- ✅ **Bilingual** (English + Spanish) with 14 i18n namespaces
-- ✅ **Bundle: 2,050 KB** (within 2,200 KB CI budget)
-- ✅ **4 CI/CD workflows** - GitHub Actions pipeline
+<table align="center">
+  <tr>
+    <td align="center" width="50%">
+      <img src="public/images/portada/inicio.webp" alt="Home screen with pending actions, quick match, create tournament and handicap figures" width="260"><br>
+      <sub><b>Home</b>: what needs your attention, at a glance</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="public/images/portada/anotacion.webp" alt="Scoring screen of a fourball quick match on hole 1" width="260"><br>
+      <sub><b>Scoring</b>: hole by hole, with the map one tap away</sub>
+    </td>
+  </tr>
+</table>
 
 ---
 
-## 🌐 Backend API
+## Contents
 
-This is the **web frontend**. For the backend REST API, visit:
+- [What it is](#-what-it-is)
+- [Features](#-features)
+- [Architecture](#%EF%B8%8F-architecture)
+- [Tech stack](#-tech-stack)
+- [Getting started](#-getting-started)
+- [Quality and security](#%EF%B8%8F-quality-and-security)
+- [Documentation](#-documentation)
+- [License](#-license)
 
-👉 **[ComebackGolfApi Repository](https://github.com/agustinEDev/ComebackGolfApi)** - FastAPI + PostgreSQL + Clean Architecture (1,282 tests, OWASP 9.4/10)
+## ⛳ What it is
 
----
+**Comeback Golf** is a mobile-first web app for groups of amateur golfers who play together. One person
+sets up the tournament, the captains build their teams, and everyone scores from their own phone on the
+course while the leaderboard updates as the holes come in.
 
-## 🚀 Quick Start
-
-### Prerequisites
-- Node.js 18+
-- npm 9+
-
-### Local Development
-
-```bash
-# Clone repository
-git clone https://github.com/agustinEDev/ComebackGolfWeb.git
-cd ComebackGolfWeb
-
-# Install dependencies
-npm install
-
-# Copy environment template
-cp .env.example .env
-# Edit .env with your configuration
-
-# Start development server
-npm run dev
-
-# Access application
-open http://localhost:5173
-```
-
-**Environment Variables:**
-```bash
-VITE_API_BASE_URL=http://localhost:8000
-VITE_SENTRY_DSN=your-sentry-dsn
-VITE_SENTRY_ENVIRONMENT=development
-```
-
-### Production Build
-
-```bash
-npm run build     # Production build
-npm run preview   # Preview locally
-```
-
----
-
-## 📚 Documentation
-
-| Document | Description |
-|----------|-------------|
-| [ROADMAP.md](ROADMAP.md) | Sprint planning (7 weeks, 5 sprints) |
-| [CHANGELOG.md](CHANGELOG.md) | Detailed version history |
-| [ADRs](docs/architecture/decisions/) | Architecture Decision Records (11 total) |
-| [docs/presentation.md](docs/presentation.md) | Academic project presentation |
-| [docs/INTEGRATION_TESTS.md](docs/INTEGRATION_TESTS.md) | Integration tests guide |
-| [docs/BRANCH_PROTECTION.md](docs/BRANCH_PROTECTION.md) | Branch protection rules |
-
----
-
-## 🛠️ Tech Stack
-
-<div align="center">
-
-| Category | Technologies |
-|----------|-------------|
-| **Framework** | React 19 |
-| **Build Tool** | Vite 7.3 |
-| **Styling** | Tailwind CSS 4 |
-| **Routing** | React Router 7 |
-| **State (Global)** | React Context (AuthContext) |
-| **State (Server)** | Fetch API + custom hooks |
-| **Validation** | Ad-hoc JS per form (`src/utils/validation.js`) |
-| **Drag & Drop** | @dnd-kit |
-| **i18n** | react-i18next 16 (EN + ES) |
-| **Monitoring** | Sentry 10 |
-| **Testing** | Vitest 4 + Playwright |
-| **Linting** | ESLint 9 |
-
-</div>
-
----
+This repository is the **web frontend**: a React single-page app, installable as a PWA, that talks to the
+[ComebackGolfApi](https://github.com/agustinEDev/ComebackGolfApi) REST backend. It is available in
+**Spanish and English**, with a light and a dark theme.
 
 ## ✨ Features
 
-### User Management
-- ✅ Registration with email verification
-- ✅ JWT authentication (httpOnly cookies)
-- ✅ Profile management (personal info + security)
-- ✅ Handicap system (manual + RFEG integration for Spanish players)
-- ✅ Password reset with secure tokens
-- ✅ Device fingerprinting with remote revocation
-- ✅ Multi-tab logout via Broadcast Channel API
+| | Feature | What it does |
+|:-:|---|---|
+| 🏆 | **Ryder-style tournaments** | Two teams over several rounds of foursomes, fourball and singles, with match play scoring and team points. |
+| 📋 | **Stroke play competitions** | Individual competitions scored as Stableford or Medal. |
+| ✉️ | **Captains' envelopes and draft room** | Each captain hands in a sealed playing order that is opened only when both are in, and teams can be picked turn by turn in a live draft the whole group can follow. |
+| ⚡ | **Quick matches** | A round with friends without creating a tournament: pick the course, the players and who keeps the score. |
+| ✍️ | **Hole-by-hole scoring** | Everyone scores from their phone. Without coverage, scores are kept on the device and sent when the connection comes back. |
+| 🗺️ | **Hole map** | Satellite view of each hole (Spanish PNOA orthophoto, with newer regional imagery where available) and GPS distances. |
+| 🏌️ | **Handicaps** | WHS playing handicaps calculated per format, with official handicap lookup for players federated in Spain. |
+| 📊 | **Leaderboards** | Live standings during the round, with public links to share them. |
+| 👥 | **Friends and activity** | Friend requests, an activity feed of rounds and tournaments, and the unread count on the app icon. |
+| 🗂️ | **Golf courses** | A shared course catalogue with tees and hole data, reviewed by administrators before it goes live. |
+| 🔐 | **Accounts** | Email verification, Google sign-in, password reset and a list of signed-in devices that can be revoked remotely. |
+| 📱 | **Installable app** | PWA with an offline fallback page, an install prompt and its own icon on the home screen. |
 
-### Role-Based Access Control
-- ✅ **RBAC Foundation (v2.0.0)**: Simplified three-tier role system (ADMIN, CREATOR, PLAYER)
-- ✅ `RoleGuard` HOC for route protection
-- ✅ Per-competition role resolution via `useUserRoles(competitionId)` hook
-- ✅ Role badges with color coding (Purple: Admin, Blue: Creator, Green: Player)
+## 🏛️ Architecture
 
-### Tournament Management
-- ✅ Create and configure competitions with custom team names
-- ✅ Enrollment flow with tee category selection (5 categories)
-- ✅ Competition state machine: DRAFT → ACTIVE → CLOSED → IN_PROGRESS → COMPLETED (+ reverse transitions)
-- ✅ **Competition ↔ GolfCourse M2M** (v2.0.2) - Multi-course tournaments
+The code follows **Clean Architecture** with **Domain-Driven Design**. The layers are not just a convention:
+the contracts in [`.dependency-cruiser.cjs`](.dependency-cruiser.cjs) are checked on every push by the
+`Architecture` job, and a forbidden import fails it.
 
-### Schedule & Matches (Sprint 2)
-- ✅ Create rounds with configurable formats (Singles, Fourball, Foursomes)
-- ✅ Session-based scheduling (MORNING / AFTERNOON / EVENING)
-- ✅ Automatic and manual team assignment with drag & drop (@dnd-kit)
-- ✅ Match generation with WHS handicap calculations
-- ✅ Walkover declaration with reason tracking
-- ✅ Player reassignment between matches
+```mermaid
+flowchart TB
+    UI["<b>Interface</b><br/>pages · components · hooks · contexts"]
+    COMP["<b>composition</b><br/>composition root: wires use cases to implementations"]
+    APP["<b>application</b><br/>use cases · assemblers"]
+    DOM["<b>domain</b><br/>entities · value objects · domain services · repository interfaces"]
+    INFRA["<b>infrastructure</b><br/>API repositories · mappers (anti-corruption layer)"]
+    HTTP["<b>infrastructure/http</b><br/>API client · session refresh · CSRF token"]
+    SRV["<b>services</b><br/>shared session · offline queue · local cache"]
+    API[("ComebackGolfApi<br/>REST")]
 
-### Golf Course Management
-- ✅ Full CRUD with admin approval workflow (request → approve/reject)
-- ✅ Tee categories: Championship, Amateur, Senior, Forward, Junior
-- ✅ 18-hole validation with stroke index and par constraints
-- ✅ Clone-based update system for approved courses
+    UI --> COMP
+    UI --> SRV
+    COMP --> APP
+    COMP --> INFRA
+    APP --> DOM
+    INFRA -. implements .-> DOM
+    INFRA --> HTTP
+    SRV --> HTTP
+    HTTP --> API
 
-### What's New
-
-**v2.0.17 (Scoring Improvements - Jul 2026)**
-- ✅ **Handicap Revert to RFEG**: Creator/admin can clear a player's custom handicap from the enrollment edit form, reverting to their official RFEG handicap (Spanish players only)
-- ✅ **Auto Handicap Refresh on Login**: Spanish players get a silent daily RFEG lookup; others see the handicap request modal
-- ✅ **Admin Full Scoring Access**: Admins can submit scores, scorecards, and concede any match without being a player
-- ✅ **Playing Handicap Limit**: Optional per-competition cap (1–54) on calculated playing handicap
-- ✅ **Best Ball Tie Display**: Shows both tied players' names on best-ball holes in Fourball
-- ✅ **Admin Badge**: Header and profile dropdown show an "Admin" badge for admin accounts
-- ✅ **Button Groups**: Golf course and competition forms replace `<select>` inputs with button groups
-- ✅ **Progressive Web App**: Installable app with offline fallback page and install prompt
-
-**v2.0.12 (Sprint 4 - Live Scoring - Feb 2026)**
-- ✅ **Live Scoring UI**: Hole-by-hole annotation with 3-tab interface (Input, Scorecard, Leaderboard)
-- ✅ **Marker System**: Reciprocal markers (singles) + distributed markers (team formats)
-- ✅ **Score Validation**: Visual indicators for match/mismatch/pending states
-- ✅ **Independent Scorecard Submission**: Own and marker scores lock independently
-- ✅ **Match Concede**: Early end modal with concession tracking
-- ✅ **Offline Support**: Queue scores when offline, auto-sync on reconnect
-- ✅ **Session Lock**: User-scoped multi-device conflict prevention
-- ✅ **Dashboard Pending Actions**: Card showing pending invitations, enrollment requests, upcoming matches
-- ✅ **Invitation Auto-redirect**: Navigate to competition after accepting invitation
-- ✅ **User Search Invitations**: Search registered users by name/email for invitations
-- ✅ **Upcoming Matches Page**: Player view of scheduled/in-progress matches across competitions
-- ✅ **Reverse Status Transitions**: Reopen enrollments (CLOSED→ACTIVE) and revert to closed (IN_PROGRESS→CLOSED)
-- ✅ **Admin Dropdown**: Admin links moved from nav bar to user profile dropdown
-- ✅ **Walkover in Leaderboard**: Walkover matches displayed in completed section
-- ✅ **Creator Info**: Competition detail shows organizer name
-
-**v2.0.11 (Sprint 3 - Invitations - Feb 2026)**
-- ✅ **Invitation System**: Email invitations with secure tokens
-- ✅ **Invitation Management**: CRUD operations for creators
-- ✅ **Response Flow**: Accept/decline with automated enrollment
-
-**v2.0.6 (Sprint 2 - Schedule & Matches - Feb 8, 2026)**
-- ✅ **Schedule Management**: Round CRUD, match generation, team assignment
-- ✅ **Enrollment Tee Category**: 5-category tee selection during enrollment
-- ✅ **i18n Toast Migration**: All messages use translation keys
-- ✅ **Bundle Optimization**: CDN flags replacing 239 KB SVG bundle
-
-**v2.0.4 (Feb 3, 2026)**
-- ✅ **Subdomain Architecture**: Cloudflare configuration for `www` + `api` subdomains
-
----
-
-## 🏗️ Architecture
-
-### Clean Architecture + DDD
-
-```
-src/
-├── domain/              # Entities, VOs, Repository Interfaces
-│   ├── entities/        #   8 domain entities
-│   ├── value_objects/   #  22 value objects
-│   └── repositories/    #   Repository interfaces (ports)
-├── application/         # Use Cases (79 total)
-│   └── use_cases/       #   7 domain areas
-├── infrastructure/      # API Repos, Mappers (ACL)
-│   ├── repositories/    #  12 API repositories (adapters)
-│   └── mappers/         #   Anti-corruption layer
-├── pages/               # 30 route pages
-│   ├── admin/           #   Users, golf course approval
-│   ├── creator/         #   Schedule, invitations management
-│   └── public/          #   Leaderboard, Pricing, Contact, Terms, Privacy, Cookies
-├── components/          # 52 reusable components
-├── hooks/               # Custom React hooks (incl. polling: useScoring, useQuickMatchScoring)
-├── contexts/            # React Context (AuthContext — only global state)
-├── composition/         # Dependency injection (Composition Root)
-├── i18n/                # 14 namespaces × 2 languages
-└── utils/               # Sentry, validation, token refresh
+    classDef core fill:#222D24,stroke:#DDF478,color:#DDF478
+    classDef edge fill:#E8DDCE,stroke:#222D24,color:#222D24
+    classDef ext fill:#FFFFFF,stroke:#222D24,color:#222D24,stroke-dasharray:4 3
+    class DOM,APP core
+    class UI,COMP,INFRA,HTTP,SRV edge
+    class API ext
 ```
 
-**Composition Root** (`src/composition/index.js`) wires all dependencies at startup, keeping layers fully decoupled.
+Main rules (the full set is in [`.dependency-cruiser.cjs`](.dependency-cruiser.cjs)):
 
-### Design Patterns
-- **Repository** - Data access abstraction (domain interfaces → infrastructure implementations)
-- **Anti-Corruption Layer (ACL)** - Mappers translating snake_case API → camelCase domain
-- **Value Objects** - Encapsulated validation logic (22 VOs)
-- **Composition Root** - DI container wiring all layers
-- **Use Cases** - Single responsibility per business operation
-- **Guard Components** - `RoleGuard`, `ProtectedRoute` for access control
+| Rule checked in CI | Meaning |
+|---|---|
+| `domain-is-pure` | The domain depends on nothing else in `src/`, nor on React. |
+| `application-only-uses-domain` | Use cases depend only on the domain (and `utils`). |
+| `infrastructure-does-not-reach-up` | Infrastructure implements the domain repositories and never imports use cases or the composition root. |
+| `ui-goes-through-composition` | Pages, components and hooks reach use cases only through `src/composition`. |
+| `core-only-reaches-allowed-packages` | Domain and use cases may only import an allow-listed set of npm packages (today, `uuid`). |
+| `no-circular` | No circular dependencies between modules. |
 
-### Key Principles
-- **SOLID** compliance
-- **Dependency Inversion** - Domain never imports Infrastructure
-- **Testability** - 85%+ coverage on business logic
-- **Immutability** - Value Objects are immutable
-- **Separation of Concerns** - 4 strict layers
+The JavaScript core (`domain`, `application`, `infrastructure`) is type-checked with `checkJs` against its
+JSDoc (`npm run typecheck:nucleo`). The decisions behind the design are in the
+[ADRs](docs/architecture/decisions/).
 
-### Codebase Metrics
+## 🧰 Tech stack
 
-| Metric | Value |
-|--------|-------|
-| Source files | 328 |
-| Lines of code | ~50,000 |
-| Test files | 130 |
-| Domain entities | 8 |
-| Value objects | 22 |
-| Use cases | 79 |
-| API repositories | 12 |
-| Components | 52 |
-| Pages | 30 |
+| Area | Tools |
+|---|---|
+| **UI** | React 19 · React Router 8 · Tailwind CSS 4 · Framer Motion · Lucide icons |
+| **Build** | Vite 8 · `vite-plugin-pwa` (Workbox) · `vite-plugin-sri3` (Subresource Integrity) |
+| **Maps** | MapLibre GL |
+| **Drag and drop** | dnd-kit |
+| **i18n** | i18next + react-i18next, 19 namespaces in Spanish and English |
+| **Monitoring** | Sentry: errors, traces and replays of sessions with an error, with all text masked |
+| **Tests** | Vitest + Testing Library + jsdom · Playwright for end-to-end |
+| **Code quality** | ESLint 9 · Prettier · TypeScript 7 (`checkJs`) · dependency-cruiser |
 
----
+## 🚀 Getting started
 
-## 🧪 Testing
-
-### Test Statistics (v2.0.12)
-
-| Category | Tests | Status | Coverage |
-|----------|-------|--------|----------|
-| **Total** | **1,550** | ✅ 100% passing | 85%+ |
-| Domain | ~424 | ✅ 100% | Entity invariants, VO validation |
-| Application | ~434 | ✅ 100% | Use case orchestration |
-| Infrastructure | ~261 | ✅ 100% | Mapper transformations |
-| Hooks/Utils | ~196 | ✅ 100% | Custom hooks, utilities |
-| Components/Pages | ~235 | ✅ 100% | UI components, integration |
-
-### Quality Gates
-
-| Gate | Threshold | Current |
-|------|-----------|---------|
-| Tests | 100% pass | 4,873/4,873 |
-| Coverage (all of `src/`) | lines >= 78%, statements >= 77.5%, functions >= 73.5%, branches >= 74% | 78.5 / 78.1 / 74.1 / 74.8 |
-| Startup JS, gzip (what `index.html` loads) | <= 280 KB, and <= 320 KB per chunk | 270 KB |
-| ESLint errors | 0 | 0 |
-
-**Test Types**:
-- Unit tests (domain + application logic)
-- Infrastructure tests (mapper transformations)
-- Hook tests (custom React hooks)
-- E2E tests (full user flows with Playwright)
-
----
-
-## 🔐 Security
-
-### OWASP Top 10 2021 Score: 9.2/10 ⭐
-
-<div align="center">
-
-| Feature | Implementation |
-|---------|---------------|
-| **Authentication** | httpOnly cookies (access 15min + refresh 7 days) |
-| **Token Management** | Automatic refresh with 401 interceptor |
-| **Input Validation** | 3-layer: HTML constraints + ad-hoc JS validation + Backend Pydantic |
-| **Session Security** | Multi-tab logout via Broadcast Channel API |
-| **Device Control** | Fingerprinting with remote revocation |
-| **Asset Integrity** | SRI (Subresource Integrity) |
-| **Monitoring** | Sentry error tracking + session replay |
-| **Password Policy** | 12-64 chars and 72 bytes (new passwords), uppercase + lowercase + numbers + symbol |
-
-</div>
-
-**Security Features Timeline**:
-- **v1.8.0**: httpOnly cookies, session timeout, Broadcast Channel logout
-- **v1.11.0**: Password reset system with secure tokens
-- **v1.13.0**: Device fingerprinting with remote revocation
-- **v2.0.4**: SRI (Subresource Integrity) for production assets
-
----
-
-## 🔄 CI/CD Pipeline
-
-### GitHub Actions Workflows
-
-| Workflow | Description |
-|----------|-------------|
-| **`ci-cd.yml`** | Main pipeline, two columns. First (all required): lint, types, architecture, OWASP (Semgrep), npm audit, secret scanning, licenses, dependency review, signed commits (every commit, verified by GitHub), outdated deps. Second, only if the first passes: tests + coverage, build + bundle budget |
-| **`pr-checks.yml`** | Conventional Commits on the PR title |
-| **`auto-fix-pr-title.yml`** | Fixes Dependabot PR titles to the convention |
-| **`snyk-review.yml`** | Snyk review: weekly and on every PR to `main` (release/hotfix) |
-
-**Branch Protection**:
-- All CI checks must pass before merge
-- GPG-signed commits required on `main` and `develop`
-- Minimum 1 approving review for PRs
-- No force push or deletion on `main`
-
----
-
-## 🌍 Internationalization
-
-**14 namespaces** with full English + Spanish coverage:
-
-`auth` | `common` | `competitions` | `contact` | `dashboard` | `devices` | `golfCourses` | `invitations` | `landing` | `legal` | `pricing` | `profile` | `schedule` | `scoring`
-
-- ✅ Automatic browser language detection
-- ✅ localStorage persistence
-- ✅ Language switcher with country flags
-- ✅ Pluralization support (`_one`/`_other`)
-- ✅ Cross-namespace access in modals
-
-**Adding a language:** Create `locales/fr/*.json` + import in `i18n/config.js`
-
----
-
-## 📡 API Integration
-
-This frontend consumes **82 REST API endpoints** organized across 15 domain areas:
-
-| Domain | Endpoints | Description |
-|--------|-----------|-------------|
-| Authentication | 11 | Register, login, tokens, password reset, account unlock |
-| Users | 5 | Profile, security, role queries, user search |
-| Devices | 2 | Fingerprinting, remote revocation |
-| Handicaps | 3 | Manual + RFEG integration |
-| Competitions | 13 | CRUD + state machine transitions + reverse transitions |
-| Competition-GolfCourse | 4 | Add/remove/reorder courses in competition |
-| Enrollments | 8 | Request, approve, reject, withdraw |
-| Golf Courses | 10 | CRUD + admin approval workflow |
-| Schedule & Rounds | 4 | Round CRUD, schedule queries |
-| Matches | 4 | Status, walkover, player reassignment |
-| Teams & Generation | 3 | Team assignment, match generation |
-| Invitations | 5 | Send, list, respond to invitations |
-| Scoring | 5 | Scoring view, hole scores, scorecard, leaderboard, concede |
-| Countries | 2 | Country list, adjacent countries |
-| Support | 1 | Public contact form (`POST /api/v1/support/contact`) |
-
----
-
-## 💻 Development
+**Requirements:** Node.js 22 (see [`.nvmrc`](.nvmrc)) and, for anything beyond the public pages, a running
+[ComebackGolfApi](https://github.com/agustinEDev/ComebackGolfApi).
 
 ```bash
-npm install              # Install dependencies
-npm run dev              # Dev server (http://localhost:5173)
-npm run build            # Production build
-npm test                 # Unit tests (Vitest)
-npm test -- --coverage   # Coverage report
-npm run test:e2e         # E2E tests (Playwright)
-npm run lint             # ESLint
+git clone https://github.com/agustinEDev/ComebackGolfWeb.git
+cd ComebackGolfWeb
+npm ci
+cp .env.example .env      # VITE_API_BASE_URL=http://localhost:8000 by default;
+                          # empty VITE_SENTRY_DSN and the TEST_* values unless you use them
+npm run dev               # http://localhost:5173
 ```
 
-### Conventions
+| Command | What it does |
+|---|---|
+| `npm run dev` | Development server with hot reload |
+| `npm run build` · `npm run preview` | Production build in `dist/`, and a local preview of it |
+| `npm test` | Vitest in watch mode; `npm test -- --run --coverage` runs it once with coverage, as CI does |
+| `npm run test:e2e:smoke` | Playwright tests tagged `@smoke`, which need no backend |
+| `npm run test:e2e` | Every Playwright test (some need the backend and a test user) |
+| `npm run lint` · `npm run format:check` | ESLint with zero warnings allowed, and Prettier |
+| `npm run lint:architecture` | Clean Architecture contracts (dependency-cruiser) |
+| `npm run typecheck:nucleo` | Type check of the JavaScript core |
 
-- **Commits**: `<type>(<scope>): <UPPERCASE subject>` ([Conventional Commits](https://www.conventionalcommits.org/))
-- **Branches**: GitFlow (`main`, `develop`, `feature/*`, `release/*`, `hotfix/*`)
-- **GPG signing**: Required on `main` and `develop`
+Main environment variables (all of them are listed in [`.env.example`](.env.example)):
 
----
+| Variable | Purpose |
+|---|---|
+| `VITE_API_BASE_URL` | Backend URL |
+| `VITE_GOOGLE_CLIENT_ID` · `VITE_GOOGLE_REDIRECT_URI` | Google sign-in |
+| `VITE_SENTRY_DSN` · `VITE_SENTRY_ENVIRONMENT` · `VITE_SENTRY_TRACES_SAMPLE_RATE` · `VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE` · `VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE` | Sentry; without a DSN it is not started (the `.env.example` placeholder is not empty: clear it) |
 
-## 📊 Project Roadmap
+The full local setup, backend included, is in [SETUP.md](SETUP.md).
 
-### Current Version: v2.0.12 (Sprint 4 - Live Scoring)
+## 🛡️ Quality and security
 
-**Latest Features** (Sprint 4 - Feb 2026):
-- **Live Scoring System**: Hole-by-hole annotation with marker validation
-- **Score Input UI**: 3-tab interface (Input, Scorecard, Leaderboard)
-- **Independent Scorecard Submission**: Partial locking (own vs marker scores)
-- **Match Concede Flow**: Early end with concession tracking
-- **Offline Support**: Queue scores when offline, auto-sync on reconnect
-- **Session Management**: User-scoped multi-device conflict prevention
-- **Dashboard Pending Actions**: Actionable items card (invitations, enrollments, matches)
-- **User Search Invitations**: Tabbed modal with user search + email invite
-- **Total: 1,550 tests** passing - **Bundle: 1,487 KB**
+Every push to `main`, `develop`, `feature/**`, `release/**` or `hotfix/**`, and every pull request to `develop` or `main`, runs the
+[CI/CD pipeline](.github/workflows/ci-cd.yml) in two columns: static analysis and security first, then tests and builds, which only run if the first column passes. Each job
+leaves a summary card saying what it checked. Details in
+[`.github/workflows/README.md`](.github/workflows/README.md).
 
-### Sprint History
+<table>
+<tr>
+<td valign="top" width="50%">
 
-**Sprint Breakdown**:
-1. ✅ **Sprint 1** (Jan 27-31): Golf Courses + RBAC
-2. ✅ **Sprint 2** (Feb 3-8): Schedule & Matches + Enrollment
-3. ✅ **Sprint 3** (Feb 2026): Invitations System
-4. ✅ **Sprint 4** (Feb 2026): Live Scoring (COMPLETE)
-5. 🔄 **Sprint 5** (Mar 2026): Public Leaderboards
+**Code**
 
-See [ROADMAP.md](ROADMAP.md) for complete version planning.
+- 🧪 **15,257 Vitest tests**, with coverage gates of 90% lines, 89.5% statements and 86.5% functions and branches
+- 🎭 Playwright smoke tests in Chromium
+- 🔍 ESLint (zero warnings) and Prettier
+- 📝 TypeScript checks, including `checkJs` on the core
+- 🏛️ Architecture contracts (dependency-cruiser)
+- 📦 Startup JS budget: ≤ 280 KB gzip, ≤ 320 KB per chunk
+- 🚀 A second build that repeats Render's (its Node, its npm, `npm install`) and serves the result as a static site
 
----
+</td>
+<td valign="top" width="50%">
 
-## 🤝 Contributing
+**Security**
 
-We welcome contributions! Please follow these guidelines:
+- 🛡️ Semgrep with the OWASP Top 10, React and JavaScript rules; CodeQL on GitHub
+- 🔐 Secret scanning with TruffleHog and gitleaks over the whole history
+- 🔒 `npm audit`, licence allow-list and Dependency Review on pull requests
+- 🐍 Snyk review every week and on every pull request to `main`
+- 🔏 Every commit signed and verified by GitHub
+- 📌 Third-party actions pinned by commit SHA; Dependabot waits 5 days (3 for Docker images) before proposing a new version
+- 🌐 Production headers (CSP with no inline scripts, HSTS, COOP, CORP) compared every day with [the expected set](.github/scripts/cabeceras_de_produccion.json)
 
-### Code Standards
-- Follow **Clean Architecture** and **DDD** principles
-- Write **tests** for all new features (>85% coverage)
-- Follow the existing ad-hoc per-form validation pattern (`src/utils/validation.js`)
-- Follow **ESLint** rules (enforced in CI)
-- All user-facing strings must use **i18n** keys
+</td>
+</tr>
+</table>
 
-### Pull Request Process
-1. Fork the repository
-2. Create feature branch: `git checkout -b feature/amazing-feature`
-3. Commit changes with GPG signature: `git commit -S -m "feat: ADD amazing feature"`
-4. Write/update tests: `npm test`
-5. Push branch: `git push origin feature/amazing-feature`
-6. Open Pull Request with description
+In the app itself: the session lives in **httpOnly cookies** with a CSRF token, the built assets carry
+**Subresource Integrity**, the CSP allows no inline scripts, Google sign-in uses **PKCE**, and Sentry masks
+all text in replays and scrubs tokens from URLs. How the headers are set up in production is in
+[docs/SECURITY_HEADERS.md](docs/SECURITY_HEADERS.md). To report a vulnerability, use the contact in
+[`security.txt`](public/.well-known/security.txt).
 
----
+## 📚 Documentation
+
+| Document | Contents |
+|---|---|
+| [SETUP.md](SETUP.md) | Local development with backend and frontend |
+| [CHANGELOG.md](CHANGELOG.md) | Every release, in detail |
+| [docs/architecture/decisions](docs/architecture/decisions/) | Architecture Decision Records |
+| [.github/workflows/README.md](.github/workflows/README.md) | What each CI job checks |
+| [docs/BRANCH_PROTECTION.md](docs/BRANCH_PROTECTION.md) | GitFlow, protected branches and release tags |
+| [docs/SECURITY_HEADERS.md](docs/SECURITY_HEADERS.md) | Production security headers (in Spanish) |
+| [docs/RENDER_SETUP.md](docs/RENDER_SETUP.md) | Sentry variables on Render |
+| [docs/INTEGRATION_TESTS.md](docs/INTEGRATION_TESTS.md) | Playwright tests against a real backend |
+| [ROADMAP.md](ROADMAP.md) | Planning history of the 2.0 series |
+
+Kept for reference only, with their date: the [July 2026 audit](docs/AUDIT_FRONTEND_2026-07.md), the
+[first Sentry setup](docs/SENTRY_IMPLEMENTATION_SUMMARY.md) (November 2025) and the
+[project presentation](docs/presentation.md) (February 2026).
+
+**Conventions:** GitFlow (`feature/*`, `fix/*` and `docs/*` into `develop`; `release/vX.Y.Z` and `hotfix/*` into `main`, then merged back into `develop`), signed
+commits, and [Conventional Commits](https://www.conventionalcommits.org/). Commit subjects are written in
+uppercase; pull request titles are checked in CI as `type(scope): Subject`, with a lowercase type.
 
 ## 📄 License
 
-Copyright (c) 2025-2026 Agustín Estévez Domínguez. **All rights reserved.** The source code is published for viewing only; no licence is granted to use, copy, modify or distribute it without the author's written permission. Versions published before 20 October 2026 remain under the MIT License. See [LICENSE](LICENSE).
+Copyright © 2025-2026 Agustín Estévez Domínguez. **All rights reserved.**
 
----
-
-## 👨‍💻 Author & Contact
-
-**Agustin Estevez Dominguez**
-- GitHub: [@agustinEDev](https://github.com/agustinEDev)
-- Repository: [ComebackGolfWeb](https://github.com/agustinEDev/ComebackGolfWeb)
-- Issues: [Report a bug](https://github.com/agustinEDev/ComebackGolfWeb/issues)
-
----
-
-## 🙏 Acknowledgments
-
-- **React** - Modern UI library for building user interfaces
-- **Vite** - Next generation frontend build tool
-- **Tailwind CSS** - Utility-first CSS framework
-- **R&A** - Official Rules of Golf
-- **USGA** - World Handicap System (WHS)
-
----
+The source code is published **for viewing only**: no licence is granted to use, copy, modify or distribute it
+without the author's written permission. Versions published before 20 October 2026 in the predecessor
+repository remain under the MIT License. Third-party components keep their own licences. See [LICENSE](LICENSE).
 
 <div align="center">
-
-### ⭐ Star this repository if you find it useful!
-
-
+<br>
+<sub>Golf among friends · <a href="mailto:hola@comebackgolf.com">hola@comebackgolf.com</a></sub>
 </div>

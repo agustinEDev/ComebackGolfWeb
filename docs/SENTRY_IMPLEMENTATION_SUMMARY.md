@@ -1,21 +1,28 @@
 # 🎯 Implementation Summary: Advanced Sentry
 
-> Complete documentation of the customization and advanced implementation of Sentry in the Comeback Golf Web project
+> **Historical document (November 2025, version 1.6.0).** It records how Sentry was first set up and is kept
+> for reference; much of it has changed since. What holds **today** (v2.96.0, November 2026):
+>
+> - Replays mask **all text** and block **all media** in every environment; the `.sensitive` / `.private`
+>   classes described below are no longer used.
+> - No random sessions are recorded (`VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE` defaults to `0`); every
+>   session with an error is.
+> - The code reads only `VITE_SENTRY_DSN`, `VITE_SENTRY_ENVIRONMENT`, `VITE_SENTRY_DEBUG` and the three
+>   `VITE_SENTRY_*_SAMPLE_RATE` variables for traces and replays. Profiles, auto session tracking and attach
+>   stack trace variables are not read.
+> - Tokens are scrubbed from events, breadcrumbs, spans and recordings by `src/utils/sentryScrubbing.js`.
+> - `src/utils/sentryHelpers.js` keeps only `setUserContext()`, `clearUserContext()` and `captureError()`.
+> - The feedback widget was removed.
+>
+> For the current setup see [RENDER_SETUP.md](RENDER_SETUP.md), `src/sentry.ts`, `src/main.jsx` and
+> `src/utils/sentrySampleRates.js`.
+
+**Original description:** complete documentation of the customization and advanced implementation of Sentry
+in the Comeback Golf Web project.
 
 **Implementation Date:** November 26, 2025
 **Project Version:** 1.6.0+
 **Implemented by:** Agustín Estévez
-
----
-
-## 📝 Table of Contents
-
-1. [Objectives Achieved](#objectives-achieved)
-2. [Created/Modified Files](#createdmodified-files)
-3. [Implemented Features](#implemented-features)
-4. [Configuration by Environment](#configuration-by-environment)
-5. [Quick Usage Guide](#quick-usage-guide)
-6. [Recommended Next Steps](#recommended-next-steps)
 
 ---
 
@@ -43,8 +50,8 @@
 ### ✅ Objective 4: Security and Privacy
 - [x] Sensitive data filtering (passwords, tokens)
 - [x] Header sanitization (Authorization, Cookie)
-- [x] Masking of elements with `.sensitive` class
-- [x] Blocking of elements with `.private` class
+- [x] Masking of elements with `.sensitive` class (since replaced by masking all text)
+- [x] Blocking of elements with `.private` class (since replaced by blocking all media)
 - [x] Ignoring browser extension errors
 
 ### ✅ Objective 5: Performance Monitoring
@@ -73,7 +80,7 @@
 
 #### 1. `src/utils/sentryHelpers.js` (450 lines)
 
-> **Update (Oct 2026, FE #244):** only `setUserContext()`, `clearUserContext()` and `captureError()` remain. The module tags, business contexts, breadcrumbs, `captureMessage()` and `sanitizeSensitiveData()` helpers listed below were never used and were removed, so the examples that call them no longer apply.
+> **Update (Oct 2026):** only `setUserContext()`, `clearUserContext()` and `captureError()` remain. The module tags, business contexts, breadcrumbs, `captureMessage()` and `sanitizeSensitiveData()` helpers listed below were never used and were removed, so the examples that call them no longer apply.
 
 **Purpose:** Utilities for working with Sentry
 
@@ -125,7 +132,7 @@
 - Added advanced integrations:
   - `browserTracingIntegration` with Web Vitals
   - `replayIntegration` with configured privacy
-  - ~~`feedbackIntegration` (optional)~~: removed on 2 Oct 2026 (FE #792), the app has its own channel to report problems
+  - ~~`feedbackIntegration` (optional)~~: removed on 2 Oct 2026, the app has its own channel to report problems
 - Added configuration validation (doesn't initialize without DSN)
 - Added `beforeSend` and `beforeSendTransaction` hooks for filtering
 - Added `beforeBreadcrumb` hook for sanitization
@@ -263,17 +270,16 @@ export default Sentry.withProfiler(App);
 
 ### 3. Intelligent Session Replay
 
-**Before:**
-- No random sessions recorded (since 2 Oct 2026, FE #792)
+**Before (2025):**
 - 100% of error sessions recorded
 - No privacy configuration
 
-**Now:**
-- ✅ Differentiated sample rates (10% dev, 5% prod for normal sessions)
+**Now (updated November 2026):**
+- ✅ No random sessions recorded in any environment
 - ✅ 100% of error sessions always recorded
-- ✅ Masking of elements with `.sensitive` class
-- ✅ Blocking of elements with `.private` class
-- ✅ Advanced privacy configuration
+- ✅ All text masked and all media blocked in every environment
+- ✅ Request and response bodies and headers never recorded
+- ✅ Tokens scrubbed from the recorded URLs
 
 ### 4. Enriched User Context
 
@@ -356,7 +362,7 @@ VITE_SENTRY_ENVIRONMENT=development
 VITE_SENTRY_DEBUG=true
 VITE_SENTRY_TRACES_SAMPLE_RATE=1.0          # 100%
 VITE_SENTRY_PROFILES_SAMPLE_RATE=1.0        # 100%
-VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE=0   # no random sessions (FE #792)
+VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE=0   # no random sessions
 VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE=1.0 # 100%
 ```
 
@@ -364,7 +370,7 @@ VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE=1.0 # 100%
 - All errors captured
 - All transactions monitored
 - Debug logs in console
-- No random sessions recorded (since 2 Oct 2026, FE #792)
+- No random sessions recorded (since 2 Oct 2026)
 - 100% of error sessions recorded
 
 ### Production (Render)
@@ -376,7 +382,7 @@ VITE_SENTRY_ENVIRONMENT=production
 VITE_SENTRY_DEBUG=false
 VITE_SENTRY_TRACES_SAMPLE_RATE=0.1          # 10%
 VITE_SENTRY_PROFILES_SAMPLE_RATE=0.1        # 10%
-# VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE not set -> 0 (FE #792)
+# VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE not set -> 0
 VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE=1.0 # 100%
 ```
 
@@ -384,7 +390,7 @@ VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE=1.0 # 100%
 - All errors captured
 - 10% of transactions monitored (enough for analysis)
 - No debug logs in console
-- No random sessions recorded (since 2 Oct 2026, FE #792)
+- No random sessions recorded (since 2 Oct 2026)
 - 100% of error sessions recorded (critical)
 
 ---
@@ -393,7 +399,7 @@ VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE=1.0 # 100%
 
 ### For Developers - Common Use Cases
 
-> **Update (Oct 2026, FE #244):** only `setUserContext()`, `clearUserContext()` and `captureError()` remain. The module tags, business contexts, breadcrumbs, `captureMessage()` and `sanitizeSensitiveData()` helpers listed below were never used and were removed, so the examples that call them no longer apply.
+> **Update (Oct 2026):** only `setUserContext()`, `clearUserContext()` and `captureError()` remain. The module tags, business contexts, breadcrumbs, `captureMessage()` and `sanitizeSensitiveData()` helpers listed below were never used and were removed, so the examples that call them no longer apply.
 
 
 #### 1. Set User Context on Login
@@ -582,8 +588,8 @@ const loadCompetitions = async () => {
 
 #### 5. ~~Implement Feedback Widget~~ (discarded)
 
-Removed on 2 Oct 2026 (FE #792): it put an English floating button on every
-screen, and problems are reported through the app's own channel (FE #320).
+Removed on 2 Oct 2026: it put an English floating button on every
+screen, and problems are reported through the app's own channel.
 
 #### 6. Create Custom Dashboards in Sentry
 
