@@ -4,17 +4,16 @@
 
 | Entorno | Fuente de las cabeceras | Fichero / lugar |
 |---|---|---|
-| **Producción** (`www.comebackgolf.com`) | Dashboard de Render → Static Site `ComebackGolfWeb` → **Headers** | No está en el repo |
-| **Docker / k8s local** | nginx dentro de la imagen | `nginx.conf` |
+| **Producción** (`www.comebackgolf.com`) | Dashboard de Render → el Static Site de cada dominio → **Headers**, y Cloudflare (HSTS y la CORP de `/images/*`) | No está en el repo |
+| **Docker / k8s local** | nginx dentro de la imagen | `nginx-security-headers.conf` (incluido desde `nginx.conf`) |
 | **Vite dev** (`localhost:5173`) | Cabeceras del dev server | `vite.config.js` |
 
 Producción es un **Render Static Site**, y Render sirve las cabeceras desde su propia
-configuración. **No lee `vercel.json`, ni `public/_headers`, ni `nginx.conf`.** Ambos
-ficheros existieron en este repo hasta agosto de 2026 aparentando ser configuración
-activa sin serlo; se eliminaron para que nadie los vuelva a confundir con la realidad
-(ver #295).
+configuración. **No lee `vercel.json`, ni `public/_headers`, ni `nginx.conf`.** `vercel.json` y
+`public/_headers` existieron en el repositorio anterior hasta agosto de 2026 aparentando ser configuración
+activa sin serlo; se eliminaron para que nadie los vuelva a confundir con la realidad.
 
-`nginx.conf` **sí** es real, pero solo para la imagen Docker (k8s local), no para producción.
+`nginx.conf` y `nginx-security-headers.conf` siguen en el repositorio y **sí** son reales, pero solo para la imagen Docker (k8s local), no para producción.
 
 ## Valor aplicado en producción
 
@@ -39,7 +38,7 @@ regla de transformación de encabezado de **respuesta** «Logo de los correos: C
 cross-origin», con `http.host eq "<el www de esa zona>" and
 starts_with(http.request.uri.path, "/images/")` → establecer `cross-origin`. La regla de
 `/images/*` de Render no ganaba a la de `/*` para esa cabecera, pusiera la fila antes o
-después (FE #1133, 14 nov 2026).
+después (14 nov 2026).
 
 Hay **dos Static Sites** en Render, uno por dominio (`www.comebackgolf.com` y el del dominio viejo), y los dos llevan estas cabeceras. Lo único que cambia es la API de la CSP: **`{api}` es el `https://api.` de cada dominio: `https://api.comebackgolf.com` en el nuevo y el `api.` del dominio viejo en el suyo** (lo calcula `api_de()` en `.github/scripts/cabeceras_de_produccion.py`) (27 nov 2026). Unsplash ya no va en `img-src` desde el rediseño de las páginas de acceso. En Cloudflare, la regla de `/images/` de arriba existe en las dos zonas, cada una con **su** host: `www.comebackgolf.com` en la nueva y el `www` del dominio viejo en la suya («Imagenes de los correos: CORP cross-origin»).
 
@@ -91,7 +90,7 @@ Qué hace cada novedad de la fase 4:
 
 ## Por qué `connect-src` lleva `https://www.ign.es` y las ortofotos de comunidad
 
-El mapa del hoyo (BE #532) pinta la ortofoto del PNOA, y MapLibre pide sus teselas
+El mapa del hoyo pinta la ortofoto del PNOA, y MapLibre pide sus teselas
 con `fetch`, no con `<img>`: sin el IGN en `connect-src` el mapa sale gris. Al
 desplegarlo hay que **añadirlo también en el dashboard de Render**, que no lee este
 repositorio.
@@ -132,5 +131,5 @@ Por lo mismo, un cambio de cabeceras tarda en llegar a los usuarios recurrentes.
 
 `www`, `api` y la raíz pasan por el **proxy de Cloudflare** (nube naranja), con SSL
 **Full (strict)** (ADR-012). Por eso funcionan las reglas de Cloudflare que ponen el HSTS y
-la CORP de `/images/*`, y la que añade `X-Origin-Verify` a las peticiones a la API. El resto
+la CORP de `/images/*`, y la que añade a las peticiones a la API una cabecera secreta de verificación de origen. El resto
 de cabeceras las sirve Render.

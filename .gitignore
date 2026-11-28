@@ -65,5 +65,6 @@ __pycache__/
 # formatos, brief, capturas del rediseño): vive en el disco de quien diseña, no en
 # el repositorio (Agustín, 25 nov 2026). Lo que usa la web está en public/brand y
 # public/icons, y un test vigila que esos ficheros sean solo dibujo y lleven las
-# tintas del dossier
-brand/
+# tintas del dossier. Con la barra delante solo cuenta la carpeta de la raíz: sin
+# ella también dejaba fuera public/brand
+/brand/

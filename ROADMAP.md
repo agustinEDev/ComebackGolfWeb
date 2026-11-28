@@ -1,11 +1,16 @@
 # 🗺️ Roadmap - Comeback Golf Frontend
 
-> **Version:** 1.15.0 → 1.16.0 → 2.0.0 → 2.0.4 → 2.0.5 → 2.0.6 → 2.0.9 → 2.0.10 → 2.0.11 → 2.0.12 → 2.0.17 → 2.0.18 (synchronized with backend)
-> **Last Update:** Jul 7, 2026
-> **Status:** ✅ v2.0.0 Sprint 1 Completed | ✅ v2.0.4 Sprint 2 + Infra Completed | ✅ v2.0.5 Hotfix UI | ✅ v2.0.6 Sprint 2 Schedule COMPLETED | ✅ v2.0.9 Clean Architecture | ✅ v2.0.10 Manual Pairings | ✅ v2.0.11 Sprint 3 Invitations | ✅ v2.0.12 Sprint 4 Live Scoring COMPLETE | ✅ v2.0.13 Sprint 5 Absorbed + Post-Sprint 4 | ✅ v2.0.14 Build/CI Dependencies | ✅ v2.0.15 TeeCategory VO + Security Hotfixes | ✅ v2.0.17 Scoring Improvements | ✅ v2.0.18 Hotfix (SW cache, dates, 422 errors, match summary)
-> **Stack:** React 19 + Vite 7.3 + Tailwind CSS 4 + ESLint 9
-> **Architecture:** Subdomain (www + api) behind the Cloudflare proxy (ADR-012)
+> **Historical document.** This file records the planning of the 2.0 series (January to July 2026, versions
+> 1.15.0 to 2.0.18) and is kept for reference: figures, versions, file names and plans below are those of
+> that time, and some of the files it mentions no longer exist. Pull request and issue numbers from that
+> period belong to the archived repository and have been removed.
+>
+> **Today:** version **2.96.1** (November 2026). What changed in each release is in
+> [CHANGELOG.md](CHANGELOG.md); the current state of the project is in [README.md](README.md).
+>
 > **Note:** Some entries below (Zustand, TanStack Query, Zod) reflect early planning that was **not** implemented as written — actual state management/polling/validation is React Context + hooks with ad-hoc per-form validation. ADR-002 (useState + Context API) reflects the current architecture; ADR-009 still describes the Zustand authStore design that was never adopted.
+>
+> **Planning period:** 1.15.0 → 2.0.18 · **Last update of the plan:** Jul 7, 2026 · **Stack at the time:** React 19 + Vite 7.3 + Tailwind CSS 4 + ESLint 9
 
 ---
 
@@ -13,12 +18,11 @@
 
 > Cosas que se han pospuesto conscientemente (con una razón concreta) en vez de arreglarse en el momento. Revisar y priorizar periódicamente.
 
-### React Hooks — 37 avisos silenciados tras bump de `eslint-plugin-react-hooks` (Jul 2026)
-- **Qué pasó:** al mergear la PR de Dependabot que sube `eslint-plugin-react-hooks` 7.0.1 → 7.1.1, la nueva versión incorpora la familia de reglas del React Compiler (`immutability`, `purity`, `refs`, `preserve-manual-memoization`, además de `set-state-in-effect`) al set "recommended", y estas detectan 37 patrones preexistentes repartidos en 19 archivos.
-- **Por qué se pospuso:** arreglarlos de verdad implica refactorizar 19 archivos de producción entendiendo el contexto de cada uno (por ejemplo, mover llamadas que hacen `setState` desde un `useEffect`, o el acceso a `.current` de refs durante el render), lo cual es un cambio de comportamiento real que no debía colarse dentro de un PR de "bump de dependencias".
-- **Qué se hizo en su lugar:** cada aviso se silenció puntualmente con `// eslint-disable-next-line <regla> -- ...` (sin tocar lógica), manteniendo la política de `--max-warnings 0` intacta para el resto del proyecto.
-- **Archivos afectados:** `CompetitionGolfCoursesSection.jsx`, `GolfCourseForm.jsx`, `GolfCourseSearchBox.jsx`, `SendInvitationModal.jsx`, `useAuth.js`, `useDeviceManagement.js`, `useInactivityLogout.jsx`, `useProactiveTokenRefresh.js`, `useScoring.js`, `useUserRoles.jsx`, `CompetitionDetail.jsx`, `Competitions.jsx`, `CreateCompetition.jsx`, `Dashboard.jsx`, `admin/GolfCourses.jsx`, `admin/PendingGolfCourses.jsx`, `creator/InvitationsPage.jsx`, `creator/SchedulePage.jsx`, `player/MyInvitationsPage.jsx`, `player/ScoringPage.jsx`, `player/UpcomingMatchesPage.jsx`.
-- **Siguiente paso:** revisar y arreglar caso por caso (probablemente varias PRs pequeñas por área: scoring, invitations, golf courses...), retirando el `eslint-disable-next-line` correspondiente en cada uno.
+### React Hooks — avisos silenciados tras subir `eslint-plugin-react-hooks` (Jul 2026)
+- **Qué pasó:** al subir `eslint-plugin-react-hooks` de 7.0.1 a 7.1.1, la nueva versión incorporó al set "recommended" la familia de reglas del React Compiler (`immutability`, `purity`, `refs`, `preserve-manual-memoization`, además de `set-state-in-effect`), que detectaron 37 patrones preexistentes en 19 archivos.
+- **Qué se hizo:** cada aviso se silenció puntualmente con `// eslint-disable-next-line <regla> -- ...` (sin tocar lógica), manteniendo `--max-warnings 0` para el resto del proyecto, y después se fueron arreglando caso por caso.
+- **Estado a 28 nov 2026:** quedan **6** avisos `react-hooks/*` silenciados (4 `set-state-in-effect`, 1 `refs` y 1 `exhaustive-deps`) en **5** archivos: `components/golf_course/GolfCourseForm.jsx`, `components/scoring/Clasificacion.jsx`, `hooks/useCargaCancelableEffect.js`, `hooks/useCargaDePartidaRapida.js` (2) y `hooks/useFichaDeLaCompeticion.js`.
+- **Siguiente paso:** revisar los que quedan y retirar cada `eslint-disable-next-line` al arreglarlo.
 
 ---
 
@@ -285,7 +289,7 @@ _⭐ = New endpoints added by backend._
 
 > **Status:** ✅ Completed on Feb 3, 2026
 > **Type:** Infrastructure hotfix
-> **ADR:** ADR-011
+> **ADR:** ADR-011 (later replaced by ADR-012)
 
 #### 🎯 Goal
 
@@ -302,10 +306,10 @@ Migrate from reverse proxy architecture to direct subdomains to improve performa
 
 #### ✅ Deliverables
 
-- ✅ PR #114: Cookie domain rewrite fix
-- ✅ PR #115: Upgrade http-proxy-middleware v3.0.3
-- ✅ PR #116: Full subdomain migration
-- ✅ ADR-011: Architecture documentation
+- ✅ Cookie domain rewrite fix (archived repository)
+- ✅ Upgrade http-proxy-middleware v3.0.3 (archived repository)
+- ✅ Full subdomain migration (archived repository)
+- ✅ ADR-011: Architecture documentation (later replaced by ADR-012)
 - ✅ Cloudflare Page Rules configured
 - ✅ Backend CORS updated
 
@@ -481,7 +485,7 @@ Backend team must implement the 5 endpoints defined in `docs/INVITATIONS_API_CON
 2. **3 scoring tabs** (Input, Scorecard, Leaderboard) in unified view
 3. **Complete offline support** with localStorage queue and automatic synchronization
 4. **Session lock** multi-device via BroadcastChannel
-5. **Public leaderboard** with Ryder Cup points and 30s polling
+5. **Public leaderboard** with team points and 30s polling
 6. **API contract** for backend team to implement 5 endpoints
 
 #### ✅ Completed: Frontend
@@ -489,7 +493,7 @@ Backend team must implement the 5 endpoints defined in `docs/INVITATIONS_API_CON
 1. **Backend API Contract**
    - `docs/SCORING_API_CONTRACT.md` with 5 complete endpoints
    - Request/response shapes in snake_case
-   - Business rules: cross-marking, dual validation, early finish, concession, Ryder Cup points
+   - Business rules: cross-marking, dual validation, early finish, concession, team points
 
 2. **Domain Layer (3 files + tests)**
    - `HoleScore` value object: range 1-9 + null (ball picked up)
@@ -517,7 +521,7 @@ Backend team must implement the 5 endpoints defined in `docs/INVITATIONS_API_CON
    - `ScorecardTable`: OUT/IN/Total table with all players, team names and color coding
    - `GolfFigure`: classic concentric SVG (eagle/birdie/par/bogey/double+)
    - `ValidationIcon`: validation icon (match/mismatch/pending)
-   - `LeaderboardView`: Ryder Cup points, conceded match display, proper golf notation (X&Y)
+   - `LeaderboardView`: team points, conceded match display, proper golf notation (X&Y)
    - `TeamStandingsHeader`: facing team points
    - `PreMatchInfo`: "You mark X, Y marks you"
    - `MatchSummaryCard`: final result + stats
@@ -538,7 +542,7 @@ Backend team must implement the 5 endpoints defined in `docs/INVITATIONS_API_CON
    - Independent scorecard submission with partial locking (own vs marker scores)
    - Session lock orphan prevention with forceRelease + user-scoped locks
    - "AS" abbreviation replaced with "All Square" / "Empate"
-   - Match score format corrected to Ryder Cup notation (X&Y instead of XUP)
+   - Match score format corrected to match play notation (X&Y instead of XUP)
    - Leaderboard made publicly accessible to all users
    - Conceded match display in leaderboard
 
@@ -696,7 +700,7 @@ _... (Remains the same as previous version) ..._
 
 ---
 
-## 📊 Current Status (v2.0.14 + security hotfixes)
+## 📊 Status at v2.0.14 (April 2026)
 
 ### Key Metrics
 
@@ -736,7 +740,7 @@ _... (Remains the same as previous version) ..._
 
 ---
 
-## 🔐 OWASP Top 10 2021 Security
+## 🔐 OWASP Top 10 2021 Self-Assessment (April 2026)
 
 | Category | Score | Status | Priority |
 |----------|-------|--------|----------|
@@ -758,8 +762,7 @@ _... (Remains the same as previous version) ..._
 
 - **CHANGELOG.md** - Detailed change history
 - **ADRs:** `docs/architecture/decisions/`
-- **Backend:** Configure `BACKEND_PATH` variable with local backend repository path
-- **API Docs:** `http://localhost:{BACKEND_PORT}/docs` (default port 8000)
+- **Backend:** [ComebackGolfApi](https://github.com/agustinEDev/ComebackGolfApi)
 
 ---
 

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.96.1] - 2026-11-28
+
+**Primera release desde el repositorio nuevo `agustinEDev/ComebackGolfWeb`.** Sin cambios en
+la aplicación: recupera los ficheros de la marca que se habían quedado fuera y renueva la
+documentación. Va con el backend 2.82.1, que tampoco cambia nada.
+
+### Fixed
+
+- **Los seis SVG de la marca** (`public/brand/{wordmark,wordmark-linea,stamp}-{deep,acid}.svg`)
+  vuelven al repositorio (#79). El `.gitignore` ignoraba `brand/` a cualquier profundidad y no
+  entraron en el commit inicial del repo nuevo; la app los usa en `index.html`, `index.css` y
+  `BrandMark.jsx`. Ahora solo se ignora la carpeta `brand/` de la raíz (`/brand/`).
+
+### Changed
+
+- **Documentación renovada** (#80): README rehecho con el logo, capturas de la app y un diagrama
+  de la arquitectura; SETUP, tests de integración, despliegue en Render, protección de ramas,
+  workflows, cabeceras de seguridad, Sentry, auditoría, presentación y ROADMAP al día con el
+  nombre y los repos nuevos.
+
 ## [2.96.0] - 2026-11-27
 
 **Lo básico para los buscadores y el código sin la marca vieja** (#1288-#1291). Al cargar,
